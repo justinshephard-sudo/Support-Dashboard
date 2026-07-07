@@ -7,8 +7,16 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="confetti-layer" class="confetti-layer" aria-hidden="true"></div>
+
 <header class="topbar">
-  <h1>Support Team Dashboard</h1>
+  <div class="title-row">
+    <div class="mascot-wrap">
+      <span class="mascot" id="mascot">🦉</span>
+      <div class="speech-bubble" id="mascot-bubble">Loading the latest scoop... 📊</div>
+    </div>
+    <h1>Support Team Dashboard</h1>
+  </div>
   <div class="controls">
     <label for="month-select">Month</label>
     <select id="month-select"></select>
@@ -22,7 +30,7 @@
   <section id="tiles" class="tiles"></section>
 
   <section class="panel">
-    <h2>Team Leaderboard</h2>
+    <h2>🏆 Team Leaderboard</h2>
     <div class="table-wrap">
       <table id="leaderboard">
         <thead></thead>
@@ -32,13 +40,50 @@
   </section>
 
   <section class="panel">
-    <h2>Trends</h2>
+    <div class="panel-header-row">
+      <h2>📅 Quarterly Stats</h2>
+      <div class="controls">
+        <label for="quarter-select">Quarter</label>
+        <select id="quarter-select"></select>
+      </div>
+    </div>
+    <section id="quarter-tiles" class="tiles"></section>
+    <div class="table-wrap">
+      <table id="quarterly-leaderboard">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>📈 Trends</h2>
     <div class="charts-grid">
-      <div class="chart-card"><h3>Conversations</h3><canvas id="chart-conversations"></canvas></div>
-      <div class="chart-card"><h3>Phone Answer Rate</h3><canvas id="chart-answer-rate"></canvas></div>
-      <div class="chart-card"><h3>CSAT %</h3><canvas id="chart-csat"></canvas></div>
-      <div class="chart-card"><h3>AI Resolution Rate</h3><canvas id="chart-ai-resolution"></canvas></div>
-      <div class="chart-card"><h3>Avg Conversations / Teammate</h3><canvas id="chart-avg-per-teammate"></canvas></div>
+      <div class="chart-card">
+        <h3>Conversations</h3>
+        <span class="chart-buddy" data-buddy-for="chart-conversations">🧐</span>
+        <canvas id="chart-conversations"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Phone Answer Rate</h3>
+        <span class="chart-buddy" data-buddy-for="chart-answer-rate">🧐</span>
+        <canvas id="chart-answer-rate"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>CSAT %</h3>
+        <span class="chart-buddy" data-buddy-for="chart-csat">🧐</span>
+        <canvas id="chart-csat"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>AI Resolution Rate</h3>
+        <span class="chart-buddy" data-buddy-for="chart-ai-resolution">🧐</span>
+        <canvas id="chart-ai-resolution"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3>Avg Conversations / Teammate</h3>
+        <span class="chart-buddy" data-buddy-for="chart-avg-per-teammate">🧐</span>
+        <canvas id="chart-avg-per-teammate"></canvas>
+      </div>
     </div>
   </section>
 </main>

@@ -1,5 +1,6 @@
 const SHEET_ID = '1rShk4vaQZtchZf7GKjCmA3Q_xamtLm3Sb9eUaBEKagg';
 const ANNUAL_GID = '1501069044';
+const QUARTERLY_GID = '1582468207';
 
 const MONTH_TABS = [
   { name: 'January', gid: '749310542' },
@@ -15,6 +16,16 @@ const MONTH_TABS = [
   { name: 'November', gid: '2021455964' },
   { name: 'December', gid: '142641585' },
 ];
+
+const QUARTER_NAMES = ['Q1', 'Q2', 'Q3', 'Q4'];
+const QUARTER_MONTH_INDEXES = {
+  Q1: [0, 1, 2],
+  Q2: [3, 4, 5],
+  Q3: [6, 7, 8],
+  Q4: [9, 10, 11],
+};
+
+const EXCLUDED_NAMES = new Set(['justin', 'dakota', 'erika']);
 
 const LEADERBOARD_COLUMNS = [
   { key: 'convAssigned', label: 'Conv Assigned' },
@@ -86,19 +97,31 @@ async function fetchSheet(gid) {
   return parseCSV(text).filter((r) => r.some((cell) => cell.trim() !== ''));
 }
 
+function readMemberRow(row) {
+  const name = (row[0] || '').trim();
+  if (!name || EXCLUDED_NAMES.has(name.toLowerCase())) return null;
+  const member = { name };
+  LEADERBOARD_COLUMNS.forEach((col, idx) => {
+    member[col.key] = (row[idx + 1] || '').trim();
+  });
+  return member;
+}
+
+function memberHasData(m) {
+  const n = parseFloat((m.convAssigned || '').replace(/,/g, ''));
+  return !Number.isNaN(n) && n > 0;
+}
+
 function parseMonthSheet(rows) {
   const members = [];
   let totalRowIdx = -1;
 
   for (let i = 1; i < rows.length; i++) {
-    const name = (rows[i][0] || '').trim();
-    if (!name) continue;
-    if (name.toLowerCase() === 'total') { totalRowIdx = i; break; }
-    const member = { name };
-    LEADERBOARD_COLUMNS.forEach((col, idx) => {
-      member[col.key] = (rows[i][idx + 1] || '').trim();
-    });
-    members.push(member);
+    const rawName = (rows[i][0] || '').trim();
+    if (!rawName) continue;
+    if (rawName.toLowerCase() === 'total') { totalRowIdx = i; break; }
+    const member = readMemberRow(rows[i]);
+    if (member) members.push(member);
   }
 
   const groups = { 0: new Map(), 6: new Map(), 11: new Map() };
@@ -117,8 +140,30 @@ function parseMonthSheet(rows) {
     }
   }
 
-  const hasData = members.some((m) => m.convAssigned !== '');
+  const hasData = members.some(memberHasData);
   return { members, groups, hasData };
+}
+
+function parseQuarterlySheet(rows) {
+  const quarters = {};
+
+  const readBlock = (startIdx) => {
+    const members = [];
+    for (let i = startIdx; i < startIdx + 8 && i < rows.length; i++) {
+      const member = readMemberRow(rows[i]);
+      if (member) members.push(member);
+    }
+    return { members, hasData: members.some(memberHasData) };
+  };
+
+  quarters.Q1 = readBlock(1);
+  for (let i = 0; i < rows.length; i++) {
+    const label = (rows[i][0] || '').trim().toUpperCase();
+    if (label === 'Q2' || label === 'Q3' || label === 'Q4') {
+      quarters[label] = readBlock(i + 2);
+    }
+  }
+  return quarters;
 }
 
 function lookup(map, candidates) {
@@ -163,6 +208,43 @@ function toNumber(str) {
   return Number.isNaN(n) ? null : n;
 }
 
+function fmtNum(n) {
+  return n == null ? null : Math.round(n).toLocaleString();
+}
+
+function fmtPct(n) {
+  return n == null ? null : `${(Math.round(n * 10) / 10)}%`;
+}
+
+const QUARTER_TILE_DEFS = [
+  { label: 'New Conversations', icon: '💬', slot: 1, source: 'annual', series: 'New Conversations', agg: 'sum', fmt: fmtNum },
+  { label: 'Phone Answer Rate', icon: '📞', slot: 2, source: 'annual', series: 'Answer Rate', agg: 'avg', fmt: fmtPct },
+  // "Total Atendees" in the Annual tab has a pre-existing formatting bug in most months
+  // (values render as bogus percentages); each month tab's own cell is clean, so sum those instead.
+  { label: 'Office Hours Attendees', icon: '🎓', slot: 3, source: 'monthlyTile', series: 'Office Hours Attendees', agg: 'sum', fmt: fmtNum },
+  { label: 'AI Resolution Rate', icon: '🤖', slot: 5, source: 'annual', series: 'AI Resolution Rate', agg: 'avg', fmt: fmtPct },
+  { label: 'Article Views', icon: '📄', slot: 8, source: 'annual', series: 'Total Help Article Search', agg: 'sum', fmt: fmtNum },
+];
+
+function extractQuarterTiles(annualSeries, monthlyTileValues, monthIndexes) {
+  return QUARTER_TILE_DEFS.map((def) => {
+    const values = monthIndexes
+      .map((idx) => {
+        if (def.source === 'monthlyTile') {
+          const tile = (monthlyTileValues[idx] || []).find((t) => t.label === def.series);
+          return tile ? toNumber(tile.value) : null;
+        }
+        return toNumber((annualSeries.get(def.series.toLowerCase()) || [])[idx]);
+      })
+      .filter((v) => v != null);
+    let agg = null;
+    if (values.length) {
+      agg = def.agg === 'sum' ? values.reduce((a, b) => a + b, 0) : values.reduce((a, b) => a + b, 0) / values.length;
+    }
+    return { label: def.label, icon: def.icon, slot: def.slot, value: def.fmt(agg) };
+  });
+}
+
 function trimTrailingEmpty(labels, arrays) {
   let lastIdx = -1;
   arrays.forEach((arr) => {
@@ -195,8 +277,8 @@ function showError(message) {
   el.hidden = false;
 }
 
-function renderTiles(tiles) {
-  const el = document.getElementById('tiles');
+function renderTiles(containerId, tiles) {
+  const el = document.getElementById(containerId);
   el.innerHTML = '';
   tiles.forEach(({ label, icon, slot, value }) => {
     const div = document.createElement('div');
@@ -207,79 +289,120 @@ function renderTiles(tiles) {
   });
 }
 
-let sortState = { key: null, dir: 1 };
-
-function renderLeaderboard(members) {
-  const thead = document.querySelector('#leaderboard thead');
-  const tbody = document.querySelector('#leaderboard tbody');
-
-  const columns = [{ key: 'name', label: 'Name' }, ...LEADERBOARD_COLUMNS];
-
-  thead.innerHTML = '';
-  const headRow = document.createElement('tr');
-  columns.forEach((col) => {
-    const th = document.createElement('th');
-    th.textContent = col.label;
-    th.dataset.key = col.key;
-    if (sortState.key === col.key) {
-      th.classList.add('sorted');
-      if (sortState.dir === -1) th.classList.add('asc');
-    }
-    th.addEventListener('click', () => {
-      if (sortState.key === col.key) sortState.dir *= -1;
-      else { sortState.key = col.key; sortState.dir = 1; }
-      renderLeaderboard(members);
-    });
-    headRow.appendChild(th);
-  });
-  thead.appendChild(headRow);
-
-  let rows = [...members];
-  if (sortState.key) {
-    rows.sort((a, b) => {
-      const av = sortValue(a[sortState.key]);
-      const bv = sortValue(b[sortState.key]);
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === 'string' || typeof bv === 'string') {
-        return String(av).localeCompare(String(bv)) * sortState.dir;
-      }
-      return (av - bv) * sortState.dir;
-    });
-  }
-
-  tbody.innerHTML = '';
-  rows.forEach((m) => {
-    const tr = document.createElement('tr');
-    columns.forEach((col) => {
-      const td = document.createElement('td');
-      const v = m[col.key];
-      td.textContent = v && v !== '' ? v : '–';
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
+function moodFace(csatPct) {
+  const n = toNumber(csatPct);
+  if (n == null) return '';
+  if (n >= 97) return '🤩';
+  if (n >= 92) return '😄';
+  if (n >= 85) return '🙂';
+  if (n >= 75) return '😐';
+  return '😟';
 }
+
+function createLeaderboardRenderer(tableId) {
+  const sortState = { key: null, dir: 1 };
+
+  return function renderLeaderboard(members) {
+    const thead = document.querySelector(`#${tableId} thead`);
+    const tbody = document.querySelector(`#${tableId} tbody`);
+    const columns = [{ key: 'name', label: 'Name' }, { key: 'mood', label: '' }, ...LEADERBOARD_COLUMNS];
+
+    thead.innerHTML = '';
+    const headRow = document.createElement('tr');
+    columns.forEach((col) => {
+      const th = document.createElement('th');
+      th.textContent = col.label;
+      th.dataset.key = col.key;
+      if (sortState.key === col.key) {
+        th.classList.add('sorted');
+        if (sortState.dir === -1) th.classList.add('asc');
+      }
+      if (col.key !== 'mood') {
+        th.addEventListener('click', () => {
+          if (sortState.key === col.key) sortState.dir *= -1;
+          else { sortState.key = col.key; sortState.dir = 1; }
+          renderLeaderboard(members);
+        });
+      } else {
+        th.style.cursor = 'default';
+      }
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+
+    let rows = [...members];
+    if (sortState.key) {
+      rows.sort((a, b) => {
+        const av = sortValue(a[sortState.key]);
+        const bv = sortValue(b[sortState.key]);
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === 'string' || typeof bv === 'string') {
+          return String(av).localeCompare(String(bv)) * sortState.dir;
+        }
+        return (av - bv) * sortState.dir;
+      });
+    }
+
+    let topName = null;
+    let topCsat = -Infinity;
+    members.forEach((m) => {
+      const n = toNumber(m.csatPct);
+      if (n != null && n > topCsat) { topCsat = n; topName = m.name; }
+    });
+
+    tbody.innerHTML = '';
+    rows.forEach((m) => {
+      const tr = document.createElement('tr');
+      columns.forEach((col) => {
+        const td = document.createElement('td');
+        if (col.key === 'name') {
+          td.textContent = m.name;
+          if (m.name === topName) {
+            const crown = document.createElement('span');
+            crown.className = 'crown';
+            crown.textContent = '👑';
+            crown.title = `${m.name} is topping CSAT this period!`;
+            td.appendChild(crown);
+          }
+        } else if (col.key === 'mood') {
+          td.textContent = moodFace(m.csatPct);
+          td.className = 'mood-cell';
+        } else {
+          const v = m[col.key];
+          td.textContent = v && v !== '' ? v : '–';
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+  };
+}
+
+const renderMonthlyLeaderboard = createLeaderboardRenderer('leaderboard');
+const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderboard');
 
 function renderMonth(entry) {
-  renderTiles(extractTiles(entry.parsed));
-  renderLeaderboard(entry.parsed.members);
+  renderTiles('tiles', extractTiles(entry.parsed));
+  renderMonthlyLeaderboard(entry.parsed.members);
+  updateMascot(entry.parsed.members, entry.name);
 }
 
-function populateMonthSelect(entries, selectedGid) {
-  const select = document.getElementById('month-select');
+function populateSelect(selectId, entries, selectedValue, valueKey, labelKey) {
+  const select = document.getElementById(selectId);
   select.innerHTML = '';
   entries.forEach((entry) => {
     const opt = document.createElement('option');
-    opt.value = entry.gid;
-    opt.textContent = entry.name;
-    if (entry.gid === selectedGid) opt.selected = true;
+    opt.value = entry[valueKey];
+    opt.textContent = entry[labelKey];
+    if (entry[valueKey] === selectedValue) opt.selected = true;
     select.appendChild(opt);
   });
 }
 
 const charts = {};
+const chartBuddyEmoji = { up: ['🚀', '🎉', '🔥'], flat: ['😌', '👍'], down: ['😅', '💪'] };
 
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -289,6 +412,20 @@ function withAlpha(hex, alpha) {
   const n = parseInt(hex.replace('#', ''), 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function updateChartBuddy(canvasId, data) {
+  const buddy = document.querySelector(`[data-buddy-for="${canvasId}"]`);
+  if (!buddy) return;
+  const valid = data.filter((v) => v != null);
+  if (valid.length < 2) { buddy.textContent = '🧐'; return; }
+  const delta = valid[valid.length - 1] - valid[0];
+  const magnitude = Math.abs(delta) / (Math.abs(valid[0]) || 1);
+  let bucket = 'flat';
+  if (magnitude > 0.03) bucket = delta > 0 ? 'up' : 'down';
+  const choices = chartBuddyEmoji[bucket];
+  buddy.textContent = choices[Math.floor(Math.random() * choices.length)];
+  buddy.dataset.mood = bucket;
 }
 
 function drawLineChart(canvasId, labels, datasets) {
@@ -330,6 +467,7 @@ function drawLineChart(canvasId, labels, datasets) {
       },
     },
   });
+  updateChartBuddy(canvasId, datasets[0].data);
 }
 
 function renderTrends(series) {
@@ -363,6 +501,70 @@ function renderTrends(series) {
   ]);
 }
 
+const MASCOT_FACES = { great: '🦄', good: '🦉', meh: '🐢', rough: '🐌' };
+
+function updateMascot(members, periodName) {
+  const bubble = document.getElementById('mascot-bubble');
+  const mascot = document.getElementById('mascot');
+  if (!bubble || !mascot) return;
+
+  let topName = null;
+  let topCsat = -Infinity;
+  const csatValues = [];
+  members.forEach((m) => {
+    const n = toNumber(m.csatPct);
+    if (n != null) {
+      csatValues.push(n);
+      if (n > topCsat) { topCsat = n; topName = m.name; }
+    }
+  });
+
+  if (!csatValues.length) {
+    mascot.textContent = MASCOT_FACES.meh;
+    bubble.textContent = `Waiting on the ${periodName} numbers to roll in... 👀`;
+    return;
+  }
+
+  const avgCsat = csatValues.reduce((a, b) => a + b, 0) / csatValues.length;
+  let face = MASCOT_FACES.good;
+  let line = `${periodName} is looking solid! ${topName} is leading CSAT at ${topCsat}% 👑`;
+  if (avgCsat >= 95) {
+    face = MASCOT_FACES.great;
+    line = `Whoa! ${periodName} CSAT is on fire 🔥 ${topName} is crushing it at ${topCsat}%!`;
+  } else if (avgCsat < 85) {
+    face = MASCOT_FACES.rough;
+    line = `${periodName}'s a bit bumpy, but ${topName} is holding the line at ${topCsat}% CSAT 💪`;
+  }
+  mascot.textContent = face;
+  bubble.textContent = line;
+  mascot.classList.remove('bounce-once');
+  requestAnimationFrame(() => mascot.classList.add('bounce-once'));
+}
+
+function launchConfetti() {
+  const layer = document.getElementById('confetti-layer');
+  if (!layer) return;
+  const pieces = ['🎉', '✨', '🎊', '⭐', '💫'];
+  for (let i = 0; i < 24; i++) {
+    const span = document.createElement('span');
+    span.className = 'confetti-piece';
+    span.textContent = pieces[Math.floor(Math.random() * pieces.length)];
+    span.style.left = `${Math.random() * 100}%`;
+    span.style.animationDelay = `${Math.random() * 0.6}s`;
+    span.style.animationDuration = `${2.2 + Math.random() * 1.2}s`;
+    span.style.fontSize = `${14 + Math.random() * 14}px`;
+    layer.appendChild(span);
+    setTimeout(() => span.remove(), 4000);
+  }
+}
+
+function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
+  const q = quarters[quarterKey];
+  if (!q) return;
+  renderTiles('quarter-tiles', extractQuarterTiles(annualSeries, monthlyTileValues, QUARTER_MONTH_INDEXES[quarterKey]));
+  renderQuarterlyLeaderboard(q.members);
+}
+
 async function main() {
   try {
     const monthResults = await Promise.all(
@@ -372,11 +574,13 @@ async function main() {
       })
     );
 
+    const monthlyTileValues = monthResults.map((m) => extractTiles(m.parsed));
+
     const monthsWithData = monthResults.filter((m) => m.parsed.hasData);
     const optionList = monthsWithData.length ? monthsWithData : monthResults;
     const defaultEntry = optionList[optionList.length - 1];
 
-    populateMonthSelect(optionList, defaultEntry.gid);
+    populateSelect('month-select', optionList, defaultEntry.gid, 'gid', 'name');
     renderMonth(defaultEntry);
 
     document.getElementById('month-select').addEventListener('change', (e) => {
@@ -384,10 +588,29 @@ async function main() {
       if (selected) renderMonth(selected);
     });
 
-    const annualRows = await fetchSheet(ANNUAL_GID);
-    renderTrends(parseAnnualSheet(annualRows));
+    const [annualRows, quarterlyRows] = await Promise.all([
+      fetchSheet(ANNUAL_GID),
+      fetchSheet(QUARTERLY_GID),
+    ]);
+    const annualSeries = parseAnnualSheet(annualRows);
+    renderTrends(annualSeries);
+
+    const quarters = parseQuarterlySheet(quarterlyRows);
+    const quarterOptions = QUARTER_NAMES
+      .filter((q) => quarters[q] && quarters[q].hasData)
+      .map((q) => ({ key: q, label: q }));
+    const finalQuarterOptions = quarterOptions.length ? quarterOptions : [{ key: 'Q1', label: 'Q1' }];
+    const defaultQuarter = finalQuarterOptions[finalQuarterOptions.length - 1].key;
+
+    populateSelect('quarter-select', finalQuarterOptions, defaultQuarter, 'key', 'label');
+    renderQuarter(defaultQuarter, quarters, annualSeries, monthlyTileValues);
+
+    document.getElementById('quarter-select').addEventListener('change', (e) => {
+      renderQuarter(e.target.value, quarters, annualSeries, monthlyTileValues);
+    });
 
     document.getElementById('last-updated').textContent = `Data loaded ${new Date().toLocaleString()}`;
+    launchConfetti();
   } catch (err) {
     console.error(err);
     showError(`Couldn't load dashboard data: ${err.message}`);
