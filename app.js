@@ -470,7 +470,7 @@ function drawLineChart(canvasId, labels, datasets) {
   updateChartBuddy(canvasId, datasets[0].data);
 }
 
-function renderTrends(series) {
+function renderTrends(series, monthlyTileValues) {
   const seriesFor = (label) => MONTH_NAMES.map((_, i) => toNumber((series.get(label.toLowerCase()) || [])[i]));
 
   const newConv = seriesFor('New Conversations');
@@ -479,9 +479,15 @@ function renderTrends(series) {
   const csatPct = seriesFor('CSAT%');
   const aiResolution = seriesFor('AI Resolution Rate');
   const avgPerTeammate = seriesFor('Avg Assigned Convers Per Team Member');
+  // Sourced from each month's own tab (not the Annual tab's "Total Atendees" row,
+  // which has a pre-existing formatting bug for most months — see quarterly tiles).
+  const officeAttendees = monthlyTileValues.map((tiles) => {
+    const tile = tiles.find((t) => t.label === 'Office Hours Attendees');
+    return tile ? toNumber(tile.value) : null;
+  });
 
-  const trimmed = trimTrailingEmpty(MONTH_NAMES, [newConv, assigned, answerRate, csatPct, aiResolution, avgPerTeammate]);
-  const [tNewConv, tAssigned, tAnswerRate, tCsatPct, tAiResolution, tAvgPerTeammate] = trimmed.arrays;
+  const trimmed = trimTrailingEmpty(MONTH_NAMES, [newConv, assigned, answerRate, csatPct, aiResolution, avgPerTeammate, officeAttendees]);
+  const [tNewConv, tAssigned, tAnswerRate, tCsatPct, tAiResolution, tAvgPerTeammate, tOfficeAttendees] = trimmed.arrays;
 
   drawLineChart('chart-conversations', trimmed.labels, [
     { label: 'New Conversations', data: tNewConv, borderColor: cssVar('--slot-1') },
@@ -498,6 +504,9 @@ function renderTrends(series) {
   ]);
   drawLineChart('chart-avg-per-teammate', trimmed.labels, [
     { label: 'Avg Conversations / Teammate', data: tAvgPerTeammate, borderColor: cssVar('--slot-8') },
+  ]);
+  drawLineChart('chart-office-attendees', trimmed.labels, [
+    { label: 'Office Hours Attendees', data: tOfficeAttendees, borderColor: cssVar('--slot-4') },
   ]);
 }
 
@@ -593,7 +602,7 @@ async function main() {
       fetchSheet(QUARTERLY_GID),
     ]);
     const annualSeries = parseAnnualSheet(annualRows);
-    renderTrends(annualSeries);
+    renderTrends(annualSeries, monthlyTileValues);
 
     const quarters = parseQuarterlySheet(quarterlyRows);
     const quarterOptions = QUARTER_NAMES
