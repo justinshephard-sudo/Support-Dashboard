@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS Support Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Support Team Dashboard</h1>
+  <div class="controls">
+    <label for="month-select">Month</label>
+    <select id="month-select"></select>
+    <span id="last-updated" class="muted"></span>
+  </div>
+</header>
+
+<main>
+  <div id="error-banner" class="error-banner" hidden></div>
+
+  <section id="tiles" class="tiles"></section>
+
+  <section class="panel">
+    <h2>Team Leaderboard</h2>
+    <div class="table-wrap">
+      <table id="leaderboard">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Trends</h2>
+    <div class="charts-grid">
+      <div class="chart-card"><h3>Conversations</h3><canvas id="chart-conversations"></canvas></div>
+      <div class="chart-card"><h3>Phone Answer Rate</h3><canvas id="chart-answer-rate"></canvas></div>
+      <div class="chart-card"><h3>CSAT %</h3><canvas id="chart-csat"></canvas></div>
+      <div class="chart-card"><h3>AI Resolution Rate</h3><canvas id="chart-ai-resolution"></canvas></div>
+      <div class="chart-card"><h3>Avg Conversations / Teammate</h3><canvas id="chart-avg-per-teammate"></canvas></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
