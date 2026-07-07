@@ -129,14 +129,21 @@ function lookup(map, candidates) {
   return null;
 }
 
+const TILE_DEFS = [
+  { label: 'New Conversations', icon: '💬', slot: 1, get: (p) => lookup(p.groups[0], ['New Conversations']) },
+  { label: 'Phone Answer Rate', icon: '📞', slot: 2, get: (p) => lookup(p.groups[6], ['Answer Rate']) },
+  { label: 'Office Hours Attendees', icon: '🎓', slot: 3, get: (p) => lookup(p.groups[11], ['Total Attendees', 'Total Atendees']) },
+  { label: 'AI Resolution Rate', icon: '🤖', slot: 5, get: (p) => lookup(p.groups[0], ['AI Resolution Rate', 'AI Confirmed Resolution Rate']) },
+  { label: 'Article Views', icon: '📄', slot: 8, get: (p) => lookup(p.groups[11], ['Total Artcile Views', 'Total Article Views', 'Total Help Article Search']) },
+];
+
 function extractTiles(parsed) {
-  return {
-    'New Conversations': lookup(parsed.groups[0], ['New Conversations']),
-    'Phone Answer Rate': lookup(parsed.groups[6], ['Answer Rate']),
-    'Office Hours Attendees': lookup(parsed.groups[11], ['Total Attendees', 'Total Atendees']),
-    'AI Resolution Rate': lookup(parsed.groups[0], ['AI Resolution Rate', 'AI Confirmed Resolution Rate']),
-    'Article Views': lookup(parsed.groups[11], ['Total Artcile Views', 'Total Article Views', 'Total Help Article Search']),
-  };
+  return TILE_DEFS.map((def) => ({
+    label: def.label,
+    icon: def.icon,
+    slot: def.slot,
+    value: def.get(parsed),
+  }));
 }
 
 function parseAnnualSheet(rows) {
@@ -191,10 +198,11 @@ function showError(message) {
 function renderTiles(tiles) {
   const el = document.getElementById('tiles');
   el.innerHTML = '';
-  Object.entries(tiles).forEach(([label, value]) => {
+  tiles.forEach(({ label, icon, slot, value }) => {
     const div = document.createElement('div');
     div.className = 'tile';
-    div.innerHTML = `<div class="label">${label}</div><div class="value">${value != null ? value : '–'}</div>`;
+    div.style.setProperty('--tile-accent', `var(--slot-${slot})`);
+    div.innerHTML = `<span class="icon">${icon}</span><div class="label">${label}</div><div class="value">${value != null ? value : '–'}</div>`;
     el.appendChild(div);
   });
 }
@@ -273,18 +281,53 @@ function populateMonthSelect(entries, selectedGid) {
 
 const charts = {};
 
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function withAlpha(hex, alpha) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function drawLineChart(canvasId, labels, datasets) {
   const ctx = document.getElementById(canvasId);
   if (charts[canvasId]) charts[canvasId].destroy();
+  const gridColor = cssVar('--border');
+  const tickColor = cssVar('--faint');
   charts[canvasId] = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets },
+    data: {
+      labels,
+      datasets: datasets.map((d) => ({
+        borderWidth: 2.5,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointBackgroundColor: d.borderColor,
+        pointBorderColor: cssVar('--surface'),
+        pointBorderWidth: 2,
+        backgroundColor: withAlpha(d.borderColor, 0.12),
+        fill: datasets.length === 1,
+        tension: 0.3,
+        ...d,
+      })),
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       spanGaps: true,
-      plugins: { legend: { display: datasets.length > 1 } },
-      scales: { y: { beginAtZero: false } },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: datasets.length > 1,
+          labels: { color: tickColor, boxWidth: 10, boxHeight: 10, usePointStyle: true },
+        },
+      },
+      scales: {
+        x: { grid: { color: gridColor }, ticks: { color: tickColor } },
+        y: { beginAtZero: false, grid: { color: gridColor }, ticks: { color: tickColor } },
+      },
     },
   });
 }
@@ -302,22 +345,21 @@ function renderTrends(series) {
   const trimmed = trimTrailingEmpty(MONTH_NAMES, [newConv, assigned, answerRate, csatPct, aiResolution, avgPerTeammate]);
   const [tNewConv, tAssigned, tAnswerRate, tCsatPct, tAiResolution, tAvgPerTeammate] = trimmed.arrays;
 
-  document.querySelector('#chart-conversations').style.display = '';
   drawLineChart('chart-conversations', trimmed.labels, [
-    { label: 'New Conversations', data: tNewConv, borderColor: '#2f6feb', tension: 0.3 },
-    { label: 'Conversations Assigned', data: tAssigned, borderColor: '#9a6fe0', tension: 0.3 },
+    { label: 'New Conversations', data: tNewConv, borderColor: cssVar('--slot-1') },
+    { label: 'Conversations Assigned', data: tAssigned, borderColor: cssVar('--slot-2') },
   ]);
   drawLineChart('chart-answer-rate', trimmed.labels, [
-    { label: 'Answer Rate %', data: tAnswerRate, borderColor: '#1a8754', tension: 0.3 },
+    { label: 'Answer Rate %', data: tAnswerRate, borderColor: cssVar('--slot-2') },
   ]);
   drawLineChart('chart-csat', trimmed.labels, [
-    { label: 'CSAT %', data: tCsatPct, borderColor: '#e0a02f', tension: 0.3 },
+    { label: 'CSAT %', data: tCsatPct, borderColor: cssVar('--slot-3') },
   ]);
   drawLineChart('chart-ai-resolution', trimmed.labels, [
-    { label: 'AI Resolution Rate %', data: tAiResolution, borderColor: '#d1373f', tension: 0.3 },
+    { label: 'AI Resolution Rate %', data: tAiResolution, borderColor: cssVar('--slot-5') },
   ]);
   drawLineChart('chart-avg-per-teammate', trimmed.labels, [
-    { label: 'Avg Conversations / Teammate', data: tAvgPerTeammate, borderColor: '#2f9ceb', tension: 0.3 },
+    { label: 'Avg Conversations / Teammate', data: tAvgPerTeammate, borderColor: cssVar('--slot-8') },
   ]);
 }
 

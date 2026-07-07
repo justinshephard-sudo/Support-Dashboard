@@ -1,25 +1,44 @@
 :root {
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --text: #1a1d23;
-  --muted: #666e7a;
-  --border: #e2e5ea;
-  --accent: #2f6feb;
-  --good: #1a8754;
-  --bad: #d1373f;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --text: #0b0b0b;
+  --muted: #52514e;
+  --faint: #898781;
+  --border: rgba(11, 11, 11, 0.1);
+  --good: #006300;
+  --bad: #d03b3b;
+
+  --slot-1: #2a78d6; /* blue */
+  --slot-2: #1baf7a; /* aqua */
+  --slot-3: #eda100; /* yellow */
+  --slot-4: #008300; /* green */
+  --slot-5: #4a3aa7; /* violet */
+  --slot-6: #e34948; /* red */
+  --slot-7: #e87ba4; /* magenta */
+  --slot-8: #eb6834; /* orange */
+
   color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14161a;
-    --surface: #1e2126;
-    --text: #e8eaed;
-    --muted: #9aa1ab;
-    --border: #2c3038;
-    --accent: #6ea8fe;
-    --good: #3ecf8e;
-    --bad: #ff6b6b;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --text: #ffffff;
+    --muted: #c3c2b7;
+    --faint: #898781;
+    --border: rgba(255, 255, 255, 0.1);
+    --good: #0ca30c;
+    --bad: #e66767;
+
+    --slot-1: #3987e5;
+    --slot-2: #199e70;
+    --slot-3: #c98500;
+    --slot-4: #008300;
+    --slot-5: #9085e9;
+    --slot-6: #e66767;
+    --slot-7: #d55181;
+    --slot-8: #d95926;
   }
 }
 
@@ -28,7 +47,7 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
+  background: var(--page);
   color: var(--text);
 }
 
@@ -38,14 +57,18 @@ body {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 20px 24px;
+  padding: 20px 28px;
+  background:
+    linear-gradient(90deg, var(--slot-1), var(--slot-2), var(--slot-3), var(--slot-5)) top / 100% 3px no-repeat,
+    var(--surface);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
 }
 
 .topbar h1 {
-  font-size: 20px;
+  font-size: 21px;
+  font-weight: 700;
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .controls {
@@ -55,12 +78,19 @@ body {
 }
 
 .controls select {
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--page);
   color: var(--text);
   font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.controls select:hover {
+  border-color: var(--slot-1);
 }
 
 .muted {
@@ -71,7 +101,7 @@ body {
 main {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 28px 24px 48px;
 }
 
 .error-banner {
@@ -80,44 +110,79 @@ main {
   padding: 12px 16px;
   border-radius: 8px;
   margin-bottom: 20px;
+  font-weight: 600;
 }
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
-  margin-bottom: 28px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
 }
 
 .tile {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 18px 18px 16px;
+  overflow: hidden;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.tile .value {
-  font-size: 28px;
-  font-weight: 600;
-  margin-top: 4px;
+.tile::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--tile-accent, var(--slot-1));
+}
+
+.tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.25);
+}
+
+.tile .icon {
+  font-size: 20px;
+  line-height: 1;
+  margin-bottom: 8px;
+  display: block;
 }
 
 .tile .label {
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tile .value {
+  font-size: 30px;
+  font-weight: 700;
+  margin-top: 4px;
+  letter-spacing: -0.01em;
+  color: var(--tile-accent, var(--text));
 }
 
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 20px;
-  margin-bottom: 24px;
+  border-radius: 12px;
+  padding: 22px;
+  margin-bottom: 28px;
 }
 
 .panel h2 {
-  margin-top: 0;
+  margin: 0 0 16px;
   font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .table-wrap {
@@ -129,10 +194,11 @@ table {
   width: 100%;
   font-size: 13px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 th, td {
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border);
   text-align: left;
 }
@@ -140,8 +206,20 @@ th, td {
 th {
   cursor: pointer;
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
   user-select: none;
+  transition: color 0.15s ease;
+}
+
+th:hover {
+  color: var(--slot-1);
+}
+
+th.sorted {
+  color: var(--slot-1);
 }
 
 th.sorted::after {
@@ -152,8 +230,12 @@ th.sorted.asc::after {
   content: " \2191";
 }
 
+tbody tr {
+  transition: background 0.1s ease;
+}
+
 tbody tr:hover {
-  background: var(--bg);
+  background: color-mix(in srgb, var(--slot-1) 8%, transparent);
 }
 
 .charts-grid {
@@ -162,10 +244,17 @@ tbody tr:hover {
   gap: 20px;
 }
 
+.chart-card {
+  padding: 4px;
+}
+
 .chart-card h3 {
-  font-size: 14px;
-  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 10px;
   color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .chart-card canvas {
