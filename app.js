@@ -305,27 +305,6 @@ function moodFace(csatPct) {
   return '😟';
 }
 
-const INCENTIVE_DEFS = [
-  {
-    key: 'speed',
-    metric: (m) => parseTimeToSeconds(m.avgRespTime),
-    better: 'lower',
-    format: (m) => `${m.avgRespTime} avg response`,
-  },
-  {
-    key: 'answer',
-    metric: (m) => toNumber(m.phoneAnswerRate),
-    better: 'higher',
-    format: (m) => `${m.phoneAnswerRate} answer rate`,
-  },
-  {
-    key: 'csat',
-    metric: (m) => toNumber(m.csat),
-    better: 'higher',
-    format: (m) => `${m.csat} CSAT ratings`,
-  },
-];
-
 function computeIncentiveWinner(members, def) {
   let winner = null;
   let bestVal = def.better === 'lower' ? Infinity : -Infinity;
@@ -337,18 +316,76 @@ function computeIncentiveWinner(members, def) {
       winner = m;
     }
   });
-  return winner ? { name: winner.name, statText: def.format(winner) } : null;
+  return winner ? { name: winner.name, statText: def.format(winner), tiedWith: [] } : null;
 }
+
+// Best Answer Rate: ties on the rate itself are broken by total call volume
+// (more calls at the same rate is the stronger result), but everyone who tied
+// on the rate still gets surfaced in the card, not just the tiebreak winner.
+function computeAnswerRateWinner(members) {
+  const withRate = members
+    .map((m) => ({ m, rate: toNumber(m.phoneAnswerRate) }))
+    .filter((x) => x.rate != null);
+  if (!withRate.length) return null;
+
+  const maxRate = Math.max(...withRate.map((x) => x.rate));
+  const tiedGroup = withRate.filter((x) => x.rate === maxRate).map((x) => x.m);
+
+  let winner = tiedGroup[0];
+  if (tiedGroup.length > 1) {
+    winner = tiedGroup.reduce((best, m) => {
+      const calls = toNumber(m.totalCalls) ?? -Infinity;
+      const bestCalls = toNumber(best.totalCalls) ?? -Infinity;
+      return calls > bestCalls ? m : best;
+    }, tiedGroup[0]);
+  }
+
+  const tiedWith = tiedGroup.filter((m) => m.name !== winner.name).map((m) => m.name);
+  return {
+    name: winner.name,
+    statText: `${winner.phoneAnswerRate} answer rate${winner.totalCalls ? ` · ${winner.totalCalls} calls` : ''}`,
+    tiedWith,
+    tiedStatLabel: winner.phoneAnswerRate,
+  };
+}
+
+const INCENTIVE_DEFS = [
+  {
+    key: 'speed',
+    compute: (members) => computeIncentiveWinner(members, {
+      metric: (m) => parseTimeToSeconds(m.avgRespTime),
+      better: 'lower',
+      format: (m) => `${m.avgRespTime} avg response`,
+    }),
+  },
+  { key: 'answer', compute: computeAnswerRateWinner },
+  {
+    key: 'csat',
+    compute: (members) => computeIncentiveWinner(members, {
+      metric: (m) => toNumber(m.csat),
+      better: 'higher',
+      format: (m) => `${m.csat} CSAT ratings`,
+    }),
+  },
+];
 
 function renderIncentives(members) {
   INCENTIVE_DEFS.forEach((def) => {
-    const result = computeIncentiveWinner(members, def);
+    const result = def.compute(members);
     const card = document.querySelector(`[data-incentive="${def.key}"]`);
     if (!card) return;
     const nameEl = card.querySelector('.incentive-winner');
     const statEl = card.querySelector('.incentive-stat');
+    const tiedEl = card.querySelector('.incentive-tied');
     if (nameEl) nameEl.textContent = result ? result.name : 'No winner yet';
     if (statEl) statEl.textContent = result ? result.statText : '–';
+    if (tiedEl) {
+      const hasTie = result && result.tiedWith && result.tiedWith.length > 0;
+      tiedEl.textContent = hasTie
+        ? `🤝 Also tied at ${result.tiedStatLabel}: ${result.tiedWith.join(', ')}`
+        : '';
+      tiedEl.hidden = !hasTie;
+    }
     card.classList.toggle('is-empty', !result);
   });
 }
