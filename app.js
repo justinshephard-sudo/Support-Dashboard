@@ -1,6 +1,9 @@
 const SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
 const ANNUAL_GID = '1501069044';
 const QUARTERLY_GID = '1582468207';
+const OVERRIDES_GID = '1979946321';
+const OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g/exec';
+const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 
 const MONTH_TABS = [
   { name: 'January', gid: '749310542' },
@@ -316,7 +319,7 @@ function computeIncentiveWinner(members, def) {
       winner = m;
     }
   });
-  return winner ? { name: winner.name, statText: def.format(winner), tiedWith: [] } : null;
+  return winner ? { name: winner.name, member: winner, tiedWith: [] } : null;
 }
 
 // Best Answer Rate: ties on the rate itself are broken by total call volume
@@ -341,52 +344,155 @@ function computeAnswerRateWinner(members) {
   }
 
   const tiedWith = tiedGroup.filter((m) => m.name !== winner.name).map((m) => m.name);
-  return {
-    name: winner.name,
-    statText: `${winner.phoneAnswerRate} answer rate${winner.totalCalls ? ` · ${winner.totalCalls} calls` : ''}`,
-    tiedWith,
-    tiedStatLabel: winner.phoneAnswerRate,
-  };
+  return { name: winner.name, member: winner, tiedWith, tiedStatLabel: winner.phoneAnswerRate };
 }
 
 const INCENTIVE_DEFS = [
   {
     key: 'speed',
+    displayStat: (m) => `${m.avgRespTime} avg response`,
     compute: (members) => computeIncentiveWinner(members, {
       metric: (m) => parseTimeToSeconds(m.avgRespTime),
       better: 'lower',
-      format: (m) => `${m.avgRespTime} avg response`,
     }),
   },
-  { key: 'answer', compute: computeAnswerRateWinner },
+  {
+    key: 'answer',
+    displayStat: (m) => `${m.phoneAnswerRate} answer rate${m.totalCalls ? ` · ${m.totalCalls} calls` : ''}`,
+    compute: computeAnswerRateWinner,
+  },
   {
     key: 'csat',
+    displayStat: (m) => `${m.csat} CSAT ratings`,
     compute: (members) => computeIncentiveWinner(members, {
       metric: (m) => toNumber(m.csat),
       better: 'higher',
-      format: (m) => `${m.csat} CSAT ratings`,
     }),
   },
 ];
 
-function renderIncentives(members) {
+function parseOverridesSheet(rows) {
+  const map = new Map();
+  for (let i = 1; i < rows.length; i++) {
+    const [monthKey, incentiveKey, winnerName] = rows[i];
+    if (!monthKey || !incentiveKey || !winnerName) continue;
+    map.set(`${monthKey}:${incentiveKey}`, winnerName.trim());
+  }
+  return map;
+}
+
+async function postOverride(monthKey, incentiveKey, winnerName) {
+  await fetch(OVERRIDES_WEBAPP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: OVERRIDES_SECRET, monthKey, incentiveKey, winnerName: winnerName || '' }),
+  });
+}
+
+let overridesUnlocked = false;
+let currentIncentiveMembers = [];
+let currentIncentiveMonthKey = null;
+let overridesMap = new Map();
+
+function renderIncentives(members, monthKey) {
+  currentIncentiveMembers = members;
+  currentIncentiveMonthKey = monthKey;
+
   INCENTIVE_DEFS.forEach((def) => {
-    const result = def.compute(members);
     const card = document.querySelector(`[data-incentive="${def.key}"]`);
     if (!card) return;
     const nameEl = card.querySelector('.incentive-winner');
     const statEl = card.querySelector('.incentive-stat');
     const tiedEl = card.querySelector('.incentive-tied');
-    if (nameEl) nameEl.textContent = result ? result.name : 'No winner yet';
-    if (statEl) statEl.textContent = result ? result.statText : '–';
+
+    const overrideName = overridesMap.get(`${monthKey}:${def.key}`);
+    const overrideMember = overrideName ? members.find((m) => m.name === overrideName) : null;
+
+    let displayName = null;
+    let displayStat = null;
+    let tiedWith = [];
+    let tiedStatLabel = '';
+
+    if (overrideMember) {
+      displayName = overrideMember.name;
+      displayStat = def.displayStat(overrideMember);
+    } else {
+      const result = def.compute(members);
+      if (result) {
+        displayName = result.name;
+        displayStat = def.displayStat(result.member);
+        tiedWith = result.tiedWith || [];
+        tiedStatLabel = result.tiedStatLabel || '';
+      }
+    }
+
+    if (nameEl) nameEl.textContent = displayName || 'No winner yet';
+    if (statEl) statEl.textContent = displayStat || '–';
     if (tiedEl) {
-      const hasTie = result && result.tiedWith && result.tiedWith.length > 0;
-      tiedEl.textContent = hasTie
-        ? `🤝 Also tied at ${result.tiedStatLabel}: ${result.tiedWith.join(', ')}`
-        : '';
+      const hasTie = tiedWith.length > 0;
+      tiedEl.textContent = hasTie ? `🤝 Also tied at ${tiedStatLabel}: ${tiedWith.join(', ')}` : '';
       tiedEl.hidden = !hasTie;
     }
-    card.classList.toggle('is-empty', !result);
+    card.classList.toggle('is-empty', !displayName);
+
+    renderOverrideControl(card, def, members, monthKey, overrideName);
+  });
+}
+
+function renderOverrideControl(card, def, members, monthKey, overrideName) {
+  let select = card.querySelector('.incentive-override-select');
+  if (!overridesUnlocked) {
+    if (select) select.remove();
+    return;
+  }
+  if (!select) {
+    select = document.createElement('select');
+    select.className = 'incentive-override-select';
+    card.appendChild(select);
+  }
+  select.innerHTML = '';
+  const autoOpt = document.createElement('option');
+  autoOpt.value = '';
+  autoOpt.textContent = '— Auto —';
+  select.appendChild(autoOpt);
+  members.forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.name;
+    opt.textContent = m.name;
+    select.appendChild(opt);
+  });
+  select.value = overrideName || '';
+  select.onchange = async () => {
+    const chosen = select.value;
+    if (chosen) overridesMap.set(`${monthKey}:${def.key}`, chosen);
+    else overridesMap.delete(`${monthKey}:${def.key}`);
+    renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
+    try {
+      await postOverride(monthKey, def.key, chosen);
+    } catch (err) {
+      console.error('Failed to save override', err);
+    }
+  };
+}
+
+const CORNER_UNLOCK_WINDOW_MS = 4000;
+let cornerClickState = { corners: new Set(), firstClickAt: 0 };
+
+function setupSecretCornerUnlock() {
+  document.querySelectorAll('.incentive-secret-corner').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (overridesUnlocked) return;
+      const now = Date.now();
+      if (cornerClickState.corners.size === 0 || now - cornerClickState.firstClickAt > CORNER_UNLOCK_WINDOW_MS) {
+        cornerClickState = { corners: new Set(), firstClickAt: now };
+      }
+      cornerClickState.corners.add(el.dataset.corner);
+      if (cornerClickState.corners.size === 4) {
+        cornerClickState = { corners: new Set(), firstClickAt: 0 };
+        overridesUnlocked = true;
+        renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
+      }
+    });
   });
 }
 
@@ -477,7 +583,7 @@ const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderbo
 function renderMonth(entry) {
   renderTiles('tiles', extractTiles(entry.parsed));
   renderMonthlyLeaderboard(entry.parsed.members);
-  renderIncentives(entry.parsed.members);
+  renderIncentives(entry.parsed.members, entry.gid);
   updateMascot(entry.parsed.members, entry.name);
 }
 
@@ -677,12 +783,19 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
 
 async function main() {
   try {
-    const monthResults = await Promise.all(
-      MONTH_TABS.map(async (m) => {
-        const rows = await fetchSheet(m.gid);
-        return { ...m, parsed: parseMonthSheet(rows) };
-      })
-    );
+    setupSecretCornerUnlock();
+
+    const [monthResults] = await Promise.all([
+      Promise.all(
+        MONTH_TABS.map(async (m) => {
+          const rows = await fetchSheet(m.gid);
+          return { ...m, parsed: parseMonthSheet(rows) };
+        })
+      ),
+      fetchSheet(OVERRIDES_GID)
+        .then((rows) => { overridesMap = parseOverridesSheet(rows); })
+        .catch((err) => console.error('Failed to load incentive overrides', err)),
+    ]);
 
     const monthlyTileValues = monthResults.map((m) => extractTiles(m.parsed));
 

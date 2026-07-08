@@ -309,6 +309,35 @@ main {
   text-align: center;
 }
 
+.incentives-panel {
+  position: relative;
+}
+
+.incentive-secret-corner {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  z-index: 6;
+}
+
+.incentive-secret-corner[data-corner="tl"] { top: 0; left: 0; }
+.incentive-secret-corner[data-corner="tr"] { top: 0; right: 0; }
+.incentive-secret-corner[data-corner="bl"] { bottom: 0; left: 0; }
+.incentive-secret-corner[data-corner="br"] { bottom: 0; right: 0; }
+
+.incentive-override-select {
+  margin-top: 10px;
+  width: 100%;
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--incentive-accent);
+  background: var(--surface);
+  color: var(--text);
+  position: relative;
+  z-index: 2;
+}
+
 .incentives-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
