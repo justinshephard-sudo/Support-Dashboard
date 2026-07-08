@@ -259,13 +259,19 @@ function trimTrailingEmpty(labels, arrays) {
   };
 }
 
+function parseTimeToSeconds(str) {
+  if (str == null || String(str).trim() === '' || str === '-') return null;
+  const s = String(str).trim();
+  if (!/^\d{1,3}:\d{2}(:\d{2})?$/.test(s)) return null;
+  const parts = s.split(':').map(Number);
+  return parts.reduce((acc, v) => acc * 60 + v, 0);
+}
+
 function sortValue(str) {
   if (str == null || String(str).trim() === '' || str === '-') return null;
   const s = String(str).trim();
-  if (/^\d{1,3}:\d{2}(:\d{2})?$/.test(s)) {
-    const parts = s.split(':').map(Number);
-    return parts.reduce((acc, v) => acc * 60 + v, 0);
-  }
+  const asTime = parseTimeToSeconds(s);
+  if (asTime != null) return asTime;
   const cleaned = s.replace(/[%,]/g, '');
   const n = parseFloat(cleaned);
   return Number.isNaN(n) ? s.toLowerCase() : n;
@@ -297,6 +303,54 @@ function moodFace(csatPct) {
   if (n >= 85) return '🙂';
   if (n >= 75) return '😐';
   return '😟';
+}
+
+const INCENTIVE_DEFS = [
+  {
+    key: 'speed',
+    metric: (m) => parseTimeToSeconds(m.avgRespTime),
+    better: 'lower',
+    format: (m) => `${m.avgRespTime} avg response`,
+  },
+  {
+    key: 'answer',
+    metric: (m) => toNumber(m.phoneAnswerRate),
+    better: 'higher',
+    format: (m) => `${m.phoneAnswerRate} answer rate`,
+  },
+  {
+    key: 'csat',
+    metric: (m) => toNumber(m.csat),
+    better: 'higher',
+    format: (m) => `${m.csat} CSAT ratings`,
+  },
+];
+
+function computeIncentiveWinner(members, def) {
+  let winner = null;
+  let bestVal = def.better === 'lower' ? Infinity : -Infinity;
+  members.forEach((m) => {
+    const v = def.metric(m);
+    if (v == null) return;
+    if ((def.better === 'lower' && v < bestVal) || (def.better === 'higher' && v > bestVal)) {
+      bestVal = v;
+      winner = m;
+    }
+  });
+  return winner ? { name: winner.name, statText: def.format(winner) } : null;
+}
+
+function renderIncentives(members) {
+  INCENTIVE_DEFS.forEach((def) => {
+    const result = computeIncentiveWinner(members, def);
+    const card = document.querySelector(`[data-incentive="${def.key}"]`);
+    if (!card) return;
+    const nameEl = card.querySelector('.incentive-winner');
+    const statEl = card.querySelector('.incentive-stat');
+    if (nameEl) nameEl.textContent = result ? result.name : 'No winner yet';
+    if (statEl) statEl.textContent = result ? result.statText : '–';
+    card.classList.toggle('is-empty', !result);
+  });
 }
 
 function createLeaderboardRenderer(tableId) {
@@ -345,11 +399,11 @@ function createLeaderboardRenderer(tableId) {
       });
     }
 
-    let topName = null;
-    let topCsat = -Infinity;
+    let fastestName = null;
+    let fastestTime = Infinity;
     members.forEach((m) => {
-      const n = toNumber(m.csatPct);
-      if (n != null && n > topCsat) { topCsat = n; topName = m.name; }
+      const secs = parseTimeToSeconds(m.avgRespTime);
+      if (secs != null && secs < fastestTime) { fastestTime = secs; fastestName = m.name; }
     });
 
     tbody.innerHTML = '';
@@ -359,11 +413,11 @@ function createLeaderboardRenderer(tableId) {
         const td = document.createElement('td');
         if (col.key === 'name') {
           td.textContent = m.name;
-          if (m.name === topName) {
+          if (m.name === fastestName) {
             const crown = document.createElement('span');
             crown.className = 'crown';
             crown.textContent = '👑';
-            crown.title = `${m.name} is topping CSAT this period!`;
+            crown.title = `${m.name} has the fastest average response time this period!`;
             td.appendChild(crown);
           }
         } else if (col.key === 'mood') {
@@ -386,6 +440,7 @@ const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderbo
 function renderMonth(entry) {
   renderTiles('tiles', extractTiles(entry.parsed));
   renderMonthlyLeaderboard(entry.parsed.members);
+  renderIncentives(entry.parsed.members);
   updateMascot(entry.parsed.members, entry.name);
 }
 
@@ -428,11 +483,14 @@ function updateChartBuddy(canvasId, data) {
   buddy.dataset.mood = bucket;
 }
 
-function drawLineChart(canvasId, labels, datasets) {
+function drawLineChart(canvasId, labels, datasets, yOpts = {}) {
   const ctx = document.getElementById(canvasId);
   if (charts[canvasId]) charts[canvasId].destroy();
   const gridColor = cssVar('--border');
   const tickColor = cssVar('--faint');
+  // Anchoring the y-axis at 0 (and at 100 for percentage metrics), rather than
+  // letting Chart.js auto-fit tightly to the data's min/max, keeps normal
+  // month-to-month wobble from reading as a dramatic swing.
   charts[canvasId] = new Chart(ctx, {
     type: 'line',
     data: {
@@ -463,7 +521,13 @@ function drawLineChart(canvasId, labels, datasets) {
       },
       scales: {
         x: { grid: { color: gridColor }, ticks: { color: tickColor } },
-        y: { beginAtZero: false, grid: { color: gridColor }, ticks: { color: tickColor } },
+        y: {
+          beginAtZero: true,
+          min: yOpts.min ?? 0,
+          max: yOpts.max,
+          grid: { color: gridColor },
+          ticks: { color: tickColor },
+        },
       },
     },
   });
@@ -495,13 +559,13 @@ function renderTrends(series, monthlyTileValues) {
   ]);
   drawLineChart('chart-answer-rate', trimmed.labels, [
     { label: 'Answer Rate %', data: tAnswerRate, borderColor: cssVar('--slot-2') },
-  ]);
+  ], { max: 100 });
   drawLineChart('chart-csat', trimmed.labels, [
     { label: 'CSAT %', data: tCsatPct, borderColor: cssVar('--slot-3') },
-  ]);
+  ], { max: 100 });
   drawLineChart('chart-ai-resolution', trimmed.labels, [
     { label: 'AI Resolution Rate %', data: tAiResolution, borderColor: cssVar('--slot-5') },
-  ]);
+  ], { max: 100 });
   drawLineChart('chart-avg-per-teammate', trimmed.labels, [
     { label: 'Avg Conversations / Teammate', data: tAvgPerTeammate, borderColor: cssVar('--slot-8') },
   ]);
