@@ -20,6 +20,12 @@ const SHARED_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 const OVERRIDES_SHEET_NAME = 'Overrides';
 
 function doPost(e) {
+  // Two overlapping requests (e.g. changing the winner select and the stat
+  // text input in quick succession) could otherwise both read the sheet
+  // before either had written, and both append a row instead of the second
+  // one updating the first. The lock serializes executions so that can't happen.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
   try {
     const body = JSON.parse(e.postData.contents);
     if (body.secret !== SHARED_SECRET) {
@@ -29,6 +35,7 @@ function doPost(e) {
     const monthKey = body.monthKey;
     const incentiveKey = body.incentiveKey;
     const winnerName = body.winnerName;
+    const statText = body.statText || '';
     if (!monthKey || !incentiveKey) {
       return jsonResponse({ ok: false, error: 'missing monthKey or incentiveKey' });
     }
@@ -47,10 +54,11 @@ function doPost(e) {
     const now = new Date().toISOString();
     if (winnerName) {
       if (rowIndex === -1) {
-        sheet.appendRow([monthKey, incentiveKey, winnerName, now]);
+        sheet.appendRow([monthKey, incentiveKey, winnerName, now, statText]);
       } else {
         sheet.getRange(rowIndex, 3).setValue(winnerName);
         sheet.getRange(rowIndex, 4).setValue(now);
+        sheet.getRange(rowIndex, 5).setValue(statText);
       }
     } else if (rowIndex !== -1) {
       sheet.deleteRow(rowIndex);
@@ -59,6 +67,8 @@ function doPost(e) {
     return jsonResponse({ ok: true });
   } catch (err) {
     return jsonResponse({ ok: false, error: String(err) });
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -71,7 +81,7 @@ function getOrCreateOverridesSheet_() {
   let sheet = ss.getSheetByName(OVERRIDES_SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(OVERRIDES_SHEET_NAME);
-    sheet.appendRow(['MonthKey', 'IncentiveKey', 'WinnerName', 'UpdatedAt']);
+    sheet.appendRow(['MonthKey', 'IncentiveKey', 'WinnerName', 'UpdatedAt', 'StatText']);
   }
   return sheet;
 }

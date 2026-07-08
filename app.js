@@ -369,23 +369,38 @@ const INCENTIVE_DEFS = [
       better: 'higher',
     }),
   },
+  {
+    key: 'facetime',
+    // No reliable "FaceTime calls" column exists in the sheet, so this
+    // incentive has no automatic winner at all — it's set entirely via
+    // the secret override panel, including a free-text stat note.
+    manualOnly: true,
+    statPlaceholder: 'e.g. 12 FaceTime calls',
+    compute: () => null,
+  },
 ];
 
 function parseOverridesSheet(rows) {
   const map = new Map();
   for (let i = 1; i < rows.length; i++) {
-    const [monthKey, incentiveKey, winnerName] = rows[i];
+    const [monthKey, incentiveKey, winnerName, , statText] = rows[i];
     if (!monthKey || !incentiveKey || !winnerName) continue;
-    map.set(`${monthKey}:${incentiveKey}`, winnerName.trim());
+    map.set(`${monthKey}:${incentiveKey}`, { winnerName: winnerName.trim(), statText: (statText || '').trim() });
   }
   return map;
 }
 
-async function postOverride(monthKey, incentiveKey, winnerName) {
+async function postOverride(monthKey, incentiveKey, winnerName, statText) {
   await fetch(OVERRIDES_WEBAPP_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: OVERRIDES_SECRET, monthKey, incentiveKey, winnerName: winnerName || '' }),
+    body: JSON.stringify({
+      secret: OVERRIDES_SECRET,
+      monthKey,
+      incentiveKey,
+      winnerName: winnerName || '',
+      statText: statText || '',
+    }),
   });
 }
 
@@ -393,6 +408,7 @@ let overridesUnlocked = false;
 let currentIncentiveMembers = [];
 let currentIncentiveMonthKey = null;
 let overridesMap = new Map();
+const overridePostTimers = new Map();
 
 function renderIncentives(members, monthKey) {
   currentIncentiveMembers = members;
@@ -405,15 +421,20 @@ function renderIncentives(members, monthKey) {
     const statEl = card.querySelector('.incentive-stat');
     const tiedEl = card.querySelector('.incentive-tied');
 
-    const overrideName = overridesMap.get(`${monthKey}:${def.key}`);
-    const overrideMember = overrideName ? members.find((m) => m.name === overrideName) : null;
+    const override = overridesMap.get(`${monthKey}:${def.key}`);
+    const overrideMember = override ? members.find((m) => m.name === override.winnerName) : null;
 
     let displayName = null;
     let displayStat = null;
     let tiedWith = [];
     let tiedStatLabel = '';
 
-    if (overrideMember) {
+    if (def.manualOnly) {
+      if (override) {
+        displayName = override.winnerName;
+        displayStat = override.statText || '–';
+      }
+    } else if (overrideMember) {
       displayName = overrideMember.name;
       displayStat = def.displayStat(overrideMember);
     } else {
@@ -435,25 +456,28 @@ function renderIncentives(members, monthKey) {
     }
     card.classList.toggle('is-empty', !displayName);
 
-    renderOverrideControl(card, def, members, monthKey, overrideName);
+    renderOverrideControl(card, def, members, monthKey, override);
   });
 }
 
-function renderOverrideControl(card, def, members, monthKey, overrideName) {
-  let select = card.querySelector('.incentive-override-select');
+function renderOverrideControl(card, def, members, monthKey, override) {
+  let wrap = card.querySelector('.incentive-override-wrap');
   if (!overridesUnlocked) {
-    if (select) select.remove();
+    if (wrap) wrap.remove();
     return;
   }
-  if (!select) {
-    select = document.createElement('select');
-    select.className = 'incentive-override-select';
-    card.appendChild(select);
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.className = 'incentive-override-wrap';
+    card.appendChild(wrap);
   }
-  select.innerHTML = '';
+  wrap.innerHTML = '';
+
+  const select = document.createElement('select');
+  select.className = 'incentive-override-select';
   const autoOpt = document.createElement('option');
   autoOpt.value = '';
-  autoOpt.textContent = '— Auto —';
+  autoOpt.textContent = def.manualOnly ? '— None —' : '— Auto —';
   select.appendChild(autoOpt);
   members.forEach((m) => {
     const opt = document.createElement('option');
@@ -461,18 +485,51 @@ function renderOverrideControl(card, def, members, monthKey, overrideName) {
     opt.textContent = m.name;
     select.appendChild(opt);
   });
-  select.value = overrideName || '';
-  select.onchange = async () => {
-    const chosen = select.value;
-    if (chosen) overridesMap.set(`${monthKey}:${def.key}`, chosen);
+  select.value = override ? override.winnerName : '';
+  wrap.appendChild(select);
+
+  let statInput = null;
+  if (def.manualOnly) {
+    statInput = document.createElement('input');
+    statInput.type = 'text';
+    statInput.className = 'incentive-override-stat-input';
+    statInput.placeholder = def.statPlaceholder || 'Optional note';
+    statInput.value = override ? override.statText : '';
+    wrap.appendChild(statInput);
+  }
+
+  const commit = () => {
+    const chosenName = select.value;
+    const chosenStat = statInput ? statInput.value.trim() : '';
+    if (chosenName) overridesMap.set(`${monthKey}:${def.key}`, { winnerName: chosenName, statText: chosenStat });
     else overridesMap.delete(`${monthKey}:${def.key}`);
     renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
-    try {
-      await postOverride(monthKey, def.key, chosen);
-    } catch (err) {
-      console.error('Failed to save override', err);
-    }
+
+    // Debounced so picking a name and then typing a stat note a moment
+    // later sends one write instead of two racing requests (the sheet
+    // backend can end up with duplicate rows if two writes for the same
+    // month+incentive land close together).
+    const timerKey = `${monthKey}:${def.key}`;
+    clearTimeout(overridePostTimers.get(timerKey));
+    overridePostTimers.set(timerKey, setTimeout(async () => {
+      try {
+        await postOverride(monthKey, def.key, chosenName, chosenStat);
+      } catch (err) {
+        console.error('Failed to save override', err);
+      }
+    }, 800));
   };
+
+  select.onchange = commit;
+  if (statInput) {
+    statInput.addEventListener('blur', commit);
+    statInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      }
+    });
+  }
 }
 
 const CORNER_UNLOCK_WINDOW_MS = 4000;

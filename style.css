@@ -325,8 +325,17 @@ main {
 .incentive-secret-corner[data-corner="bl"] { bottom: 0; left: 0; }
 .incentive-secret-corner[data-corner="br"] { bottom: 0; right: 0; }
 
-.incentive-override-select {
+.incentive-override-wrap {
   margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  z-index: 2;
+}
+
+.incentive-override-select,
+.incentive-override-stat-input {
   width: 100%;
   font-size: 12px;
   padding: 5px 6px;
@@ -334,8 +343,10 @@ main {
   border: 1px solid var(--incentive-accent);
   background: var(--surface);
   color: var(--text);
-  position: relative;
-  z-index: 2;
+}
+
+.incentive-override-stat-input::placeholder {
+  color: var(--faint);
 }
 
 .incentives-grid {
