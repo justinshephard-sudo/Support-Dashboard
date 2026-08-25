@@ -16,7 +16,7 @@
    ========================================================================== */
 
 var CZ_ACCOUNTS_TAB = 'Accounts';
-var CZ_PAGE_SIZE = 200;
+var CZ_PAGE_SIZE = 100;   // ChurnZero caps $top at 100; pagination fetches the rest
 
 // Output columns — must match the header the dashboard's parseAccounts() reads.
 var CZ_COLUMNS = [
