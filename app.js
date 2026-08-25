@@ -5,6 +5,16 @@ const OVERRIDES_GID = '1979946321';
 const OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g/exec';
 const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 
+// Google sign-in gate (restricted to lawmatics.com) + Sheets API read config.
+// NOTE: reuses the Merlin OAuth client — its Authorized JavaScript origins must
+// include this dashboard's Pages origin (https://justinshephard-sudo.github.io).
+const CONFIG = {
+  CLIENT_ID: '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com',
+  ALLOWED_DOMAIN: 'lawmatics.com',
+  SCOPES: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email',
+};
+const ACCOUNTS_TAB = 'Accounts';   // tab the ChurnZero sync writes (see apps-script/sync-accounts.gs)
+
 const MONTH_TABS = [
   { name: 'January', gid: '749310542' },
   { name: 'February', gid: '629761774' },
@@ -54,50 +64,88 @@ const LEADERBOARD_COLUMNS = [
 
 const MONTH_NAMES = MONTH_TABS.map((m) => m.name);
 
-function csvUrl(gid) {
-  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
+/* --------------------------------------------------------------------------
+   Google auth (lawmatics.com gate) + Sheets API transport.
+   fetchSheet(gid) keeps its old signature, so every call site is unchanged —
+   it now reads via the Sheets API using the signed-in user's OAuth token,
+   which lets the spreadsheet be private instead of "anyone with the link".
+   -------------------------------------------------------------------------- */
+const AUTH = { token: null, email: null, tokenClient: null, gidTitle: {} };
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function gateError(msg) {
+  const el = document.getElementById('gateError');
+  if (el) { el.textContent = msg || ''; el.hidden = !msg; }
 }
 
-function parseCSV(text) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQuotes = false;
-      } else field += c;
-    } else if (c === '"') {
-      inQuotes = true;
-    } else if (c === ',') {
-      row.push(field);
-      field = '';
-    } else if (c === '\n') {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
-    } else if (c === '\r') {
-      // skip
-    } else {
-      field += c;
-    }
-  }
-  if (field.length || row.length) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows;
+function setUserChip(info) {
+  const chip = document.getElementById('userChip');
+  if (!chip) return;
+  const email = info.email || '';
+  const handle = email.split('@')[0];
+  const init = (info.name || handle).split(/[.\s]+/).slice(0, 2).map((s) => s[0] || '').join('').toUpperCase();
+  chip.innerHTML = `<span class="av">${esc(init)}</span>${esc(handle)}`;
+  chip.classList.remove('hidden');
+}
+
+function initAuth(onReady) {
+  AUTH.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: CONFIG.SCOPES,
+    callback: async (resp) => {
+      if (resp.error) { gateError('Sign-in failed — please try again.'); return; }
+      AUTH.token = resp.access_token;
+      let info;
+      try {
+        info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: 'Bearer ' + AUTH.token },
+        }).then((r) => r.json());
+      } catch (e) { gateError('Could not verify your account. Try again.'); return; }
+      const email = (info && info.email ? info.email : '').toLowerCase();
+      if (!email.endsWith('@' + CONFIG.ALLOWED_DOMAIN)) {
+        AUTH.token = null;
+        gateError('Please sign in with your @' + CONFIG.ALLOWED_DOMAIN + ' account.');
+        return;
+      }
+      AUTH.email = email;
+      gateError('');
+      document.getElementById('gate').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      setUserChip(info);
+      onReady();
+    },
+  });
+  const btn = document.getElementById('gateBtn');
+  if (btn) btn.addEventListener('click', () => AUTH.tokenClient.requestAccessToken({ prompt: '' }));
+}
+
+async function sheetsApi(path) {
+  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + SHEET_ID + path, {
+    headers: { Authorization: 'Bearer ' + AUTH.token },
+  });
+  if (!res.ok) throw new Error('Sheets API HTTP ' + res.status);
+  return res.json();
+}
+
+async function loadGidTitleMap() {
+  const meta = await sheetsApi('?fields=sheets(properties(sheetId,title))');
+  (meta.sheets || []).forEach((s) => { AUTH.gidTitle[String(s.properties.sheetId)] = s.properties.title; });
+}
+
+function rangeForTitle(title) {
+  return encodeURIComponent("'" + String(title).replace(/'/g, "''") + "'");
+}
+
+async function fetchSheetByTitle(title) {
+  const data = await sheetsApi('/values/' + rangeForTitle(title));
+  return (data.values || []).filter((r) => r.some((cell) => String(cell).trim() !== ''));
 }
 
 async function fetchSheet(gid) {
-  const res = await fetch(csvUrl(gid));
-  if (!res.ok) throw new Error(`Failed to load sheet data (gid=${gid}): HTTP ${res.status}`);
-  const text = await res.text();
-  return parseCSV(text).filter((r) => r.some((cell) => cell.trim() !== ''));
+  const title = AUTH.gidTitle[String(gid)];
+  if (!title) throw new Error('No tab found for gid ' + gid);
+  return fetchSheetByTitle(title);
 }
 
 function readMemberRow(row) {
@@ -841,6 +889,8 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
 async function main() {
   try {
     setupSecretCornerUnlock();
+    await loadGidTitleMap();
+    initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
 
     const [monthResults] = await Promise.all([
       Promise.all(
@@ -897,4 +947,233 @@ async function main() {
   }
 }
 
-main();
+/* ==========================================================================
+   Firm Lookup — reads the "Accounts" tab (written by the ChurnZero sync),
+   fuzzy-searches firms, and renders a customer profile.
+   ========================================================================== */
+const FIRMS = { list: [], loaded: false };
+
+async function initFirmLookup() {
+  const input = document.getElementById('q');
+  const emptyMsg = document.getElementById('firmEmptyMsg');
+  const cnt = document.getElementById('firmCount');
+  try {
+    const rows = await fetchSheetByTitle(ACCOUNTS_TAB);
+    FIRMS.list = parseAccounts(rows);
+    FIRMS.loaded = true;
+    if (cnt) cnt.textContent = FIRMS.list.length ? `${FIRMS.list.length} firms` : '';
+    if (emptyMsg) emptyMsg.textContent = FIRMS.list.length
+      ? 'Start typing a firm name to pull up their profile.'
+      : 'No account data yet — run the ChurnZero sync to populate the Accounts tab.';
+  } catch (err) {
+    console.error('Accounts tab not available', err);
+    if (emptyMsg) emptyMsg.textContent = 'Account data unavailable — the “Accounts” tab hasn’t been created yet.';
+  }
+  if (input) input.addEventListener('input', onFirmSearch);
+}
+
+function parseAccounts(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map((h) => String(h || '').trim().toLowerCase());
+  const idx = {};
+  header.forEach((h, i) => { idx[h] = i; });
+  const get = (row, name) => { const i = idx[name.toLowerCase()]; return i == null ? '' : String(row[i] == null ? '' : row[i]).trim(); };
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const name = get(r, 'Name');
+    if (!name) continue;
+    out.push({
+      name,
+      firmId: get(r, 'FirmId'),
+      area: get(r, 'PracticeArea'),
+      am: get(r, 'AccountManager'),
+      mrr: get(r, 'MRR'),
+      contract: get(r, 'TotalContract'),
+      cb: get(r, 'ChargebeeStatus'),
+      cstatus: get(r, 'ContractStatus'),
+      term: get(r, 'TermEnd'),
+      cycles: get(r, 'RemainingCycles'),
+      lic: get(r, 'Licenses'),
+      score: get(r, 'ChurnScore'),
+      freq: get(r, 'UsageFrequency'),
+      danger: /^(true|yes|1)$/i.test(get(r, 'DangerZone')),
+      cancel: /^(true|yes|1)$/i.test(get(r, 'CancellationRequested')),
+      csat60: get(r, 'CSAT60'),
+      tenure: get(r, 'TenureDays'),
+      matters: get(r, 'MattersPerMonth'),
+      leads: get(r, 'LeadVolume'),
+      sms: get(r, 'TotalSms'),
+      acts30: get(r, 'Activities30'),
+      emp: get(r, 'Employees'),
+      contacts: get(r, 'Contacts'),
+      onb: get(r, 'OnboardingStatus'),
+      city: get(r, 'City'),
+      web: get(r, 'Website'),
+    });
+  }
+  return out;
+}
+
+function firmSearchScore(q, name) {
+  q = q.toLowerCase().trim(); name = String(name).toLowerCase();
+  if (!q) return -1;
+  if (name.includes(q)) return 100 - name.indexOf(q);
+  let qi = 0;
+  for (let i = 0; i < name.length && qi < q.length; i++) if (name[i] === q[qi]) qi++;
+  if (qi === q.length) return 40;
+  let hit = 0;
+  for (const ch of new Set(q.split(''))) if (name.includes(ch)) hit++;
+  return hit >= Math.ceil(q.length * 0.6) ? 10 : -1;
+}
+
+const HEALTH = {
+  good: ['Healthy', 'var(--st-good)', 'rgba(12,163,90,.15)', 'good'],
+  warn: ['Watch', 'var(--st-warn)', 'rgba(230,148,26,.16)', 'warn'],
+  bad: ['At Risk', 'var(--st-critical)', 'rgba(216,58,58,.15)', 'bad'],
+};
+function healthOf(f) {
+  if (f.danger || f.cancel) return 'bad';
+  const s = toNumber(f.score);
+  if (s == null) return 'warn';
+  if (s < 25) return 'good';
+  if (s < 50) return 'warn';
+  return 'bad';
+}
+function firmInitials(n) {
+  return String(n).replace(/[^A-Za-z ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '—';
+}
+function fmtMoney(v) {
+  if (v == null || String(v).trim() === '') return '—';
+  const n = toNumber(v);
+  if (n == null) return String(v);
+  return '$' + Math.round(n).toLocaleString();
+}
+const orDash = (v) => (v == null || String(v).trim() === '' ? '—' : String(v));
+
+function onFirmSearch() {
+  const v = document.getElementById('q').value;
+  const results = document.getElementById('results');
+  if (!v.trim()) { results.classList.remove('show'); return; }
+  const list = FIRMS.list
+    .map((f) => ({ f, s: firmSearchScore(v, f.name) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 8)
+    .map((x) => x.f);
+  renderFirmResults(list);
+}
+
+function renderFirmResults(list) {
+  const results = document.getElementById('results');
+  if (!list.length) { results.classList.remove('show'); return; }
+  results.innerHTML = list.map((f) => {
+    const h = HEALTH[healthOf(f)];
+    const meta = [f.area, f.am ? 'AM ' + f.am : '', f.mrr ? fmtMoney(f.mrr) + '/mo' : ''].filter(Boolean).join(' · ');
+    return `<div class="res" data-id="${esc(f.firmId)}" data-name="${esc(f.name)}">
+      <div class="res-logo">${esc(firmInitials(f.name))}</div>
+      <div class="res-main"><div class="res-name">${esc(f.name)}</div><div class="res-meta">${esc(meta)}</div></div>
+      <span class="res-health" style="color:${h[1]};background:${h[2]}">${h[0]}</span>
+    </div>`;
+  }).join('');
+  results.classList.add('show');
+  results.querySelectorAll('.res').forEach((el) => el.addEventListener('click', () => openFirm(el.dataset.id, el.dataset.name)));
+}
+
+function pfRow(k, v, cls) { return `<div class="pf-row"><span class="k">${esc(k)}</span><span class="v ${cls || ''}">${esc(v)}</span></div>`; }
+
+function openFirm(firmId, name) {
+  const f = FIRMS.list.find((x) => (firmId && x.firmId === firmId) || x.name === name);
+  if (!f) return;
+  document.getElementById('results').classList.remove('show');
+  document.getElementById('firmEmpty').style.display = 'none';
+  document.getElementById('q').value = f.name;
+  const hk = healthOf(f); const h = HEALTH[hk];
+  const tenureYrs = toNumber(f.tenure) != null ? (toNumber(f.tenure) / 365).toFixed(1) + ' yrs' : '—';
+  const sub = [f.area, f.firmId ? 'FirmId ' + f.firmId : '', f.city ? '📍 ' + f.city : ''].filter(Boolean).map(esc).join(' · ');
+  const web = f.web ? ` · <a href="https://${esc(f.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">🌐 ${esc(f.web)}</a>` : '';
+  const badgeCls = hk === 'good' ? 'good' : hk === 'bad' ? 'bad' : 'warn';
+  const dangerBadge = (f.danger || f.cancel) ? '<span class="pf-badge warn">⚠ Cancellation flagged</span>' : '';
+  const scoreN = toNumber(f.score);
+  const scoreCls = scoreN == null ? '' : scoreN < 25 ? 'good' : scoreN < 50 ? 'warn' : 'bad';
+  document.getElementById('profile').innerHTML = `
+    <div class="pf-hero">
+      <div class="pf-logo">${esc(firmInitials(f.name))}</div>
+      <div class="pf-htext"><h3>${esc(f.name)}</h3><div class="sub">${sub}${web}</div></div>
+      <div class="pf-hbadges">
+        <span class="pf-badge ${badgeCls}">${h[0]}</span>
+        ${dangerBadge}
+        ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
+      </div>
+    </div>
+    <div class="pf-grid">
+      <div class="pf-card"><h4>👤 Ownership</h4>
+        ${pfRow('Account Manager', orDash(f.am))}
+        ${pfRow('Onboarding', orDash(f.onb), /complete/i.test(f.onb) ? 'good' : f.onb ? 'warn' : '')}
+        ${pfRow('Tenure', tenureYrs)}
+      </div>
+      <div class="pf-card"><h4>💳 Billing</h4>
+        ${pfRow('MRR', fmtMoney(f.mrr), toNumber(f.mrr) ? '' : 'warn')}
+        ${pfRow('Chargebee', orDash(f.cb), /active/i.test(f.cb) ? 'good' : /past due|overdue/i.test(f.cb) ? 'bad' : '')}
+        ${pfRow('Contract', orDash(f.cstatus), /active/i.test(f.cstatus) ? 'good' : /risk|churn/i.test(f.cstatus) ? 'bad' : '')}
+        ${pfRow('Term ends', orDash(f.term))}
+        ${pfRow('Licenses', orDash(f.lic))}
+      </div>
+      <div class="pf-card"><h4>❤️ Health &amp; Risk</h4>
+        ${pfRow('Churn score', orDash(f.score), scoreCls)}
+        ${pfRow('Usage', orDash(f.freq), /daily/i.test(f.freq) ? 'good' : /rare|never/i.test(f.freq) ? 'bad' : '')}
+        ${pfRow('CSAT (60d)', toNumber(f.csat60) ? f.csat60 + '%' : '—')}
+        ${pfRow('Cancellation', (f.danger || f.cancel) ? 'Flagged' : 'No', (f.danger || f.cancel) ? 'bad' : 'good')}
+      </div>
+      <div class="pf-card"><h4>📊 Usage Snapshot</h4>
+        ${pfRow('Matters / mo', orDash(f.matters))}
+        ${pfRow('Lead volume', orDash(f.leads))}
+        ${pfRow('Total SMS', orDash(f.sms))}
+        ${pfRow('Activities (30d)', orDash(f.acts30))}
+        ${pfRow('Contacts', orDash(f.contacts))}
+      </div>
+    </div>`;
+  document.getElementById('profile').classList.add('show');
+}
+
+/* ==========================================================================
+   Tabs, theme, and auth bootstrap
+   ========================================================================== */
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
+    document.querySelectorAll('.view').forEach((x) => x.classList.remove('active'));
+    t.classList.add('active');
+    const v = document.getElementById('view-' + t.dataset.tab);
+    if (v) v.classList.add('active');
+    if (t.dataset.tab === 'firm') { const q = document.getElementById('q'); if (q) q.focus(); }
+  }));
+}
+
+function setupTheme() {
+  const btn = document.getElementById('themeBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+}
+
+function bootstrap() {
+  setupTabs();
+  setupTheme();
+  const start = () => initAuth(main);
+  if (window.google && google.accounts && google.accounts.oauth2) {
+    start();
+  } else {
+    const t = setInterval(() => {
+      if (window.google && google.accounts && google.accounts.oauth2) { clearInterval(t); start(); }
+    }, 120);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
