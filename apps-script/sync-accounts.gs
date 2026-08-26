@@ -122,7 +122,7 @@ function pickSub_(subs) {
   return pool.slice().sort(function (a, b) { return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0); })[0];
 }
 function planSummary_(subs) { var s = pickSub_(subs); return s ? (s.PlanId || '') : ''; }
-function subStart_(subs) { var s = pickSub_(subs); return s ? fmtDate_(s.StartDate || s.CreatedAt || '') : ''; }
+function subStart_(subs) { var s = pickSub_(subs); return s ? fmtDate_(s.CreatedAt || s.StartDate || '') : ''; }
 
 function addOnSummary_(addons) {
   if (!addons || !addons.length) return '';
