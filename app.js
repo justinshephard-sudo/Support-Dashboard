@@ -1012,6 +1012,7 @@ function parseAccounts(rows) {
       city: get(r, 'City'),
       web: get(r, 'Website'),
       plan: get(r, 'ChargebeePlan'),
+      cbStart: get(r, 'ChargebeeStart'),
       addons: get(r, 'AddOns'),
       invBalance: get(r, 'InvoiceBalance'),
       legacy: get(r, 'LegacyContract'),
@@ -1119,7 +1120,7 @@ function openFirm(firmId, name) {
         ${pfRow('MRR', fmtMoney(f.mrr), toNumber(f.mrr) ? '' : 'warn')}
         ${f.plan ? pfRow('Plan', f.plan) : ''}
         ${pfRow('Chargebee', orDash(f.cb), /active/i.test(f.cb) ? 'good' : /past due|overdue/i.test(f.cb) ? 'bad' : '')}
-        ${pfRow('Contract', orDash(f.cstatus), /active/i.test(f.cstatus) ? 'good' : /risk|churn/i.test(f.cstatus) ? 'bad' : '')}
+        ${f.cbStart ? pfRow('Start date', f.cbStart) : ''}
         ${pfRow('Term ends', orDash(f.term))}
         ${pfRow('Licenses', orDash(f.lic))}
         ${f.addons ? `<div class="pf-row"><span class="k">Add-ons</span><span class="v">${f.addons.split(';').map((s) => esc(s.trim())).filter(Boolean).join('<br>')}</span></div>` : ''}

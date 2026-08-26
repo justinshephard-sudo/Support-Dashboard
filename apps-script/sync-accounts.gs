@@ -29,7 +29,7 @@ var CZ_COLUMNS = [
   'ChurnScore', 'UsageFrequency', 'DangerZone', 'CancellationRequested', 'CSAT60',
   'TenureDays', 'MattersPerMonth', 'LeadVolume', 'TotalSms', 'SmsPlanType', 'Activities30',
   'Employees', 'Contacts', 'OnboardingStatus', 'City', 'Website',
-  'ChargebeePlan', 'AddOns', 'InvoiceBalance', 'LegacyContract',
+  'ChargebeePlan', 'ChargebeeStart', 'AddOns', 'InvoiceBalance', 'LegacyContract',
 ];
 
 function syncChurnZeroAccounts() {
@@ -106,6 +106,7 @@ function accountToRow_(a, ctx) {
     City: city,
     Website: cf.Website || '',
     ChargebeePlan: planSummary_(ctx.subs[acctId]),
+    ChargebeeStart: subStart_(ctx.subs[acctId]),
     AddOns: addOnSummary_(ctx.addOns[acctId]),
     InvoiceBalance: balanceSummary_(ctx.unpaid[acctId]),
     LegacyContract: legacySummary_(ctx.legacy[acctId]),
@@ -114,13 +115,14 @@ function accountToRow_(a, ctx) {
 }
 
 /* ---- related-table summaries ---- */
-function planSummary_(subs) {
-  if (!subs || !subs.length) return '';
+function pickSub_(subs) {
+  if (!subs || !subs.length) return null;
   var active = subs.filter(function (s) { return String(s.Status || '').toLowerCase() === 'active'; });
   var pool = active.length ? active : subs;
-  var pick = pool.slice().sort(function (a, b) { return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0); })[0];
-  return pick ? (pick.PlanId || '') : '';
+  return pool.slice().sort(function (a, b) { return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0); })[0];
 }
+function planSummary_(subs) { var s = pickSub_(subs); return s ? (s.PlanId || '') : ''; }
+function subStart_(subs) { var s = pickSub_(subs); return s ? fmtDate_(s.StartDate || s.CreatedAt || '') : ''; }
 
 function addOnSummary_(addons) {
   if (!addons || !addons.length) return '';
