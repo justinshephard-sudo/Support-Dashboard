@@ -1089,7 +1089,6 @@ function openFirm(firmId, name) {
   document.getElementById('firmEmpty').style.display = 'none';
   document.getElementById('q').value = f.name;
   const hk = healthOf(f); const h = HEALTH[hk];
-  const tenureYrs = toNumber(f.tenure) != null ? (toNumber(f.tenure) / 365).toFixed(1) + ' yrs' : '—';
   const sub = [f.area, f.firmId ? 'FirmId ' + f.firmId : '', f.city ? '📍 ' + f.city : ''].filter(Boolean).map(esc).join(' · ');
   const web = f.web ? ` · <a href="https://${esc(f.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">🌐 ${esc(f.web)}</a>` : '';
   const badgeCls = hk === 'good' ? 'good' : hk === 'bad' ? 'bad' : 'warn';
@@ -1110,7 +1109,6 @@ function openFirm(firmId, name) {
       <div class="pf-card"><h4>👤 Ownership</h4>
         ${pfRow('Account Manager', orDash(f.am))}
         ${pfRow('Onboarding', orDash(f.onb), /complete/i.test(f.onb) ? 'good' : f.onb ? 'warn' : '')}
-        ${pfRow('Tenure', tenureYrs)}
       </div>
       <div class="pf-card"><h4>💳 Billing</h4>
         ${pfRow('MRR', fmtMoney(f.mrr), toNumber(f.mrr) ? '' : 'warn')}
@@ -1129,8 +1127,6 @@ function openFirm(firmId, name) {
         ${pfRow('Matters / mo', orDash(f.matters))}
         ${pfRow('Lead volume', orDash(f.leads))}
         ${pfRow('Total SMS', orDash(f.sms))}
-        ${pfRow('Activities (30d)', orDash(f.acts30))}
-        ${pfRow('Contacts', orDash(f.contacts))}
       </div>
     </div>`;
   document.getElementById('profile').classList.add('show');
