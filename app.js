@@ -1122,14 +1122,13 @@ function openFirm(firmId, name) {
         ${pfRow('Contract', orDash(f.cstatus), /active/i.test(f.cstatus) ? 'good' : /risk|churn/i.test(f.cstatus) ? 'bad' : '')}
         ${pfRow('Term ends', orDash(f.term))}
         ${pfRow('Licenses', orDash(f.lic))}
-        ${f.addons ? pfRow('Add-ons', f.addons) : ''}
+        ${f.addons ? `<div class="pf-row"><span class="k">Add-ons</span><span class="v">${f.addons.split(';').map((s) => esc(s.trim())).filter(Boolean).join('<br>')}</span></div>` : ''}
         ${f.invBalance ? pfRow('Balance due', f.invBalance, 'bad') : ''}
         ${f.legacy ? pfRow('Legacy contract', f.legacy) : ''}
       </div>
       <div class="pf-card"><h4>❤️ Health &amp; Risk</h4>
         ${pfRow('Churn score', orDash(f.score), scoreCls)}
         ${pfRow('Usage', orDash(f.freq), /daily/i.test(f.freq) ? 'good' : /rare|never/i.test(f.freq) ? 'bad' : '')}
-        ${pfRow('CSAT (60d)', toNumber(f.csat60) ? f.csat60 + '%' : '—')}
         ${pfRow('Cancellation', (f.danger || f.cancel) ? 'Flagged' : 'No', (f.danger || f.cancel) ? 'bad' : 'good')}
       </div>
       <div class="pf-card"><h4>📊 Usage Snapshot</h4>
