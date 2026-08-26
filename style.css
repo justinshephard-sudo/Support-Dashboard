@@ -37,8 +37,8 @@ body{font-family:var(--font);background:var(--plane);color:var(--text-1);-webkit
 .topbar{background:linear-gradient(120deg,var(--lm-navy) 0%,#2b3c54 60%,#35506f 100%);color:#fff;border-bottom:3px solid var(--lm-blue)}
 .topbar-inner{max-width:1400px;margin:0 auto;padding:16px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:13px}
-.brand-mark{width:40px;height:40px;border-radius:10px;flex:none;background:linear-gradient(135deg,var(--lm-blue),var(--lm-cyan));display:grid;place-items:center;color:#fff;box-shadow:0 2px 8px rgba(6,139,255,.4)}
-.brand-mark svg{width:22px;height:22px}
+.brand-mark{width:40px;height:40px;border-radius:10px;flex:none;background:#fff;display:grid;place-items:center;overflow:hidden;padding:4px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.brand-mark img{width:100%;height:100%;object-fit:contain;display:block}
 .brand-text h1{font-size:18px;font-weight:800;letter-spacing:-.2px;line-height:1.15}
 .brand-text p{font-size:12.5px;color:#a9bdd6;font-weight:500}
 .brand-text .lm{color:var(--lm-sky);font-weight:700}
@@ -188,8 +188,8 @@ tbody tr:hover td:first-child{background:var(--surface-2)}
 /* ---------- gate ---------- */
 .gate{position:fixed;inset:0;background:linear-gradient(120deg,var(--lm-navy),#33475f);display:grid;place-items:center;z-index:900;padding:24px}
 .gate-card{background:var(--surface-1);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:38px 36px;max-width:400px;width:100%;text-align:center}
-.gate-mark{width:56px;height:56px;border-radius:15px;margin:0 auto 16px;background:linear-gradient(135deg,var(--lm-blue),var(--lm-cyan));display:grid;place-items:center;color:#fff;box-shadow:0 4px 14px rgba(6,139,255,.4)}
-.gate-mark svg{width:30px;height:30px}
+.gate-logo-chip{display:inline-block;background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 22px;margin:0 auto 18px;box-shadow:var(--shadow-sm)}
+.gate-logo{display:block;width:210px;max-width:60vw;height:auto}
 .gate-card h2{font-size:19px;font-weight:800;color:var(--text-1)}
 .gate-card p{font-size:13px;color:var(--text-2);margin-top:8px;line-height:1.55}
 .gate-btn{margin-top:22px;width:100%;cursor:pointer;font:inherit;font-size:14px;font-weight:700;color:#fff;background:var(--lm-blue);border:none;padding:12px;border-radius:11px;display:flex;align-items:center;justify-content:center;gap:10px;transition:filter .15s}
