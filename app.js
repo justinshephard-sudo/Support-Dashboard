@@ -1004,6 +1004,7 @@ function parseAccounts(rows) {
       matters: get(r, 'MattersPerMonth'),
       leads: get(r, 'LeadVolume'),
       sms: get(r, 'TotalSms'),
+      smsPlan: get(r, 'SmsPlanType'),
       acts30: get(r, 'Activities30'),
       emp: get(r, 'Employees'),
       contacts: get(r, 'Contacts'),
@@ -1127,6 +1128,7 @@ function openFirm(firmId, name) {
         ${pfRow('Matters / mo', orDash(f.matters))}
         ${pfRow('Lead volume', orDash(f.leads))}
         ${pfRow('Total SMS', orDash(f.sms))}
+        ${pfRow('SMS plan', orDash(f.smsPlan))}
       </div>
     </div>`;
   document.getElementById('profile').classList.add('show');

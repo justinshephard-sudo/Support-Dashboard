@@ -23,7 +23,7 @@ var CZ_COLUMNS = [
   'Name', 'FirmId', 'PracticeArea', 'AccountManager', 'MRR', 'TotalContract',
   'ChargebeeStatus', 'ContractStatus', 'TermEnd', 'RemainingCycles', 'Licenses',
   'ChurnScore', 'UsageFrequency', 'DangerZone', 'CancellationRequested', 'CSAT60',
-  'TenureDays', 'MattersPerMonth', 'LeadVolume', 'TotalSms', 'Activities30',
+  'TenureDays', 'MattersPerMonth', 'LeadVolume', 'TotalSms', 'SmsPlanType', 'Activities30',
   'Employees', 'Contacts', 'OnboardingStatus', 'City', 'Website',
 ];
 
@@ -82,6 +82,7 @@ function accountToRow_(a) {
     MattersPerMonth: numOr_(cf.AvgMattersCreatedmonth, ''),
     LeadVolume: lead,
     TotalSms: numOr_(cf.TotalSms, ''),
+    SmsPlanType: cf.SmsPlanType == null ? '' : cf.SmsPlanType,
     Activities30: numOr_(cf.OfActivitiesLoggedl30, ''),
     Employees: numOr_(cf.Employees, ''),
     Contacts: numOr_(a.ContactsCount, ''),
