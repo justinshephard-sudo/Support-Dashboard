@@ -182,7 +182,7 @@ tbody tr:hover td:first-child{background:var(--surface-2)}
 .pf-row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
 .pf-row:last-child{border-bottom:none}
 .pf-row .k{color:var(--text-3);font-weight:600}
-.pf-row .v{color:var(--text-1);font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.pf-row .v{color:var(--text-1);font-weight:700;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;max-width:65%}
 .pf-row .v.good{color:var(--st-good)} .pf-row .v.warn{color:var(--st-warn)} .pf-row .v.bad{color:var(--st-critical)}
 
 /* ---------- gate ---------- */

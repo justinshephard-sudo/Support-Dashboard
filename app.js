@@ -1011,6 +1011,10 @@ function parseAccounts(rows) {
       onb: get(r, 'OnboardingStatus'),
       city: get(r, 'City'),
       web: get(r, 'Website'),
+      plan: get(r, 'ChargebeePlan'),
+      addons: get(r, 'AddOns'),
+      invBalance: get(r, 'InvoiceBalance'),
+      legacy: get(r, 'LegacyContract'),
     });
   }
   return out;
@@ -1113,10 +1117,14 @@ function openFirm(firmId, name) {
       </div>
       <div class="pf-card"><h4>💳 Billing</h4>
         ${pfRow('MRR', fmtMoney(f.mrr), toNumber(f.mrr) ? '' : 'warn')}
+        ${f.plan ? pfRow('Plan', f.plan) : ''}
         ${pfRow('Chargebee', orDash(f.cb), /active/i.test(f.cb) ? 'good' : /past due|overdue/i.test(f.cb) ? 'bad' : '')}
         ${pfRow('Contract', orDash(f.cstatus), /active/i.test(f.cstatus) ? 'good' : /risk|churn/i.test(f.cstatus) ? 'bad' : '')}
         ${pfRow('Term ends', orDash(f.term))}
         ${pfRow('Licenses', orDash(f.lic))}
+        ${f.addons ? pfRow('Add-ons', f.addons) : ''}
+        ${f.invBalance ? pfRow('Balance due', f.invBalance, 'bad') : ''}
+        ${f.legacy ? pfRow('Legacy contract', f.legacy) : ''}
       </div>
       <div class="pf-card"><h4>❤️ Health &amp; Risk</h4>
         ${pfRow('Churn score', orDash(f.score), scoreCls)}

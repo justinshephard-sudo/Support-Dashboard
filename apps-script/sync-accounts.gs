@@ -10,9 +10,13 @@
       (CZ_BASE is optional; defaults to the lawmatics US1 instance.)
    4. Run syncChurnZeroAccounts once (authorize when prompted) to test.
    5. Triggers (clock icon) › Add Trigger › syncChurnZeroAccounts ›
-        Time-driven › Day timer (e.g. 4–5am). Daily keeps the CZ key alive
+        Time-driven › Day timer (e.g. 4-5am). Daily keeps the CZ key alive
         (it expires after 30 days of inactivity) and the data fresh.
    The CZ key lives only in Script Properties — never in the repo or the page.
+
+   Pulls the Account table plus four related custom tables (joined on the
+   internal ChurnZero AccountId): subscription add-ons, Chargebee plan,
+   unpaid invoices (balance due), and legacy contracts.
    ========================================================================== */
 
 var CZ_ACCOUNTS_TAB = 'Accounts';
@@ -25,6 +29,7 @@ var CZ_COLUMNS = [
   'ChurnScore', 'UsageFrequency', 'DangerZone', 'CancellationRequested', 'CSAT60',
   'TenureDays', 'MattersPerMonth', 'LeadVolume', 'TotalSms', 'SmsPlanType', 'Activities30',
   'Employees', 'Contacts', 'OnboardingStatus', 'City', 'Website',
+  'ChargebeePlan', 'AddOns', 'InvoiceBalance', 'LegacyContract',
 ];
 
 function syncChurnZeroAccounts() {
@@ -35,18 +40,28 @@ function syncChurnZeroAccounts() {
   if (!user || !key) throw new Error('Set CZ_USER and CZ_KEY in Script Properties first.');
 
   var headers = { Authorization: 'Basic ' + Utilities.base64Encode(user + ':' + key) };
-  var url = base + '/Account?$top=' + CZ_PAGE_SIZE + '&$count=true';
-  var rows = [];
-  var guard = 0;
 
-  while (url && guard < 200) {
+  // Related custom tables, grouped by internal ChurnZero AccountId.
+  var ctx = {
+    addOns: groupBy_(fetchAllCZ_(base + '/CustomListSubscriptionAddOn?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
+    subs:   groupBy_(fetchAllCZ_(base + '/CustomListChargebeeSubscription?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
+    legacy: groupBy_(fetchAllCZ_(base + '/CustomListLegacyContracts?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
+    // Only unpaid invoices — keeps this fast and surfaces balance-due, the support-relevant signal.
+    unpaid: groupBy_(fetchAllCZ_(base + '/CustomListInvoices?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('AmountDue gt 0'), headers), 'AccountId'),
+  };
+
+  // Accounts (paginated) → rows.
+  var rows = [];
+  var url = base + '/Account?$top=' + CZ_PAGE_SIZE + '&$count=true';
+  var guard = 0;
+  while (url && guard < 500) {
     guard++;
     var resp = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
     if (resp.getResponseCode() !== 200) {
       throw new Error('ChurnZero HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 300));
     }
     var body = JSON.parse(resp.getContentText());
-    (body.value || []).forEach(function (a) { rows.push(accountToRow_(a)); });
+    (body.value || []).forEach(function (a) { rows.push(accountToRow_(a, ctx)); });
     url = body['@odata.nextLink'] || null;
   }
 
@@ -54,8 +69,9 @@ function syncChurnZeroAccounts() {
   return rows.length;
 }
 
-function accountToRow_(a) {
+function accountToRow_(a, ctx) {
   var cf = a.Cf || {};
+  var acctId = String(a.Id);
   var city = uniqJoin_([a.BillingAddressCity, a.BillingAddressState]);
   var lead = cf.LeadVolume || '';
   var leadAvg = cf.AvgMonthlyLeadVolumelifetime;
@@ -89,8 +105,63 @@ function accountToRow_(a) {
     OnboardingStatus: cf.OnboardingStatus || '',
     City: city,
     Website: cf.Website || '',
+    ChargebeePlan: planSummary_(ctx.subs[acctId]),
+    AddOns: addOnSummary_(ctx.addOns[acctId]),
+    InvoiceBalance: balanceSummary_(ctx.unpaid[acctId]),
+    LegacyContract: legacySummary_(ctx.legacy[acctId]),
   };
   return CZ_COLUMNS.map(function (c) { return map[c]; });
+}
+
+/* ---- related-table summaries ---- */
+function planSummary_(subs) {
+  if (!subs || !subs.length) return '';
+  var active = subs.filter(function (s) { return String(s.Status || '').toLowerCase() === 'active'; });
+  var pool = active.length ? active : subs;
+  var pick = pool.slice().sort(function (a, b) { return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0); })[0];
+  return pick ? (pick.PlanId || '') : '';
+}
+
+function addOnSummary_(addons) {
+  if (!addons || !addons.length) return '';
+  return addons.map(function (a) {
+    var name = String(a.Name || '').replace(/\s*USD\s*/i, ' ').trim();
+    var amt = (a.Amount != null && a.Amount !== '') ? ' ($' + Math.round(a.Amount).toLocaleString() + ')' : '';
+    return name + amt;
+  }).filter(Boolean).join('; ');
+}
+
+function balanceSummary_(unpaid) {
+  if (!unpaid || !unpaid.length) return '';
+  var total = 0;
+  unpaid.forEach(function (i) { total += Number(i.AmountDue) || 0; });
+  if (total <= 0) return '';
+  return '$' + Math.round(total).toLocaleString() + ' (' + unpaid.length + ' unpaid)';
+}
+
+function legacySummary_(contracts) {
+  if (!contracts || !contracts.length) return '';
+  var started = contracts.filter(function (c) {
+    return c.OutreachStarted != null && c.OutreachStarted !== '' && c.OutreachStarted !== false;
+  });
+  if (!started.length) return '';
+  return started[0].NewContractStatus || 'Outreach started';
+}
+
+/* ---- fetch / sheet ---- */
+function fetchAllCZ_(url, headers) {
+  var rows = [], guard = 0;
+  while (url && guard < 500) {
+    guard++;
+    var resp = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
+    if (resp.getResponseCode() !== 200) {
+      throw new Error('ChurnZero HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 300));
+    }
+    var body = JSON.parse(resp.getContentText());
+    (body.value || []).forEach(function (r) { rows.push(r); });
+    url = body['@odata.nextLink'] || null;
+  }
+  return rows;
 }
 
 function writeAccountsTab_(rows) {
@@ -103,6 +174,11 @@ function writeAccountsTab_(rows) {
 }
 
 /* ---- helpers ---- */
+function groupBy_(list, key) {
+  var m = {};
+  (list || []).forEach(function (r) { var k = String(r[key]); (m[k] = m[k] || []).push(r); });
+  return m;
+}
 function firstOf_(v) { return Array.isArray(v) ? (v[0] || '') : (v || ''); }
 function boolStr_(v) { return v === true ? 'Yes' : v === false ? 'No' : ''; }
 function numOr_(v, fallback) {
