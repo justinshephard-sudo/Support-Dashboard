@@ -55,7 +55,6 @@ const LEADERBOARD_COLUMNS = [
   { key: 'dsat', label: 'DSAT' },
   { key: 'dsatPct', label: 'DSAT %' },
   { key: 'reviewedPct', label: 'Reviewed %' },
-  { key: 'cx', label: 'CX' },
   { key: 'newTickets', label: 'New Tickets' },
   { key: 'avg1stResponse', label: 'Avg 1st Response' },
   { key: 'avgRespTime', label: 'Avg Resp Time' },
@@ -251,7 +250,7 @@ function secToTime(sec) {
 
 function buildQuarters() {
   const SUM = ['convAssigned', 'convReplied', 'totalCalls', 'missedCalls', 'csat', 'dsat', 'newTickets', 'closedConv', 'supportCalls', 'tbDemos', 'totalDemos'];
-  const AVG_PCT = ['phoneAnswerRate', 'csatPct', 'dsatPct', 'reviewedPct', 'cx'];
+  const AVG_PCT = ['phoneAnswerRate', 'csatPct', 'dsatPct', 'reviewedPct'];
   const AVG_TIME = ['avg1stResponse', 'avgRespTime', 'closingTime'];
   const out = {};
   QUARTER_NAMES.forEach((q) => {
