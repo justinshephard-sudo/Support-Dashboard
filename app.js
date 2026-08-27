@@ -8,6 +8,9 @@ const QUARTERLY_GID = '1582468207';
 const OVERRIDES_GID = '1979946321';
 const OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g/exec';
 const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
+// Web app that writes manager cell-corrections to the NEW sheet's Overrides tab.
+// Deploy apps-script/data-overrides.gs on CS Report Master and paste its /exec URL here.
+const DATA_OVERRIDES_WEBAPP_URL = '';
 
 // Google sign-in gate (restricted to lawmatics.com) + Sheets API read config.
 // NOTE: reuses the Merlin OAuth client — its Authorized JavaScript origins must
@@ -195,8 +198,15 @@ async function loadReportTables() {
     if (!REPORT.teammates.has(mk)) REPORT.teammates.set(mk, []);
     REPORT.teammates.get(mk).push(member);
   });
+  REPORT.keyToSheetCol = {};   // member key -> sheet column name (for override write-back)
+  TEAM_COL_TO_KEY.forEach((key, i) => { const nm = tHeader[i + 2]; if (nm) REPORT.keyToSheetCol[key] = nm; });
   applyOverridesLive(overrideRows, tHeader);
 }
+
+const fullMonthLabel = (monthName) => {
+  const o = REPORT.monthly.get(String(monthName).toLowerCase());
+  return o && o.Month ? o.Month : monthName;
+};
 
 // Apply the Overrides tab live at read time so manual corrections show on the
 // dashboard immediately (no write-job run needed). Value is absolute, or a delta
@@ -751,12 +761,75 @@ function setupSecretCornerUnlock() {
         cornerClickState = { corners: new Set(), firstClickAt: 0 };
         overridesUnlocked = true;
         renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
+        renderMonthlyLeaderboard(currentIncentiveMembers);   // re-render so cells become editable
       }
     });
   });
 }
 
-function createLeaderboardRenderer(tableId) {
+let currentMonthName = null;
+
+async function postDataOverride(month, table, rep, column, value, note) {
+  const res = await fetch(DATA_OVERRIDES_WEBAPP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: OVERRIDES_SECRET, month, table, rep, column, value, note }),
+  });
+  return res.json().catch(() => ({ ok: res.ok }));
+}
+
+function closeCellEditor() {
+  const ex = document.getElementById('cell-override-editor');
+  if (ex) ex.remove();
+}
+
+function openCellEditor(member, col, td) {
+  if (!DATA_OVERRIDES_WEBAPP_URL) { alert('Manager edits aren’t wired up yet — deploy the data-overrides web app and set DATA_OVERRIDES_WEBAPP_URL.'); return; }
+  closeCellEditor();
+  const month = fullMonthLabel(currentMonthName);
+  const sheetCol = (REPORT.keyToSheetCol || {})[col.key] || col.label;
+  const pop = document.createElement('div');
+  pop.id = 'cell-override-editor';
+  pop.innerHTML =
+    `<div class="coe-title">${member.name} · ${col.label} <span class="coe-sub">${month}</span></div>` +
+    `<div class="coe-row"><select id="coe-mode"><option value="adjust">Adjust by</option><option value="set">Set to</option></select>` +
+    `<input id="coe-value" type="text" placeholder="-1" /></div>` +
+    `<input id="coe-note" type="text" placeholder="Reason (e.g. 1 excused by manager)" />` +
+    `<div class="coe-actions"><button id="coe-save">Save</button><button id="coe-clear" title="Remove override for this cell">Clear</button><button id="coe-cancel">Cancel</button></div>` +
+    `<div class="coe-hint">“Adjust by” keeps new data accruing (recommended). “Set to” pins an exact value.</div>`;
+  Object.assign(pop.style, { position: 'fixed', zIndex: 1000, background: 'var(--card, #fff)', color: 'inherit',
+    border: '1px solid rgba(128,128,128,.35)', borderRadius: '10px', padding: '12px', width: '288px',
+    boxShadow: '0 8px 30px rgba(0,0,0,.25)', font: '13px system-ui, sans-serif' });
+  document.body.appendChild(pop);
+  const r = td.getBoundingClientRect();
+  pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 210)}px`;
+  pop.style.left = `${Math.min(r.left, window.innerWidth - 300)}px`;
+  pop.querySelectorAll('button').forEach((b) => Object.assign(b.style, { marginRight: '6px', padding: '5px 10px', borderRadius: '7px', cursor: 'pointer', border: '1px solid rgba(128,128,128,.35)' }));
+  pop.querySelectorAll('input,select').forEach((el) => Object.assign(el.style, { padding: '5px 7px', borderRadius: '7px', border: '1px solid rgba(128,128,128,.35)', margin: '4px 4px 4px 0', maxWidth: '100%' }));
+  const valEl = pop.querySelector('#coe-value');
+  valEl.focus();
+  const submit = async (rawValue) => {
+    const mode = pop.querySelector('#coe-mode').value;
+    const note = pop.querySelector('#coe-note').value.trim();
+    let value = rawValue;
+    if (value !== '' && mode === 'adjust' && !/^[+-]/.test(value)) value = (parseFloat(value) >= 0 ? '+' : '') + value;
+    pop.querySelector('#coe-save').textContent = 'Saving…';
+    try {
+      const out = await postDataOverride(month, 'Teammates', member.name, sheetCol, value, note);
+      if (out && out.ok === false) throw new Error(out.error || 'save failed');
+      location.reload();
+    } catch (err) {
+      alert('Could not save override: ' + err.message);
+      pop.querySelector('#coe-save').textContent = 'Save';
+    }
+  };
+  pop.querySelector('#coe-save').addEventListener('click', () => submit(valEl.value.trim()));
+  pop.querySelector('#coe-clear').addEventListener('click', () => submit(''));
+  pop.querySelector('#coe-cancel').addEventListener('click', closeCellEditor);
+  valEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(valEl.value.trim()); if (e.key === 'Escape') closeCellEditor(); });
+}
+
+function createLeaderboardRenderer(tableId, editable) {
   const sortState = { key: null, dir: 1 };
 
   return function renderLeaderboard(members) {
@@ -829,6 +902,12 @@ function createLeaderboardRenderer(tableId) {
         } else {
           const v = m[col.key];
           td.textContent = v && v !== '' ? v : '–';
+          if (editable && overridesUnlocked && DATA_OVERRIDES_WEBAPP_URL) {
+            td.style.cursor = 'pointer';
+            td.title = 'Manager: click to adjust';
+            td.style.outline = '1px dashed rgba(128,128,128,.4)';
+            td.addEventListener('click', (e) => { e.stopPropagation(); openCellEditor(m, col, td); });
+          }
         }
         tr.appendChild(td);
       });
@@ -837,10 +916,11 @@ function createLeaderboardRenderer(tableId) {
   };
 }
 
-const renderMonthlyLeaderboard = createLeaderboardRenderer('leaderboard');
-const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderboard');
+const renderMonthlyLeaderboard = createLeaderboardRenderer('leaderboard', true);
+const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderboard', false);
 
 function renderMonth(entry) {
+  currentMonthName = entry.name;
   renderTiles('tiles', extractTiles(entry.parsed));
   renderMonthlyLeaderboard(entry.parsed.members);
   renderIncentives(entry.parsed.members, entry.gid);
