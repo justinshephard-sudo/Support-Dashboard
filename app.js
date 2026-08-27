@@ -1,4 +1,8 @@
+// Old "Support Team Report 2026" sheet — kept ONLY for the Accounts tab (firm lookup,
+// written by the ChurnZero Apps Script) and the incentive Overrides tab/webapp.
 const SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
+// New "CS Report Master" — clean data source for the monthly report (Data - Monthly / Data - Teammates).
+const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
 const ANNUAL_GID = '1501069044';
 const QUARTERLY_GID = '1582468207';
 const OVERRIDES_GID = '1979946321';
@@ -120,8 +124,8 @@ function initAuth(onReady) {
   if (btn) btn.addEventListener('click', () => AUTH.tokenClient.requestAccessToken({ prompt: '' }));
 }
 
-async function sheetsApi(path) {
-  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + SHEET_ID + path, {
+async function sheetsApi(path, sheetId = SHEET_ID) {
+  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + path, {
     headers: { Authorization: 'Bearer ' + AUTH.token },
   });
   if (!res.ok) throw new Error('Sheets API HTTP ' + res.status);
@@ -146,6 +150,130 @@ async function fetchSheet(gid) {
   const title = AUTH.gidTitle[String(gid)];
   if (!title) throw new Error('No tab found for gid ' + gid);
   return fetchSheetByTitle(title);
+}
+
+async function fetchTitleFrom(sheetId, title) {
+  const data = await sheetsApi('/values/' + rangeForTitle(title), sheetId);
+  return (data.values || []).filter((r) => r.some((cell) => String(cell).trim() !== ''));
+}
+
+/* ==========================================================================
+   CS Report Master (clean source): build the {members, groups, hasData} month
+   shape, annual series, and quarterly aggregates the existing renderers expect,
+   from the flat "Data - Monthly" + "Data - Teammates" tabs. The old sheet's
+   Accounts (firm lookup) + Overrides tabs are still read from SHEET_ID above.
+   ========================================================================== */
+const REPORT = { monthly: new Map(), teammates: new Map() };  // monthKey -> rowObj / [members]
+const monthKeyOf = (label) => String(label || '').trim().split(/\s+/)[0].toLowerCase();
+
+// Data-Teammates columns after [Month, Rep], in order -> member keys (20th col "FaceTime..." unused).
+const TEAM_COL_TO_KEY = [
+  'convAssigned', 'convReplied', 'totalCalls', 'missedCalls', 'phoneAnswerRate', 'csat', 'csatPct',
+  'dsat', 'dsatPct', 'reviewedPct', 'cx', 'newTickets', 'avg1stResponse', 'avgRespTime', 'closedConv',
+  'closingTime', 'supportCalls', 'tbDemos', 'totalDemos',
+];
+
+async function loadReportTables() {
+  const [monthlyRows, teammateRows] = await Promise.all([
+    fetchTitleFrom(REPORT_SHEET_ID, 'Data - Monthly'),
+    fetchTitleFrom(REPORT_SHEET_ID, 'Data - Teammates'),
+  ]);
+  const mHeader = (monthlyRows[0] || []).map((h) => String(h || '').trim());
+  monthlyRows.slice(1).forEach((r) => {
+    const o = {};
+    mHeader.forEach((h, i) => { o[h] = (r[i] == null ? '' : String(r[i]).trim()); });
+    if (o.Month) REPORT.monthly.set(monthKeyOf(o.Month), o);
+  });
+  const tHeader = (teammateRows[0] || []).map((h) => String(h || '').trim());
+  const mIdx = tHeader.indexOf('Month'), rIdx = tHeader.indexOf('Rep');
+  teammateRows.slice(1).forEach((r) => {
+    const mk = monthKeyOf(r[mIdx]);
+    const name = (r[rIdx] || '').trim();
+    if (!mk || !name || EXCLUDED_NAMES.has(name.toLowerCase())) return;
+    const member = { name };
+    TEAM_COL_TO_KEY.forEach((key, i) => { member[key] = (r[i + 2] == null ? '' : String(r[i + 2]).trim()); });
+    if (!REPORT.teammates.has(mk)) REPORT.teammates.set(mk, []);
+    REPORT.teammates.get(mk).push(member);
+  });
+}
+
+const mval = (mk, col) => { const o = REPORT.monthly.get(mk); return o ? (o[col] || '') : ''; };
+
+function buildMonthParsed(monthName) {
+  const mk = monthName.toLowerCase();
+  const members = REPORT.teammates.get(mk) || [];
+  const g0 = new Map(), g6 = new Map(), g11 = new Map();
+  const put = (map, label, col) => map.set(label, { current: mval(mk, col), prior: '', pct: '' });
+  put(g0, 'new conversations', 'New Conversations');
+  put(g0, 'ai resolution rate', 'AI Resolution Rate');
+  put(g6, 'answer rate', 'Phone Answer Rate');
+  put(g11, 'total attendees', 'OH Total Attendees');
+  put(g11, 'total article views', 'Total Article Views');
+  put(g11, 'total artcile views', 'Total Article Views');
+  return { members, groups: { 0: g0, 6: g6, 11: g11 }, hasData: members.some(memberHasData) };
+}
+
+function overallCsatPct(mk) {
+  let c = 0, d = 0;
+  (REPORT.teammates.get(mk) || []).forEach((m) => { c += toNumber(m.csat) || 0; d += toNumber(m.dsat) || 0; });
+  return (c + d) ? String(Math.round((c / (c + d)) * 1000) / 10) : '';
+}
+function avgAssignedPerMember(mk) {
+  const members = (REPORT.teammates.get(mk) || []).filter(memberHasData);
+  if (!members.length) return '';
+  const total = members.reduce((s, m) => s + (toNumber(m.convAssigned) || 0), 0);
+  return String(Math.round(total / members.length));
+}
+
+function buildAnnualSeries() {
+  const series = new Map();
+  const set = (label, colOrFn) => series.set(label.toLowerCase(), MONTH_NAMES.map((name) => {
+    const mk = name.toLowerCase();
+    if (!REPORT.monthly.has(mk)) return '';
+    return typeof colOrFn === 'function' ? colOrFn(mk) : mval(mk, colOrFn);
+  }));
+  set('New Conversations', 'New Conversations');
+  set('Conversations Assigned', 'Conversations Assigned');
+  set('Answer Rate', 'Phone Answer Rate');
+  set('AI Resolution Rate', 'AI Resolution Rate');
+  set('Total Help Article Search', 'Total Article Views');
+  set('CSAT%', overallCsatPct);
+  set('Avg Assigned Convers Per Team Member', avgAssignedPerMember);
+  return series;
+}
+
+function secToTime(sec) {
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${h}:${p(mm)}:${p(ss)}`;
+}
+
+function buildQuarters() {
+  const SUM = ['convAssigned', 'convReplied', 'totalCalls', 'missedCalls', 'csat', 'dsat', 'newTickets', 'closedConv', 'supportCalls', 'tbDemos', 'totalDemos'];
+  const AVG_PCT = ['phoneAnswerRate', 'csatPct', 'dsatPct', 'reviewedPct', 'cx'];
+  const AVG_TIME = ['avg1stResponse', 'avgRespTime', 'closingTime'];
+  const out = {};
+  QUARTER_NAMES.forEach((q) => {
+    const monthKeys = QUARTER_MONTH_INDEXES[q]
+      .map((i) => MONTH_NAMES[i].toLowerCase())
+      .filter((mk) => REPORT.teammates.has(mk));
+    const byRep = new Map();
+    monthKeys.forEach((mk) => (REPORT.teammates.get(mk) || []).forEach((m) => {
+      if (!byRep.has(m.name)) byRep.set(m.name, []);
+      byRep.get(m.name).push(m);
+    }));
+    const members = [];
+    byRep.forEach((rows, name) => {
+      const m = { name };
+      SUM.forEach((k) => { const v = rows.map((r) => toNumber(r[k])).filter((x) => x != null); m[k] = v.length ? String(v.reduce((a, b) => a + b, 0)) : ''; });
+      AVG_PCT.forEach((k) => { const v = rows.map((r) => toNumber(r[k])).filter((x) => x != null); m[k] = v.length ? `${Math.round(v.reduce((a, b) => a + b, 0) / v.length)}%` : ''; });
+      AVG_TIME.forEach((k) => { const v = rows.map((r) => parseTimeToSeconds(r[k])).filter((x) => x != null); m[k] = v.length ? secToTime(v.reduce((a, b) => a + b, 0) / v.length) : ''; });
+      members.push(m);
+    });
+    out[q] = { members, hasData: members.some(memberHasData) };
+  });
+  return out;
 }
 
 function readMemberRow(row) {
@@ -892,17 +1020,11 @@ async function main() {
     await loadGidTitleMap();
     initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
 
-    const [monthResults] = await Promise.all([
-      Promise.all(
-        MONTH_TABS.map(async (m) => {
-          const rows = await fetchSheet(m.gid);
-          return { ...m, parsed: parseMonthSheet(rows) };
-        })
-      ),
-      fetchSheet(OVERRIDES_GID)
-        .then((rows) => { overridesMap = parseOverridesSheet(rows); })
-        .catch((err) => console.error('Failed to load incentive overrides', err)),
-    ]);
+    await loadReportTables();
+    await fetchSheet(OVERRIDES_GID)
+      .then((rows) => { overridesMap = parseOverridesSheet(rows); })
+      .catch((err) => console.error('Failed to load incentive overrides', err));
+    const monthResults = MONTH_TABS.map((m) => ({ ...m, parsed: buildMonthParsed(m.name) }));
 
     const monthlyTileValues = monthResults.map((m) => extractTiles(m.parsed));
 
@@ -918,14 +1040,10 @@ async function main() {
       if (selected) renderMonth(selected);
     });
 
-    const [annualRows, quarterlyRows] = await Promise.all([
-      fetchSheet(ANNUAL_GID),
-      fetchSheet(QUARTERLY_GID),
-    ]);
-    const annualSeries = parseAnnualSheet(annualRows);
+    const annualSeries = buildAnnualSeries();
     renderTrends(annualSeries, monthlyTileValues);
 
-    const quarters = parseQuarterlySheet(quarterlyRows);
+    const quarters = buildQuarters();
     const quarterOptions = QUARTER_NAMES
       .filter((q) => quarters[q] && quarters[q].hasData)
       .map((q) => ({ key: q, label: q }));
