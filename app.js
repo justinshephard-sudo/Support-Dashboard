@@ -173,9 +173,10 @@ const TEAM_COL_TO_KEY = [
 ];
 
 async function loadReportTables() {
-  const [monthlyRows, teammateRows] = await Promise.all([
+  const [monthlyRows, teammateRows, overrideRows] = await Promise.all([
     fetchTitleFrom(REPORT_SHEET_ID, 'Data - Monthly'),
     fetchTitleFrom(REPORT_SHEET_ID, 'Data - Teammates'),
+    fetchTitleFrom(REPORT_SHEET_ID, 'Overrides').catch(() => []),
   ]);
   const mHeader = (monthlyRows[0] || []).map((h) => String(h || '').trim());
   monthlyRows.slice(1).forEach((r) => {
@@ -193,6 +194,39 @@ async function loadReportTables() {
     TEAM_COL_TO_KEY.forEach((key, i) => { member[key] = (r[i + 2] == null ? '' : String(r[i + 2]).trim()); });
     if (!REPORT.teammates.has(mk)) REPORT.teammates.set(mk, []);
     REPORT.teammates.get(mk).push(member);
+  });
+  applyOverridesLive(overrideRows, tHeader);
+}
+
+// Apply the Overrides tab live at read time so manual corrections show on the
+// dashboard immediately (no write-job run needed). Value is absolute, or a delta
+// if it starts with + / - (adjusts the raw report value; new data still accrues).
+function adjustValue(cur, value) {
+  const v = String(value).trim();
+  if (/^[+-]\d/.test(v)) {
+    const base = parseFloat(String(cur).replace(/[%,]/g, '')) || 0;
+    const n = base + parseFloat(v);
+    return String(n) + (String(cur).trim().endsWith('%') ? '%' : '');
+  }
+  return v;
+}
+function applyOverridesLive(overrideRows, tHeader) {
+  if (!overrideRows || overrideRows.length < 2) return;
+  const nameToKey = {};
+  TEAM_COL_TO_KEY.forEach((key, i) => { const nm = tHeader[i + 2]; if (nm) nameToKey[nm] = key; });
+  overrideRows.slice(1).forEach((row) => {
+    const [oMonth, table, rep, column, value] = row.concat(['', '', '', '', '', '']);
+    if (!column || value === '' || value == null) return;
+    const mk = monthKeyOf(oMonth);
+    if (String(table).toLowerCase().startsWith('month')) {
+      const o = REPORT.monthly.get(mk);
+      if (o && column in o) o[column] = adjustValue(o[column], value);
+    } else {
+      const key = nameToKey[String(column).trim()];
+      if (!key) return;
+      const m = (REPORT.teammates.get(mk) || []).find((x) => x.name.trim().toLowerCase() === String(rep).trim().toLowerCase());
+      if (m) m[key] = adjustValue(m[key], value);
+    }
   });
 }
 
