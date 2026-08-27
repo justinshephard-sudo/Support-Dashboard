@@ -356,9 +356,7 @@ function lookup(map, candidates) {
 const TILE_DEFS = [
   { label: 'New Conversations', icon: '💬', slot: 1, get: (p) => lookup(p.groups[0], ['New Conversations']) },
   { label: 'Phone Answer Rate', icon: '📞', slot: 2, get: (p) => lookup(p.groups[6], ['Answer Rate']) },
-  { label: 'Office Hours Attendees', icon: '🎓', slot: 3, get: (p) => lookup(p.groups[11], ['Total Attendees', 'Total Atendees']) },
   { label: 'AI Resolution Rate', icon: '🤖', slot: 5, get: (p) => lookup(p.groups[0], ['AI Resolution Rate', 'AI Confirmed Resolution Rate']) },
-  { label: 'Article Views', icon: '📄', slot: 8, get: (p) => lookup(p.groups[11], ['Total Artcile Views', 'Total Article Views', 'Total Help Article Search']) },
 ];
 
 function extractTiles(parsed) {
@@ -398,11 +396,7 @@ function fmtPct(n) {
 const QUARTER_TILE_DEFS = [
   { label: 'New Conversations', icon: '💬', slot: 1, source: 'annual', series: 'New Conversations', agg: 'sum', fmt: fmtNum },
   { label: 'Phone Answer Rate', icon: '📞', slot: 2, source: 'annual', series: 'Answer Rate', agg: 'avg', fmt: fmtPct },
-  // "Total Atendees" in the Annual tab has a pre-existing formatting bug in most months
-  // (values render as bogus percentages); each month tab's own cell is clean, so sum those instead.
-  { label: 'Office Hours Attendees', icon: '🎓', slot: 3, source: 'monthlyTile', series: 'Office Hours Attendees', agg: 'sum', fmt: fmtNum },
   { label: 'AI Resolution Rate', icon: '🤖', slot: 5, source: 'annual', series: 'AI Resolution Rate', agg: 'avg', fmt: fmtPct },
-  { label: 'Article Views', icon: '📄', slot: 8, source: 'annual', series: 'Total Help Article Search', agg: 'sum', fmt: fmtNum },
 ];
 
 function extractQuarterTiles(annualSeries, monthlyTileValues, monthIndexes) {
@@ -919,15 +913,9 @@ function renderTrends(series, monthlyTileValues) {
   const csatPct = seriesFor('CSAT%');
   const aiResolution = seriesFor('AI Resolution Rate');
   const avgPerTeammate = seriesFor('Avg Assigned Convers Per Team Member');
-  // Sourced from each month's own tab (not the Annual tab's "Total Atendees" row,
-  // which has a pre-existing formatting bug for most months — see quarterly tiles).
-  const officeAttendees = monthlyTileValues.map((tiles) => {
-    const tile = tiles.find((t) => t.label === 'Office Hours Attendees');
-    return tile ? toNumber(tile.value) : null;
-  });
 
-  const trimmed = trimTrailingEmpty(MONTH_NAMES, [newConv, assigned, answerRate, csatPct, aiResolution, avgPerTeammate, officeAttendees]);
-  const [tNewConv, tAssigned, tAnswerRate, tCsatPct, tAiResolution, tAvgPerTeammate, tOfficeAttendees] = trimmed.arrays;
+  const trimmed = trimTrailingEmpty(MONTH_NAMES, [newConv, assigned, answerRate, csatPct, aiResolution, avgPerTeammate]);
+  const [tNewConv, tAssigned, tAnswerRate, tCsatPct, tAiResolution, tAvgPerTeammate] = trimmed.arrays;
 
   drawLineChart('chart-conversations', trimmed.labels, [
     { label: 'New Conversations', data: tNewConv, borderColor: cssVar('--slot-1') },
@@ -944,9 +932,6 @@ function renderTrends(series, monthlyTileValues) {
   ], { max: 100 });
   drawLineChart('chart-avg-per-teammate', trimmed.labels, [
     { label: 'Avg Conversations / Teammate', data: tAvgPerTeammate, borderColor: cssVar('--slot-8') },
-  ]);
-  drawLineChart('chart-office-attendees', trimmed.labels, [
-    { label: 'Office Hours Attendees', data: tOfficeAttendees, borderColor: cssVar('--slot-4') },
   ]);
 }
 
