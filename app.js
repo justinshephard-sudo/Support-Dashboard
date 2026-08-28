@@ -10,7 +10,7 @@ const OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADp
 const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 // Web app that writes manager cell-corrections to the NEW sheet's Overrides tab.
 // Deploy apps-script/data-overrides.gs on CS Report Master and paste its /exec URL here.
-const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/a/macros/lawmatics.com/s/AKfycbxlK87Gb9NFO3U4Wxb2baIVhciN6vPDEMU76qVh1ByyHmVhxsyc6BYXJQwHYu1Jt1qi/exec';
+const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxcel6P0QYZm8m3FKYDFtOOBLpRL6_KvrmIcS5ShrAbuTUPFXSrLtQ3SLDhrDeg6-pSww/exec';
 // Only these signed-in users see the Manager-mode toggle. Add manager emails here (lowercase).
 const MANAGER_EMAILS = [
   'justin.shephard@lawmatics.com',
