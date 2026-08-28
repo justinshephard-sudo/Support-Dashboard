@@ -748,7 +748,32 @@ function renderOverrideControl(card, def, members, monthKey, override) {
 const CORNER_UNLOCK_WINDOW_MS = 4000;
 let cornerClickState = { corners: new Set(), firstClickAt: 0 };
 
+function unlockManagerMode() {
+  if (overridesUnlocked) return;
+  overridesUnlocked = true;
+  try { renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey); } catch (e) {}
+  try { renderMonthlyLeaderboard(currentIncentiveMembers); } catch (e) {}
+  showManagerBadge();
+}
+
+function showManagerBadge() {
+  if (document.getElementById('manager-mode-badge')) return;
+  const b = document.createElement('div');
+  b.id = 'manager-mode-badge';
+  b.textContent = '🔓 Manager mode — click a leaderboard value to adjust';
+  Object.assign(b.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 1001,
+    background: '#1f7a4d', color: '#fff', padding: '8px 14px', borderRadius: '20px',
+    font: '13px system-ui, sans-serif', boxShadow: '0 4px 16px rgba(0,0,0,.3)' });
+  document.body.appendChild(b);
+}
+
 function setupSecretCornerUnlock() {
+  // Easy, documentable ways in: URL hash (#manager) or keyboard (Shift+Alt+M).
+  if (/manager|unlock/i.test(location.hash)) setTimeout(unlockManagerMode, 0);
+  document.addEventListener('keydown', (e) => {
+    if (e.shiftKey && e.altKey && (e.key === 'M' || e.key === 'm' || e.code === 'KeyM')) unlockManagerMode();
+  });
+  // Original hidden gesture: click all four corners of an incentive card within 4s.
   document.querySelectorAll('.incentive-secret-corner').forEach((el) => {
     el.addEventListener('click', () => {
       if (overridesUnlocked) return;
@@ -759,9 +784,7 @@ function setupSecretCornerUnlock() {
       cornerClickState.corners.add(el.dataset.corner);
       if (cornerClickState.corners.size === 4) {
         cornerClickState = { corners: new Set(), firstClickAt: 0 };
-        overridesUnlocked = true;
-        renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
-        renderMonthlyLeaderboard(currentIncentiveMembers);   // re-render so cells become editable
+        unlockManagerMode();
       }
     });
   });
