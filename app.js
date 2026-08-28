@@ -14,6 +14,8 @@ const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/a/macros/lawmatics.
 // Only these signed-in users see the Manager-mode toggle. Add manager emails here (lowercase).
 const MANAGER_EMAILS = [
   'justin.shephard@lawmatics.com',
+  'erika@lawmatics.com',
+  'johnny@lawmatics.com',
 ];
 
 // Google sign-in gate (restricted to lawmatics.com) + Sheets API read config.
