@@ -276,11 +276,12 @@ function buildMonthParsed(monthName) {
   const put = (map, label, col) => map.set(label, { current: mval(mk, col), prior: '', pct: '' });
   put(g0, 'new conversations', 'New Conversations');
   put(g0, 'ai resolution rate', 'AI Resolution Rate');
+  put(g0, 'avg response time', 'Avg Response Time');
   put(g6, 'answer rate', 'Phone Answer Rate');
   put(g11, 'total attendees', 'OH Total Attendees');
   put(g11, 'total article views', 'Total Article Views');
   put(g11, 'total artcile views', 'Total Article Views');
-  return { members, groups: { 0: g0, 6: g6, 11: g11 }, hasData: members.some(memberHasData) };
+  return { mk, members, groups: { 0: g0, 6: g6, 11: g11 }, hasData: members.some(memberHasData) };
 }
 
 function overallCsatPct(mk) {
@@ -424,18 +425,28 @@ function lookup(map, candidates) {
 }
 
 const TILE_DEFS = [
-  { label: 'New Conversations', icon: '💬', slot: 1, get: (p) => lookup(p.groups[0], ['New Conversations']) },
-  { label: 'Phone Answer Rate', icon: '📞', slot: 2, get: (p) => lookup(p.groups[6], ['Answer Rate']) },
-  { label: 'AI Resolution Rate', icon: '🤖', slot: 5, get: (p) => lookup(p.groups[0], ['AI Resolution Rate', 'AI Confirmed Resolution Rate']) },
+  { label: 'New Conversations', icon: '💬', slot: 1, kind: 'num', goodDir: 'up', get: (p) => lookup(p.groups[0], ['New Conversations']) },
+  { label: 'Phone Answer Rate', icon: '📞', slot: 2, kind: 'pct', goodDir: 'up', showDelta: true, get: (p) => lookup(p.groups[6], ['Answer Rate']) },
+  { label: 'Team CSAT', icon: '⭐', slot: 3, kind: 'pct', goodDir: 'up', showDelta: true, get: (p) => teamCsatPct(p) },
+  { label: 'Avg Response Time', icon: '⏱️', slot: 4, kind: 'duration', goodDir: 'down', showDelta: true, get: (p) => lookup(p.groups[0], ['Avg Response Time']) },
+  { label: 'AI Resolution Rate', icon: '🤖', slot: 5, kind: 'num', goodDir: 'up', showDelta: true, get: (p) => lookup(p.groups[0], ['AI Resolution Rate', 'AI Confirmed Resolution Rate']) },
 ];
 
-function extractTiles(parsed) {
-  return TILE_DEFS.map((def) => ({
-    label: def.label,
-    icon: def.icon,
-    slot: def.slot,
-    value: def.get(parsed),
-  }));
+function extractTiles(parsed, prevParsed) {
+  return TILE_DEFS.map((def) => {
+    const value = def.get(parsed);
+    let delta = null; // { pct, good }
+    if (def.showDelta && prevParsed) {
+      const cur = tileNum(def.kind, value);
+      const prev = tileNum(def.kind, def.get(prevParsed));
+      if (cur != null && prev != null && prev !== 0) {
+        const pct = ((cur - prev) / Math.abs(prev)) * 100;
+        const good = def.goodDir === 'down' ? pct < 0 : pct > 0;
+        delta = { pct, good };
+      }
+    }
+    return { label: def.label, icon: def.icon, slot: def.slot, value, delta };
+  });
 }
 
 function parseAnnualSheet(rows) {
@@ -457,6 +468,22 @@ function toNumber(str) {
 
 function fmtNum(n) {
   return n == null ? null : Math.round(n).toLocaleString();
+}
+
+// ACTUAL team CSAT = Σ positive ratings / Σ total ratings (weighted by volume),
+// NOT the mean of each rep's percentage.
+function teamCsatPct(parsed) {
+  let pos = 0, tot = 0, any = false;
+  (parsed.members || []).forEach((m) => {
+    const c = toNumber(m.csat);
+    if (c != null) { any = true; pos += c; tot += c + (toNumber(m.dsat) || 0); }
+  });
+  return any && tot > 0 ? fmtPct((pos / tot) * 100) : null;
+}
+
+// Numeric value of a tile (for % change); durations use seconds.
+function tileNum(kind, value) {
+  return kind === 'duration' ? parseTimeToSeconds(value) : toNumber(value);
 }
 
 function fmtPct(n) {
@@ -529,11 +556,19 @@ function showError(message) {
 function renderTiles(containerId, tiles) {
   const el = document.getElementById(containerId);
   el.innerHTML = '';
-  tiles.forEach(({ label, icon, slot, value }) => {
+  tiles.forEach(({ label, icon, slot, value, delta }) => {
     const div = document.createElement('div');
     div.className = 'tile';
     div.style.setProperty('--tile-accent', `var(--slot-${slot})`);
-    div.innerHTML = `<span class="icon">${icon}</span><div class="label">${label}</div><div class="value">${value != null ? value : '–'}</div>`;
+    let deltaHtml = '';
+    if (delta) {
+      const arrow = delta.pct > 0 ? '▲' : (delta.pct < 0 ? '▼' : '');
+      const color = delta.good ? '#1f9d57' : '#d64545';
+      deltaHtml = `<div class="tile-delta" style="color:${color};font-size:.8em;font-weight:600;margin-top:2px;">`
+        + `${arrow} ${Math.abs(delta.pct).toFixed(1)}% <span style="opacity:.6;font-weight:400;">vs last mo</span></div>`;
+    }
+    div.innerHTML = `<span class="icon">${icon}</span><div class="label">${label}</div>`
+      + `<div class="value">${value != null ? value : '–'}</div>${deltaHtml}`;
     el.appendChild(div);
   });
 }
@@ -829,6 +864,7 @@ function setupManagerToggle() {
 }
 
 let currentMonthName = null;
+let PARSED_BY_MONTH = {};   // month name (lowercase) -> parsed, for month-over-month deltas
 
 async function postDataOverride(month, table, rep, column, value, note) {
   // Fire-and-forget, matching postOverride: Apps Script responses are cross-origin
@@ -993,7 +1029,10 @@ const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderbo
 
 function renderMonth(entry) {
   currentMonthName = entry.name;
-  renderTiles('tiles', extractTiles(entry.parsed));
+  const idx = MONTH_NAMES.indexOf(entry.name);
+  const prevRaw = idx > 0 ? PARSED_BY_MONTH[MONTH_NAMES[idx - 1].toLowerCase()] : null;
+  const prevParsed = prevRaw && prevRaw.hasData ? prevRaw : null;
+  renderTiles('tiles', extractTiles(entry.parsed, prevParsed));
   renderMonthlyLeaderboard(entry.parsed.members);
   renderIncentives(entry.parsed.members, entry.gid);
   updateMascot(entry.parsed.members, entry.name);
@@ -1194,6 +1233,8 @@ async function main() {
       .then((rows) => { overridesMap = parseOverridesSheet(rows); })
       .catch((err) => console.error('Failed to load incentive overrides', err));
     const monthResults = MONTH_TABS.map((m) => ({ ...m, parsed: buildMonthParsed(m.name) }));
+    PARSED_BY_MONTH = {};
+    monthResults.forEach((m) => { PARSED_BY_MONTH[m.name.toLowerCase()] = m.parsed; });
 
     const monthlyTileValues = monthResults.map((m) => extractTiles(m.parsed));
 
