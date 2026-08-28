@@ -425,7 +425,7 @@ function lookup(map, candidates) {
 }
 
 const TILE_DEFS = [
-  { label: 'New Conversations', icon: '💬', slot: 1, kind: 'num', goodDir: 'up', get: (p) => lookup(p.groups[0], ['New Conversations']) },
+  { label: 'New Conversations', icon: '💬', slot: 1, kind: 'num', goodDir: 'up', showDelta: true, get: (p) => lookup(p.groups[0], ['New Conversations']) },
   { label: 'Phone Answer Rate', icon: '📞', slot: 2, kind: 'pct', goodDir: 'up', showDelta: true, get: (p) => lookup(p.groups[6], ['Answer Rate']) },
   { label: 'Team CSAT', icon: '⭐', slot: 3, kind: 'pct', goodDir: 'up', showDelta: true, get: (p) => teamCsatPct(p) },
   { label: 'Avg Response Time', icon: '⏱️', slot: 4, kind: 'duration', goodDir: 'down', showDelta: true, get: (p) => lookup(p.groups[0], ['Avg Response Time']) },
