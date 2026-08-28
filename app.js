@@ -843,7 +843,10 @@ async function postDataOverride(month, table, rep, column, value, note) {
 
 function closeCellEditor() {
   const ex = document.getElementById('cell-override-editor');
-  if (ex) ex.remove();
+  if (ex) {
+    if (ex._outside) document.removeEventListener('mousedown', ex._outside);
+    ex.remove();
+  }
 }
 
 function openCellEditor(member, col, td) {
@@ -892,6 +895,10 @@ function openCellEditor(member, col, td) {
   pop.querySelector('#coe-clear').addEventListener('click', () => submit(''));
   pop.querySelector('#coe-cancel').addEventListener('click', closeCellEditor);
   valEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(valEl.value.trim()); if (e.key === 'Escape') closeCellEditor(); });
+  // Close when clicking anywhere outside the editor (deferred so this opening click doesn't trigger it).
+  const outside = (e) => { if (!pop.contains(e.target)) closeCellEditor(); };
+  pop._outside = outside;
+  setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
 function createLeaderboardRenderer(tableId, editable) {
