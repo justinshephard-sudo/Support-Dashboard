@@ -11,6 +11,10 @@ const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 // Web app that writes manager cell-corrections to the NEW sheet's Overrides tab.
 // Deploy apps-script/data-overrides.gs on CS Report Master and paste its /exec URL here.
 const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/a/macros/lawmatics.com/s/AKfycbxlK87Gb9NFO3U4Wxb2baIVhciN6vPDEMU76qVh1ByyHmVhxsyc6BYXJQwHYu1Jt1qi/exec';
+// Only these signed-in users see the Manager-mode toggle. Add manager emails here (lowercase).
+const MANAGER_EMAILS = [
+  'justin.shephard@lawmatics.com',
+];
 
 // Google sign-in gate (restricted to lawmatics.com) + Sheets API read config.
 // NOTE: reuses the Merlin OAuth client — its Authorized JavaScript origins must
@@ -224,19 +228,40 @@ function applyOverridesLive(overrideRows, tHeader) {
   if (!overrideRows || overrideRows.length < 2) return;
   const nameToKey = {};
   TEAM_COL_TO_KEY.forEach((key, i) => { const nm = tHeader[i + 2]; if (nm) nameToKey[nm] = key; });
+  const touchedMonthly = new Set();          // mk whose Missed/Inbound changed
+  const touchedMembers = new Set();          // "mk::repname" whose Missed/Total changed
   overrideRows.slice(1).forEach((row) => {
     const [oMonth, table, rep, column, value] = row.concat(['', '', '', '', '', '']);
     if (!column || value === '' || value == null) return;
     const mk = monthKeyOf(oMonth);
     if (String(table).toLowerCase().startsWith('month')) {
       const o = REPORT.monthly.get(mk);
-      if (o && column in o) o[column] = adjustValue(o[column], value);
+      if (o && column in o) {
+        o[column] = adjustValue(o[column], value);
+        if (/^(missed calls|inbound calls)$/i.test(column.trim())) touchedMonthly.add(mk);
+      }
     } else {
       const key = nameToKey[String(column).trim()];
       if (!key) return;
       const m = (REPORT.teammates.get(mk) || []).find((x) => x.name.trim().toLowerCase() === String(rep).trim().toLowerCase());
-      if (m) m[key] = adjustValue(m[key], value);
+      if (m) {
+        m[key] = adjustValue(m[key], value);
+        if (key === 'missedCalls' || key === 'totalCalls') touchedMembers.add(`${mk}::${m.name.toLowerCase()}`);
+      }
     }
+  });
+  // Missed calls drive the answer-rate %, so recompute it wherever those changed.
+  const pct = (whole, missed) => (whole && whole > 0 && missed != null) ? `${Math.round(((whole - missed) / whole) * 100)}%` : null;
+  touchedMonthly.forEach((mk) => {
+    const o = REPORT.monthly.get(mk); if (!o) return;
+    const r = pct(toNumber(o['Inbound Calls']), toNumber(o['Missed Calls']));   // monthly uses Inbound
+    if (r != null) o['Phone Answer Rate'] = r;
+  });
+  touchedMembers.forEach((tag) => {
+    const [mk, repl] = tag.split('::');
+    const m = (REPORT.teammates.get(mk) || []).find((x) => x.name.toLowerCase() === repl); if (!m) return;
+    const r = pct(toNumber(m.totalCalls), toNumber(m.missedCalls));             // per-rep uses Total calls
+    if (r != null) m.phoneAnswerRate = r;
   });
 }
 
@@ -748,12 +773,27 @@ function renderOverrideControl(card, def, members, monthKey, override) {
 const CORNER_UNLOCK_WINDOW_MS = 4000;
 let cornerClickState = { corners: new Set(), firstClickAt: 0 };
 
-function unlockManagerMode() {
-  if (overridesUnlocked) return;
-  overridesUnlocked = true;
+function isManager() {
+  return !!AUTH.email && MANAGER_EMAILS.map((e) => e.toLowerCase()).includes(AUTH.email.toLowerCase());
+}
+
+function setManagerMode(on) {
+  overridesUnlocked = on;
+  try { sessionStorage.setItem('cs-manager-mode', on ? 'on' : 'off'); } catch (e) {}
+  updateManagerToggleUI();
   try { renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey); } catch (e) {}
   try { renderMonthlyLeaderboard(currentIncentiveMembers); } catch (e) {}
-  showManagerBadge();
+  const badge = document.getElementById('manager-mode-badge');
+  if (on) showManagerBadge(); else if (badge) badge.remove();
+}
+
+function updateManagerToggleUI() {
+  const btn = document.getElementById('manager-toggle');
+  if (!btn) return;
+  btn.textContent = overridesUnlocked ? '🔓 Manager mode: ON' : '🔒 Manager mode';
+  btn.setAttribute('aria-pressed', overridesUnlocked ? 'true' : 'false');
+  btn.style.background = overridesUnlocked ? '#1f7a4d' : 'var(--card, #fff)';
+  btn.style.color = overridesUnlocked ? '#fff' : 'inherit';
 }
 
 function showManagerBadge() {
@@ -767,27 +807,23 @@ function showManagerBadge() {
   document.body.appendChild(b);
 }
 
-function setupSecretCornerUnlock() {
-  // Easy, documentable ways in: URL hash (#manager) or keyboard (Shift+Alt+M).
-  if (/manager|unlock/i.test(location.hash)) setTimeout(unlockManagerMode, 0);
-  document.addEventListener('keydown', (e) => {
-    if (e.shiftKey && e.altKey && (e.key === 'M' || e.key === 'm' || e.code === 'KeyM')) unlockManagerMode();
-  });
-  // Original hidden gesture: click all four corners of an incentive card within 4s.
-  document.querySelectorAll('.incentive-secret-corner').forEach((el) => {
-    el.addEventListener('click', () => {
-      if (overridesUnlocked) return;
-      const now = Date.now();
-      if (cornerClickState.corners.size === 0 || now - cornerClickState.firstClickAt > CORNER_UNLOCK_WINDOW_MS) {
-        cornerClickState = { corners: new Set(), firstClickAt: now };
-      }
-      cornerClickState.corners.add(el.dataset.corner);
-      if (cornerClickState.corners.size === 4) {
-        cornerClickState = { corners: new Set(), firstClickAt: 0 };
-        unlockManagerMode();
-      }
-    });
-  });
+// Shows a Manager-mode toggle ONLY for allowlisted signed-in users (MANAGER_EMAILS).
+// Replaces the old hidden corner/keyboard gesture. State persists per tab so a
+// save-triggered reload stays in manager mode.
+function setupManagerToggle() {
+  if (!isManager()) return;
+  if (!document.getElementById('manager-toggle')) {
+    const btn = document.createElement('button');
+    btn.id = 'manager-toggle';
+    Object.assign(btn.style, { position: 'fixed', top: '12px', right: '12px', zIndex: 1002,
+      padding: '8px 14px', borderRadius: '20px', border: '1px solid rgba(128,128,128,.4)',
+      cursor: 'pointer', font: '13px system-ui, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,.15)' });
+    btn.addEventListener('click', () => setManagerMode(!overridesUnlocked));
+    document.body.appendChild(btn);
+  }
+  let restore = false;
+  try { restore = sessionStorage.getItem('cs-manager-mode') === 'on'; } catch (e) {}
+  setManagerMode(restore);
 }
 
 let currentMonthName = null;
@@ -1141,7 +1177,6 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
 
 async function main() {
   try {
-    setupSecretCornerUnlock();
     await loadGidTitleMap();
     initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
 
@@ -1183,6 +1218,7 @@ async function main() {
     });
 
     document.getElementById('last-updated').textContent = `Data loaded ${new Date().toLocaleString()}`;
+    setupManagerToggle();   // shows the toggle for allowlisted managers; restores per-tab state
     launchConfetti();
   } catch (err) {
     console.error(err);
