@@ -10,7 +10,7 @@ const OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADp
 const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 // Web app that writes manager cell-corrections to the NEW sheet's Overrides tab.
 // Deploy apps-script/data-overrides.gs on CS Report Master and paste its /exec URL here.
-const DATA_OVERRIDES_WEBAPP_URL = '';
+const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/a/macros/lawmatics.com/s/AKfycbxlK87Gb9NFO3U4Wxb2baIVhciN6vPDEMU76qVh1ByyHmVhxsyc6BYXJQwHYu1Jt1qi/exec';
 
 // Google sign-in gate (restricted to lawmatics.com) + Sheets API read config.
 // NOTE: reuses the Merlin OAuth client — its Authorized JavaScript origins must
@@ -770,12 +770,14 @@ function setupSecretCornerUnlock() {
 let currentMonthName = null;
 
 async function postDataOverride(month, table, rep, column, value, note) {
-  const res = await fetch(DATA_OVERRIDES_WEBAPP_URL, {
+  // Fire-and-forget, matching postOverride: Apps Script responses are cross-origin
+  // opaque, so we don't read the body — a resolved fetch means the request was sent.
+  await fetch(DATA_OVERRIDES_WEBAPP_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ secret: OVERRIDES_SECRET, month, table, rep, column, value, note }),
   });
-  return res.json().catch(() => ({ ok: res.ok }));
+  return { ok: true };
 }
 
 function closeCellEditor() {
@@ -817,6 +819,8 @@ function openCellEditor(member, col, td) {
     try {
       const out = await postDataOverride(month, 'Teammates', member.name, sheetCol, value, note);
       if (out && out.ok === false) throw new Error(out.error || 'save failed');
+      pop.querySelector('#coe-save').textContent = 'Saved ✓';
+      await new Promise((r) => setTimeout(r, 1400));   // let the write commit before re-reading
       location.reload();
     } catch (err) {
       alert('Could not save override: ' + err.message);
