@@ -695,9 +695,12 @@ const INCENTIVE_DEFS = [
   {
     key: 'facetime',
     // No reliable "FaceTime calls" column exists in the sheet, so this
-    // incentive has no automatic winner at all — it's set entirely via
-    // the secret override panel, including a free-text stat note.
+    // incentive is set entirely in manager mode — winners, a free-text stat
+    // note, and (uniquely) an editable title + dollar amount.
     manualOnly: true,
+    editableMeta: true,
+    defaultTitle: 'Most FaceTime Calls',
+    defaultAmount: '$35',
     statPlaceholder: 'e.g. 12 FaceTime calls',
     compute: () => null,
   },
@@ -733,6 +736,15 @@ let currentIncentiveMonthKey = null;
 let overridesMap = new Map();
 const overridePostTimers = new Map();
 
+// Debounce writes per (month:incentive[:field]) so rapid edits send one request,
+// not a race that can duplicate rows in the sheet backend.
+function scheduleOverridePost(timerKey, fn) {
+  clearTimeout(overridePostTimers.get(timerKey));
+  overridePostTimers.set(timerKey, setTimeout(async () => {
+    try { await fn(); } catch (err) { console.error('Failed to save override', err); }
+  }, 800));
+}
+
 function renderIncentives(members, monthKey) {
   currentIncentiveMembers = members;
   currentIncentiveMonthKey = monthKey;
@@ -745,22 +757,32 @@ function renderIncentives(members, monthKey) {
     const tiedEl = card.querySelector('.incentive-tied');
 
     const override = overridesMap.get(`${monthKey}:${def.key}`);
-    const overrideMember = override ? members.find((m) => m.name === override.winnerName) : null;
+    const winners = override && override.winnerName
+      ? override.winnerName.split(',').map((s) => s.trim()).filter(Boolean) : [];
+
+    // Editable title + $ amount (FaceTime): apply overrides, else fall back to defaults.
+    if (def.editableMeta) {
+      const titleOv = (overridesMap.get(`${monthKey}:${def.key}:title`) || {}).winnerName;
+      const amountOv = (overridesMap.get(`${monthKey}:${def.key}:amount`) || {}).winnerName;
+      const titleElm = card.querySelector('.incentive-title');
+      const amountElm = card.querySelector('.incentive-amount');
+      if (titleElm) titleElm.textContent = titleOv || def.defaultTitle || titleElm.textContent;
+      if (amountElm) amountElm.textContent = amountOv || def.defaultAmount || amountElm.textContent;
+    }
 
     let displayName = null;
     let displayStat = null;
     let tiedWith = [];
     let tiedStatLabel = '';
 
-    if (def.manualOnly) {
-      if (override) {
-        displayName = override.winnerName;
-        displayStat = override.statText || '–';
-      }
-    } else if (overrideMember) {
-      displayName = overrideMember.name;
-      displayStat = def.displayStat(overrideMember);
-    } else {
+    if (winners.length) {
+      displayName = winners.join(', ');
+      if (override.statText) displayStat = override.statText;
+      else if (!def.manualOnly && winners.length === 1) {
+        const m = members.find((x) => x.name === winners[0]);
+        displayStat = m ? def.displayStat(m) : '–';
+      } else displayStat = '–';
+    } else if (!def.manualOnly) {
       const result = def.compute(members);
       if (result) {
         displayName = result.name;
@@ -796,63 +818,80 @@ function renderOverrideControl(card, def, members, monthKey, override) {
   }
   wrap.innerHTML = '';
 
-  const select = document.createElement('select');
-  select.className = 'incentive-override-select';
-  const autoOpt = document.createElement('option');
-  autoOpt.value = '';
-  autoOpt.textContent = def.manualOnly ? '— None —' : '— Auto —';
-  select.appendChild(autoOpt);
-  members.forEach((m) => {
-    const opt = document.createElement('option');
-    opt.value = m.name;
-    opt.textContent = m.name;
-    select.appendChild(opt);
-  });
-  select.value = override ? override.winnerName : '';
-  wrap.appendChild(select);
-
-  let statInput = null;
-  if (def.manualOnly) {
-    statInput = document.createElement('input');
-    statInput.type = 'text';
-    statInput.className = 'incentive-override-stat-input';
-    statInput.placeholder = def.statPlaceholder || 'Optional note';
-    statInput.value = override ? override.statText : '';
-    wrap.appendChild(statInput);
+  // Editable title + $ amount (FaceTime only).
+  let titleInput = null, amountInput = null;
+  if (def.editableMeta) {
+    const titleOv = (overridesMap.get(`${monthKey}:${def.key}:title`) || {}).winnerName;
+    const amountOv = (overridesMap.get(`${monthKey}:${def.key}:amount`) || {}).winnerName;
+    titleInput = document.createElement('input');
+    titleInput.type = 'text'; titleInput.className = 'incentive-override-stat-input';
+    titleInput.placeholder = 'Incentive title';
+    titleInput.value = titleOv || def.defaultTitle || '';
+    amountInput = document.createElement('input');
+    amountInput.type = 'text'; amountInput.className = 'incentive-override-stat-input';
+    amountInput.placeholder = 'Amount (e.g. $50)';
+    amountInput.value = amountOv || def.defaultAmount || '';
+    wrap.appendChild(titleInput);
+    wrap.appendChild(amountInput);
   }
+
+  // Multi-select winners (checkboxes).
+  const selected = new Set(
+    (override && override.winnerName ? override.winnerName.split(',') : []).map((s) => s.trim()).filter(Boolean),
+  );
+  const box = document.createElement('div');
+  box.className = 'incentive-winner-checks';
+  box.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:4px 0;';
+  members.forEach((m) => {
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = m.name; cb.checked = selected.has(m.name);
+    lbl.appendChild(cb); lbl.appendChild(document.createTextNode(m.name));
+    box.appendChild(lbl);
+  });
+  wrap.appendChild(box);
+
+  // Optional stat note (shown under the winners).
+  const statInput = document.createElement('input');
+  statInput.type = 'text'; statInput.className = 'incentive-override-stat-input';
+  statInput.placeholder = def.statPlaceholder || 'Optional note (shown under winners)';
+  statInput.value = override ? (override.statText || '') : '';
+  wrap.appendChild(statInput);
 
   const commit = () => {
-    const chosenName = select.value;
-    const chosenStat = statInput ? statInput.value.trim() : '';
-    if (chosenName) overridesMap.set(`${monthKey}:${def.key}`, { winnerName: chosenName, statText: chosenStat });
-    else overridesMap.delete(`${monthKey}:${def.key}`);
+    const winnersStr = [...box.querySelectorAll('input:checked')].map((cb) => cb.value).join(', ');
+    const stat = statInput.value.trim();
+    const key = `${monthKey}:${def.key}`;
+    if (winnersStr || stat) overridesMap.set(key, { winnerName: winnersStr, statText: stat });
+    else overridesMap.delete(key);
+
+    let tPost = '', aPost = '';
+    if (def.editableMeta) {
+      const titleVal = titleInput.value.trim();
+      const amountVal = amountInput.value.trim();
+      tPost = (titleVal && titleVal !== def.defaultTitle) ? titleVal : '';
+      aPost = (amountVal && amountVal !== def.defaultAmount) ? amountVal : '';
+      const tkey = `${key}:title`, akey = `${key}:amount`;
+      if (tPost) overridesMap.set(tkey, { winnerName: tPost, statText: '' }); else overridesMap.delete(tkey);
+      if (aPost) overridesMap.set(akey, { winnerName: aPost, statText: '' }); else overridesMap.delete(akey);
+    }
+
     renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
 
-    // Debounced so picking a name and then typing a stat note a moment
-    // later sends one write instead of two racing requests (the sheet
-    // backend can end up with duplicate rows if two writes for the same
-    // month+incentive land close together).
-    const timerKey = `${monthKey}:${def.key}`;
-    clearTimeout(overridePostTimers.get(timerKey));
-    overridePostTimers.set(timerKey, setTimeout(async () => {
-      try {
-        await postOverride(monthKey, def.key, chosenName, chosenStat);
-      } catch (err) {
-        console.error('Failed to save override', err);
-      }
-    }, 800));
+    scheduleOverridePost(key, () => postOverride(monthKey, def.key, winnersStr, stat));
+    if (def.editableMeta) {
+      scheduleOverridePost(`${key}:title`, () => postOverride(monthKey, `${def.key}:title`, tPost, ''));
+      scheduleOverridePost(`${key}:amount`, () => postOverride(monthKey, `${def.key}:amount`, aPost, ''));
+    }
   };
 
-  select.onchange = commit;
-  if (statInput) {
-    statInput.addEventListener('blur', commit);
-    statInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      }
-    });
-  }
+  box.addEventListener('change', commit);
+  [statInput, titleInput, amountInput].forEach((inp) => {
+    if (!inp) return;
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+  });
 }
 
 const CORNER_UNLOCK_WINDOW_MS = 4000;
