@@ -1335,24 +1335,41 @@ function ensureCelebrateStyles() {
   document.head.appendChild(st);
 }
 
+// 🔊 LOUD reggae/dancehall air horn — the classic "bip! bip! bwaaaap!" pull-up.
 function celebrateSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'triangle'; o.frequency.value = f;
-      const t = ctx.currentTime + i * 0.11;
+    const master = ctx.createGain(); master.gain.value = 0.95;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.knee.value = 22; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.25;
+    master.connect(comp).connect(ctx.destination);
+
+    // one horn blast: thick detuned saws + square, lowpassed, with vibrato and a pitch wail
+    const blast = (t, dur, f0, f1, wail) => {
+      const g = ctx.createGain();
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2800; lp.Q.value = 0.8;
+      g.connect(lp).connect(master);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.4);
-    });
-    const o2 = ctx.createOscillator(), g2 = ctx.createGain(), t0 = ctx.currentTime + 0.55;
-    o2.type = 'sawtooth';
-    o2.frequency.setValueAtTime(880, t0); o2.frequency.exponentialRampToValueAtTime(1760, t0 + 0.5);
-    g2.gain.setValueAtTime(0.0001, t0); g2.gain.exponentialRampToValueAtTime(0.12, t0 + 0.08); g2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
-    o2.connect(g2).connect(ctx.destination); o2.start(t0); o2.stop(t0 + 0.75);
-    setTimeout(() => ctx.close(), 2200);
+      g.gain.exponentialRampToValueAtTime(0.85, t + 0.015);      // punchy attack
+      g.gain.setValueAtTime(0.85, Math.max(t + 0.02, t + dur - 0.06));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      [['sawtooth', 0], ['sawtooth', 8], ['square', -7]].forEach(([type, det]) => {
+        const o = ctx.createOscillator(); o.type = type; o.detune.value = det;
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.linearRampToValueAtTime(f1, t + (wail ? dur * 0.55 : 0.07));
+        if (wail) o.frequency.linearRampToValueAtTime(f1 * 1.06, t + dur);
+        const lfo = ctx.createOscillator(); lfo.frequency.value = wail ? 6.5 : 5;
+        const lg = ctx.createGain(); lg.gain.value = wail ? 16 : 9;   // vibrato depth
+        lfo.connect(lg).connect(o.frequency); lfo.start(t); lfo.stop(t + dur);
+        o.connect(g); o.start(t); o.stop(t + dur + 0.02);
+      });
+    };
+
+    const n = ctx.currentTime + 0.02;
+    blast(n,        0.17, 440, 510, false);   // bip!
+    blast(n + 0.25, 0.17, 440, 510, false);   // bip!
+    blast(n + 0.52, 1.05, 400, 640, true);    // bwaaaaap! (the pull-up wail)
+    setTimeout(() => ctx.close(), 2400);
   } catch (e) { /* audio blocked — visuals still party */ }
 }
 
