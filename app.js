@@ -301,6 +301,7 @@ function buildMonthParsed(monthName) {
   put(g0, 'new conversations', 'New Conversations');
   put(g0, 'ai resolution rate', 'AI Resolution Rate');
   put(g0, 'avg response time', 'Avg Response Time');
+  put(g0, 'total calls', 'Total Calls');
   put(g6, 'answer rate', 'Phone Answer Rate');
   put(g11, 'total attendees', 'OH Total Attendees');
   put(g11, 'total article views', 'Total Article Views');
@@ -454,6 +455,7 @@ const TILE_DEFS = [
   { label: 'Team CSAT', icon: '⭐', slot: 3, kind: 'pct', goodDir: 'up', showDelta: true, get: (p) => teamCsatPct(p) },
   { label: 'Avg Response Time', icon: '⏱️', slot: 4, kind: 'duration', goodDir: 'down', showDelta: true, get: (p) => lookup(p.groups[0], ['Avg Response Time']) },
   { label: 'AI Resolution Rate', icon: '🤖', slot: 5, kind: 'num', goodDir: 'up', showDelta: true, get: (p) => lookup(p.groups[0], ['AI Resolution Rate', 'AI Confirmed Resolution Rate']) },
+  { label: 'Total Calls', icon: '☎️', slot: 6, kind: 'num', goodDir: 'up', showDelta: true, get: (p) => lookup(p.groups[0], ['Total Calls']) },
 ];
 
 function extractTiles(parsed, prevParsed) {
