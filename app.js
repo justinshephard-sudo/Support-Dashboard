@@ -231,6 +231,15 @@ async function loadReportTables() {
   REPORT.keyToSheetCol = {};   // member key -> sheet column name (for override write-back)
   Object.entries(TEAM_COL_TO_KEY).forEach(([colName, key]) => { REPORT.keyToSheetCol[key] = colName; });
   applyOverridesLive(overrideRows);
+
+  // Incentive meta (FaceTime title/amount): rows where Table === 'Incentive'.
+  incentiveMetaMap = new Map();
+  (overrideRows || []).slice(1).forEach((row) => {
+    const [month, table, rep, column, value] = row.concat(['', '', '', '', '', '']);
+    if (String(table).trim().toLowerCase() !== 'incentive') return;
+    if (!month || !rep || !column || value === '' || value == null) return;
+    incentiveMetaMap.set(`${String(month).trim()}:${String(rep).trim()}:${String(column).trim()}`, String(value).trim());
+  });
 }
 
 const fullMonthLabel = (monthName) => {
@@ -734,6 +743,19 @@ let overridesUnlocked = false;
 let currentIncentiveMembers = [];
 let currentIncentiveMonthKey = null;
 let overridesMap = new Map();
+// FaceTime title/amount live in the NEW sheet's Overrides tab (Table='Incentive'),
+// written via the data-overrides web app — a path we fully control and can verify.
+// Keyed `${monthKey}:${incentiveKey}:${field}` -> value.
+let incentiveMetaMap = new Map();
+
+async function postIncentiveMeta(monthKey, incentiveKey, field, value) {
+  await fetch(DATA_OVERRIDES_WEBAPP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: OVERRIDES_SECRET, month: monthKey, table: 'Incentive', rep: incentiveKey, column: field, value: value || '', note: '' }),
+  });
+  return { ok: true };
+}
 const overridePostTimers = new Map();
 
 // Debounce writes per (month:incentive[:field]) so rapid edits send one request,
@@ -762,8 +784,8 @@ function renderIncentives(members, monthKey) {
 
     // Editable title + $ amount (FaceTime): apply overrides, else fall back to defaults.
     if (def.editableMeta) {
-      const titleOv = (overridesMap.get(`${monthKey}:${def.key}:title`) || {}).winnerName;
-      const amountOv = (overridesMap.get(`${monthKey}:${def.key}:amount`) || {}).winnerName;
+      const titleOv = incentiveMetaMap.get(`${monthKey}:${def.key}:title`);
+      const amountOv = incentiveMetaMap.get(`${monthKey}:${def.key}:amount`);
       const titleElm = card.querySelector('.incentive-title');
       const amountElm = card.querySelector('.incentive-amount');
       if (titleElm) titleElm.textContent = titleOv || def.defaultTitle || titleElm.textContent;
@@ -821,8 +843,8 @@ function renderOverrideControl(card, def, members, monthKey, override) {
   // Editable title + $ amount (FaceTime only).
   let titleInput = null, amountInput = null;
   if (def.editableMeta) {
-    const titleOv = (overridesMap.get(`${monthKey}:${def.key}:title`) || {}).winnerName;
-    const amountOv = (overridesMap.get(`${monthKey}:${def.key}:amount`) || {}).winnerName;
+    const titleOv = incentiveMetaMap.get(`${monthKey}:${def.key}:title`);
+    const amountOv = incentiveMetaMap.get(`${monthKey}:${def.key}:amount`);
     titleInput = document.createElement('input');
     titleInput.type = 'text'; titleInput.className = 'incentive-override-stat-input';
     titleInput.placeholder = 'Incentive title';
@@ -873,16 +895,16 @@ function renderOverrideControl(card, def, members, monthKey, override) {
       tPost = (titleVal && titleVal !== def.defaultTitle) ? titleVal : '';
       aPost = (amountVal && amountVal !== def.defaultAmount) ? amountVal : '';
       const tkey = `${key}:title`, akey = `${key}:amount`;
-      if (tPost) overridesMap.set(tkey, { winnerName: tPost, statText: '' }); else overridesMap.delete(tkey);
-      if (aPost) overridesMap.set(akey, { winnerName: aPost, statText: '' }); else overridesMap.delete(akey);
+      if (tPost) incentiveMetaMap.set(tkey, tPost); else incentiveMetaMap.delete(tkey);
+      if (aPost) incentiveMetaMap.set(akey, aPost); else incentiveMetaMap.delete(akey);
     }
 
     renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
 
     scheduleOverridePost(key, () => postOverride(monthKey, def.key, winnersStr, stat));
     if (def.editableMeta) {
-      scheduleOverridePost(`${key}:title`, () => postOverride(monthKey, `${def.key}:title`, tPost, ''));
-      scheduleOverridePost(`${key}:amount`, () => postOverride(monthKey, `${def.key}:amount`, aPost, ''));
+      scheduleOverridePost(`${key}:title`, () => postIncentiveMeta(monthKey, def.key, 'title', tPost));
+      scheduleOverridePost(`${key}:amount`, () => postIncentiveMeta(monthKey, def.key, 'amount', aPost));
     }
   };
 
