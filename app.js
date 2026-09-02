@@ -1145,15 +1145,69 @@ function drawLineChart(canvasId, labels, datasets, yOpts = {}) {
   updateChartBuddy(canvasId, datasets[0].data);
 }
 
+// Index of the current, still-in-progress month (0=Jan). -1 if the data is from
+// a past year (then every month counts as complete). Used to keep incomplete
+// months/quarters out of the trend charts.
+function incompleteMonthIndex() {
+  const now = new Date();
+  let dataYear = null;
+  for (const o of REPORT.monthly.values()) {
+    const mm = String(o.Month || '').match(/(20\d\d)/);
+    if (mm) { dataYear = +mm[1]; break; }
+  }
+  if (dataYear != null && dataYear !== now.getFullYear()) return -1;
+  return now.getMonth();
+}
+
+function renderQoQTrends(series, quarters) {
+  const inc = incompleteMonthIndex();
+  const completeQ = QUARTER_NAMES.filter((q) => {
+    const idxs = QUARTER_MONTH_INDEXES[q];
+    const last = idxs[idxs.length - 1];
+    return quarters[q] && quarters[q].hasData && (inc < 0 || last < inc);
+  });
+  const at = (label, i) => toNumber((series.get(label.toLowerCase()) || [])[i]);
+  const sumMetric = (label, q) => {
+    let s = 0, any = false;
+    QUARTER_MONTH_INDEXES[q].forEach((i) => { const v = at(label, i); if (v != null) { s += v; any = true; } });
+    return any ? s : null;
+  };
+  const avgMetric = (label, q) => {
+    const vs = [];
+    QUARTER_MONTH_INDEXES[q].forEach((i) => { const v = at(label, i); if (v != null) vs.push(v); });
+    return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
+  };
+  // Weighted team CSAT for the quarter (Σ positives / Σ ratings), not a mean of monthly %s.
+  const csatQ = (q) => {
+    let pos = 0, tot = 0;
+    (quarters[q]?.members || []).forEach((m) => { const c = toNumber(m.csat), d = toNumber(m.dsat); if (c != null) { pos += c; tot += c + (d || 0); } });
+    return tot > 0 ? (pos / tot) * 100 : null;
+  };
+  drawLineChart('chart-qoq-conversations', completeQ, [
+    { label: 'New Conversations', data: completeQ.map((q) => sumMetric('New Conversations', q)), borderColor: cssVar('--slot-1') },
+  ]);
+  drawLineChart('chart-qoq-answer-rate', completeQ, [
+    { label: 'Answer Rate %', data: completeQ.map((q) => avgMetric('Answer Rate', q)), borderColor: cssVar('--slot-2') },
+  ], { max: 100 });
+  drawLineChart('chart-qoq-csat', completeQ, [
+    { label: 'Team CSAT %', data: completeQ.map(csatQ), borderColor: cssVar('--slot-3') },
+  ], { max: 100 });
+  drawLineChart('chart-qoq-ai-resolution', completeQ, [
+    { label: 'AI Resolution %', data: completeQ.map((q) => avgMetric('AI Resolution Rate', q)), borderColor: cssVar('--slot-5') },
+  ], { max: 100 });
+}
+
 function renderTrends(series, monthlyTileValues) {
   const seriesFor = (label) => MONTH_NAMES.map((_, i) => toNumber((series.get(label.toLowerCase()) || [])[i]));
+  const inc = incompleteMonthIndex();
+  const mask = (arr) => (inc < 0 ? arr : arr.map((v, i) => (i >= inc ? null : v)));  // hide the in-progress month
 
-  const newConv = seriesFor('New Conversations');
-  const assigned = seriesFor('Conversations Assigned');
-  const answerRate = seriesFor('Answer Rate');
-  const csatPct = seriesFor('CSAT%');
-  const aiResolution = seriesFor('AI Resolution Rate');
-  const avgPerTeammate = seriesFor('Avg Assigned Convers Per Team Member');
+  const newConv = mask(seriesFor('New Conversations'));
+  const assigned = mask(seriesFor('Conversations Assigned'));
+  const answerRate = mask(seriesFor('Answer Rate'));
+  const csatPct = mask(seriesFor('CSAT%'));
+  const aiResolution = mask(seriesFor('AI Resolution Rate'));
+  const avgPerTeammate = mask(seriesFor('Avg Assigned Convers Per Team Member'));
 
   const trimmed = trimTrailingEmpty(MONTH_NAMES, [newConv, assigned, answerRate, csatPct, aiResolution, avgPerTeammate]);
   const [tNewConv, tAssigned, tAnswerRate, tCsatPct, tAiResolution, tAvgPerTeammate] = trimmed.arrays;
@@ -1271,6 +1325,7 @@ async function main() {
     renderTrends(annualSeries, monthlyTileValues);
 
     const quarters = buildQuarters();
+    renderQoQTrends(annualSeries, quarters);
     const quarterOptions = QUARTER_NAMES
       .filter((q) => quarters[q] && quarters[q].hasData)
       .map((q) => ({ key: q, label: q }));
