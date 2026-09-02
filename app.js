@@ -1311,6 +1311,152 @@ function launchConfetti() {
   }
 }
 
+/* ======================= 🎉 THE CELEBRATION ======================= */
+let _celebrating = false;
+const CB_COLORS = ['#ff2d75', '#ffd23f', '#3ec1ff', '#7cff5b', '#b06bff', '#ff8a3d', '#ff5bd0'];
+
+function ensureCelebrateStyles() {
+  if (document.getElementById('cb-styles')) return;
+  const st = document.createElement('style');
+  st.id = 'cb-styles';
+  st.textContent = `
+  @keyframes cbFall{0%{transform:translateY(-12vh) rotate(0)}100%{transform:translateY(115vh) rotate(720deg)}}
+  @keyframes cbShoot{0%{transform:translate(0,0) rotate(0);opacity:1}100%{transform:translate(var(--dx),var(--dy)) rotate(var(--dr));opacity:0}}
+  @keyframes cbFw{0%{transform:translate(0,0) scale(1);opacity:1}100%{transform:translate(var(--fx),var(--fy)) scale(.2);opacity:0}}
+  @keyframes cbHero{0%{transform:translate(-50%,-50%) scale(0) rotate(-16deg);opacity:0}
+    14%{transform:translate(-50%,-50%) scale(1.28) rotate(7deg);opacity:1}
+    28%{transform:translate(-50%,-50%) scale(1) rotate(-3deg)}
+    78%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}
+    100%{opacity:0;transform:translate(-50%,-50%) scale(1.5)}}
+  @keyframes cbShake{10%,90%{transform:translate(-2px,1px)}20%,80%{transform:translate(5px,-2px)}30%,50%,70%{transform:translate(-7px,3px)}40%,60%{transform:translate(7px,-1px)}}
+  @keyframes cbFlash{0%{opacity:0}50%{opacity:.30}100%{opacity:0}}
+  @keyframes cbSpin{to{transform:rotate(360deg)}}
+  #celebrateBtn:hover{transform:scale(1.06)}`;
+  document.head.appendChild(st);
+}
+
+function celebrateSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'triangle'; o.frequency.value = f;
+      const t = ctx.currentTime + i * 0.11;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.4);
+    });
+    const o2 = ctx.createOscillator(), g2 = ctx.createGain(), t0 = ctx.currentTime + 0.55;
+    o2.type = 'sawtooth';
+    o2.frequency.setValueAtTime(880, t0); o2.frequency.exponentialRampToValueAtTime(1760, t0 + 0.5);
+    g2.gain.setValueAtTime(0.0001, t0); g2.gain.exponentialRampToValueAtTime(0.12, t0 + 0.08); g2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
+    o2.connect(g2).connect(ctx.destination); o2.start(t0); o2.stop(t0 + 0.75);
+    setTimeout(() => ctx.close(), 2200);
+  } catch (e) { /* audio blocked — visuals still party */ }
+}
+
+function cbCannon(layer, originXvw) {
+  for (let i = 0; i < 90; i++) {
+    const p = document.createElement('div');
+    const size = 6 + Math.random() * 9;
+    Object.assign(p.style, { position: 'absolute', bottom: '2vh', left: originXvw + 'vw',
+      width: size + 'px', height: (size * 0.5) + 'px', background: CB_COLORS[(Math.random() * CB_COLORS.length) | 0], borderRadius: '2px' });
+    const ang = (originXvw < 50 ? -62 : -118) * (Math.PI / 180) + (Math.random() - 0.5) * 1.4;
+    const dist = 45 + Math.random() * 60;
+    p.style.setProperty('--dx', Math.cos(ang) * dist + 'vw');
+    p.style.setProperty('--dy', (Math.sin(ang) * dist - 25 - Math.random() * 35) + 'vh');
+    p.style.setProperty('--dr', (Math.random() * 1440 - 720) + 'deg');
+    p.style.animation = `cbShoot ${1.6 + Math.random() * 1.4}s cubic-bezier(.15,.6,.3,1) ${Math.random() * 0.35}s forwards`;
+    layer.appendChild(p);
+  }
+}
+
+function cbFirework(layer, xvw, yvh) {
+  for (let i = 0; i < 30; i++) {
+    const d = document.createElement('div');
+    const size = 5 + Math.random() * 5;
+    const color = CB_COLORS[(Math.random() * CB_COLORS.length) | 0];
+    Object.assign(d.style, { position: 'absolute', left: xvw + 'vw', top: yvh + 'vh', width: size + 'px', height: size + 'px',
+      borderRadius: '50%', background: color, color, boxShadow: '0 0 10px currentColor' });
+    const a = (i / 30) * Math.PI * 2, r = 9 + Math.random() * 11;
+    d.style.setProperty('--fx', Math.cos(a) * r + 'vw');
+    d.style.setProperty('--fy', Math.sin(a) * r + 'vh');
+    d.style.animation = `cbFw ${0.9 + Math.random() * 0.6}s ease-out forwards`;
+    layer.appendChild(d);
+  }
+}
+
+function celebrate() {
+  if (_celebrating) return;
+  _celebrating = true;
+  ensureCelebrateStyles();
+
+  const layer = document.createElement('div');
+  layer.id = 'celebrate-layer';
+  Object.assign(layer.style, { position: 'fixed', inset: '0', zIndex: 99999, pointerEvents: 'none', overflow: 'hidden' });
+  document.body.appendChild(layer);
+
+  // rainbow flashes
+  const flash = document.createElement('div');
+  Object.assign(flash.style, { position: 'absolute', inset: '0',
+    background: 'radial-gradient(circle at 50% 40%, rgba(255,45,117,.55), rgba(62,193,255,.4) 42%, rgba(176,107,255,.3) 72%, transparent)',
+    animation: 'cbFlash 1.5s ease-in-out 3' });
+  layer.appendChild(flash);
+
+  // emoji monsoon
+  const EMO = ['🎉', '🎊', '🥳', '🦄', '🚀', '⭐', '🏆', '💥', '✨', '💫', '🌈', '🔥', '👏', '💯', '🎈', '🍾', '🎆'];
+  for (let i = 0; i < 170; i++) {
+    const s = document.createElement('div');
+    s.textContent = EMO[(Math.random() * EMO.length) | 0];
+    Object.assign(s.style, { position: 'absolute', left: Math.random() * 100 + 'vw', top: '-12vh',
+      fontSize: (18 + Math.random() * 40) + 'px', willChange: 'transform',
+      animation: `cbFall ${2.4 + Math.random() * 3.2}s linear ${Math.random() * 2.8}s forwards` });
+    layer.appendChild(s);
+  }
+
+  // confetti cannons (staggered)
+  cbCannon(layer, 5); cbCannon(layer, 95);
+  setTimeout(() => { cbCannon(layer, 22); cbCannon(layer, 78); }, 550);
+  setTimeout(() => { cbCannon(layer, 50); }, 1150);
+
+  // fireworks all over
+  for (let k = 0; k < 9; k++) {
+    setTimeout(() => cbFirework(layer, 12 + Math.random() * 76, 12 + Math.random() * 48), 300 + k * 520);
+  }
+
+  // giant cycling hero banners
+  const PHRASES = ['🎉 WOOHOO! 🎉', '🏆 TEAM CRUSHED IT! 🏆', '🚀 ABSOLUTE LEGENDS! 🚀', '🥳 LET’S GOOO! 🥳', '💯 INCREDIBLE WORK! 💯', '⭐ SUPPORT SUPERSTARS! ⭐'];
+  PHRASES.slice().sort(() => Math.random() - 0.5).slice(0, 4).forEach((txt, i) => {
+    setTimeout(() => {
+      const h = document.createElement('div');
+      h.textContent = txt;
+      Object.assign(h.style, { position: 'fixed', left: '50%', top: '42%', transform: 'translate(-50%,-50%)',
+        font: '900 clamp(30px,6.5vw,72px) system-ui,sans-serif', textAlign: 'center', whiteSpace: 'nowrap',
+        background: 'linear-gradient(90deg,#ff2d75,#ffd23f,#3ec1ff,#7cff5b,#b06bff)',
+        WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent',
+        filter: 'drop-shadow(0 6px 26px rgba(0,0,0,.45))', animation: 'cbHero 1.5s ease-out forwards', zIndex: 100000 });
+      layer.appendChild(h);
+      setTimeout(() => h.remove(), 1600);
+    }, i * 1300);
+  });
+
+  // shake the whole app + spin the button
+  const app = document.getElementById('app');
+  if (app) { app.style.animation = 'cbShake .6s ease-in-out 2'; setTimeout(() => { app.style.animation = ''; }, 1300); }
+  const btn = document.getElementById('celebrateBtn');
+  if (btn) { btn.style.animation = 'cbSpin .6s linear 3'; setTimeout(() => { btn.style.animation = ''; }, 1900); }
+
+  celebrateSound();
+
+  setTimeout(() => { layer.remove(); _celebrating = false; }, 7000);
+}
+
+function setupCelebrate() {
+  const btn = document.getElementById('celebrateBtn');
+  if (btn && !btn._wired) { btn._wired = true; btn.addEventListener('click', celebrate); }
+}
+
 function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
   const q = quarters[quarterKey];
   if (!q) return;
@@ -1320,6 +1466,7 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
 
 async function main() {
   try {
+    setupCelebrate();
     await loadGidTitleMap();
     initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
 
