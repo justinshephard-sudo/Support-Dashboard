@@ -558,9 +558,17 @@ function trimTrailingEmpty(labels, arrays) {
 function parseTimeToSeconds(str) {
   if (str == null || String(str).trim() === '' || str === '-') return null;
   const s = String(str).trim();
-  if (!/^\d{1,3}:\d{2}(:\d{2})?$/.test(s)) return null;
-  const parts = s.split(':').map(Number);
-  return parts.reduce((acc, v) => acc * 60 + v, 0);
+  // Colon format: H:MM:SS or M:SS
+  if (/^\d{1,3}:\d{2}(:\d{2})?$/.test(s)) {
+    return s.split(':').map(Number).reduce((acc, v) => acc * 60 + v, 0);
+  }
+  // Text format the Intercom reports use: "1h 34m 5s", "1h 6m", "27m", "45s", "2h", "13d20h"
+  const m = s.match(/^(?:(\d+)\s*d)?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/i);
+  if (m && (m[1] || m[2] || m[3] || m[4])) {
+    const d = +(m[1] || 0), h = +(m[2] || 0), mi = +(m[3] || 0), se = +(m[4] || 0);
+    return ((d * 24 + h) * 60 + mi) * 60 + se;
+  }
+  return null;
 }
 
 function sortValue(str) {
