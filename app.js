@@ -58,6 +58,7 @@ const LEADERBOARD_COLUMNS = [
   { key: 'convReplied', label: 'Conv Replied' },
   { key: 'totalCalls', label: 'Total Calls' },
   { key: 'missedCalls', label: 'Missed Calls' },
+  { key: 'declinedCalls', label: 'Declined Calls' },
   { key: 'phoneAnswerRate', label: 'Phone Answer %' },
   { key: 'csat', label: 'CSAT' },
   { key: 'csatPct', label: 'CSAT %' },
@@ -174,12 +175,32 @@ async function fetchTitleFrom(sheetId, title) {
 const REPORT = { monthly: new Map(), teammates: new Map() };  // monthKey -> rowObj / [members]
 const monthKeyOf = (label) => String(label || '').trim().split(/\s+/)[0].toLowerCase();
 
-// Data-Teammates columns after [Month, Rep], in order -> member keys (20th col "FaceTime..." unused).
-const TEAM_COL_TO_KEY = [
-  'convAssigned', 'convReplied', 'totalCalls', 'missedCalls', 'phoneAnswerRate', 'csat', 'csatPct',
-  'dsat', 'dsatPct', 'reviewedPct', 'cx', 'newTickets', 'avg1stResponse', 'avgRespTime', 'closedConv',
-  'closingTime', 'supportCalls', 'tbDemos', 'totalDemos',
-];
+// Data-Teammates columns, by exact sheet header name -> member key. Looked up by name (not
+// position), so columns can be reordered or appended without breaking this mapping.
+// "FaceTime + Live Screenshares" has no key on purpose — it's not surfaced on the dashboard.
+const TEAM_COL_TO_KEY = {
+  'Conv. Assigned': 'convAssigned',
+  'Conv. Replied': 'convReplied',
+  'Total Phone Calls': 'totalCalls',
+  'Missed Phone Calls': 'missedCalls',
+  'Declined Phone Calls': 'declinedCalls',
+  'Phone Answer Rate': 'phoneAnswerRate',
+  'CSAT': 'csat',
+  'CSAT %': 'csatPct',
+  'DSAT': 'dsat',
+  'DSAT %': 'dsatPct',
+  'Reviewd CSAT': 'reviewedPct',
+  'CX': 'cx',
+  'New Tickets': 'newTickets',
+  'Avg. Teammate Assign to 1st response': 'avg1stResponse',
+  'Avg. Resp Time': 'avgRespTime',
+  'Closed Conv.': 'closedConv',
+  'Closing Time': 'closingTime',
+  'Support Calls': 'supportCalls',
+  'TB Demos': 'tbDemos',
+  'Total': 'totalDemos',
+  'Avg Handling Time': 'avgHandlingTime',
+};
 
 async function loadReportTables() {
   const [monthlyRows, teammateRows, overrideRows] = await Promise.all([
@@ -200,13 +221,16 @@ async function loadReportTables() {
     const name = (r[rIdx] || '').trim();
     if (!mk || !name || EXCLUDED_NAMES.has(name.toLowerCase())) return;
     const member = { name };
-    TEAM_COL_TO_KEY.forEach((key, i) => { member[key] = (r[i + 2] == null ? '' : String(r[i + 2]).trim()); });
+    tHeader.forEach((colName, i) => {
+      const key = TEAM_COL_TO_KEY[colName];
+      if (key) member[key] = (r[i] == null ? '' : String(r[i]).trim());
+    });
     if (!REPORT.teammates.has(mk)) REPORT.teammates.set(mk, []);
     REPORT.teammates.get(mk).push(member);
   });
   REPORT.keyToSheetCol = {};   // member key -> sheet column name (for override write-back)
-  TEAM_COL_TO_KEY.forEach((key, i) => { const nm = tHeader[i + 2]; if (nm) REPORT.keyToSheetCol[key] = nm; });
-  applyOverridesLive(overrideRows, tHeader);
+  Object.entries(TEAM_COL_TO_KEY).forEach(([colName, key]) => { REPORT.keyToSheetCol[key] = colName; });
+  applyOverridesLive(overrideRows);
 }
 
 const fullMonthLabel = (monthName) => {
@@ -226,12 +250,10 @@ function adjustValue(cur, value) {
   }
   return v;
 }
-function applyOverridesLive(overrideRows, tHeader) {
+function applyOverridesLive(overrideRows) {
   if (!overrideRows || overrideRows.length < 2) return;
-  const nameToKey = {};
-  TEAM_COL_TO_KEY.forEach((key, i) => { const nm = tHeader[i + 2]; if (nm) nameToKey[nm] = key; });
-  const touchedMonthly = new Set();          // mk whose Missed/Inbound changed
-  const touchedMembers = new Set();          // "mk::repname" whose Missed/Total changed
+  const touchedMonthly = new Set();          // mk whose Missed/Declined/Inbound changed
+  const touchedMembers = new Set();          // "mk::repname" whose Missed/Declined/Total changed
   overrideRows.slice(1).forEach((row) => {
     const [oMonth, table, rep, column, value] = row.concat(['', '', '', '', '', '']);
     if (!column || value === '' || value == null) return;
@@ -240,29 +262,31 @@ function applyOverridesLive(overrideRows, tHeader) {
       const o = REPORT.monthly.get(mk);
       if (o && column in o) {
         o[column] = adjustValue(o[column], value);
-        if (/^(missed calls|inbound calls)$/i.test(column.trim())) touchedMonthly.add(mk);
+        if (/^(missed calls|declined calls|inbound calls)$/i.test(column.trim())) touchedMonthly.add(mk);
       }
     } else {
-      const key = nameToKey[String(column).trim()];
+      const key = TEAM_COL_TO_KEY[String(column).trim()];
       if (!key) return;
       const m = (REPORT.teammates.get(mk) || []).find((x) => x.name.trim().toLowerCase() === String(rep).trim().toLowerCase());
       if (m) {
         m[key] = adjustValue(m[key], value);
-        if (key === 'missedCalls' || key === 'totalCalls') touchedMembers.add(`${mk}::${m.name.toLowerCase()}`);
+        if (key === 'missedCalls' || key === 'declinedCalls' || key === 'totalCalls') touchedMembers.add(`${mk}::${m.name.toLowerCase()}`);
       }
     }
   });
-  // Missed calls drive the answer-rate %, so recompute it wherever those changed.
-  const pct = (whole, missed) => (whole && whole > 0 && missed != null) ? `${Math.round(((whole - missed) / whole) * 100)}%` : null;
+  // Missed + declined calls both drive the answer-rate %, so recompute it wherever those changed.
+  const pct = (whole, against) => (whole && whole > 0 && against != null) ? `${Math.round(((whole - against) / whole) * 100)}%` : null;
   touchedMonthly.forEach((mk) => {
     const o = REPORT.monthly.get(mk); if (!o) return;
-    const r = pct(toNumber(o['Inbound Calls']), toNumber(o['Missed Calls']));   // monthly uses Inbound
+    const against = (toNumber(o['Missed Calls']) || 0) + (toNumber(o['Declined Calls']) || 0);
+    const r = pct(toNumber(o['Inbound Calls']), against);   // monthly uses Inbound
     if (r != null) o['Phone Answer Rate'] = r;
   });
   touchedMembers.forEach((tag) => {
     const [mk, repl] = tag.split('::');
     const m = (REPORT.teammates.get(mk) || []).find((x) => x.name.toLowerCase() === repl); if (!m) return;
-    const r = pct(toNumber(m.totalCalls), toNumber(m.missedCalls));             // per-rep uses Total calls
+    const against = (toNumber(m.missedCalls) || 0) + (toNumber(m.declinedCalls) || 0);
+    const r = pct(toNumber(m.totalCalls), against);             // per-rep uses Total calls
     if (r != null) m.phoneAnswerRate = r;
   });
 }
@@ -321,7 +345,7 @@ function secToTime(sec) {
 }
 
 function buildQuarters() {
-  const SUM = ['convAssigned', 'convReplied', 'totalCalls', 'missedCalls', 'csat', 'dsat', 'newTickets', 'closedConv', 'supportCalls', 'tbDemos', 'totalDemos'];
+  const SUM = ['convAssigned', 'convReplied', 'totalCalls', 'missedCalls', 'declinedCalls', 'csat', 'dsat', 'newTickets', 'closedConv', 'supportCalls', 'tbDemos', 'totalDemos'];
   const AVG_PCT = ['phoneAnswerRate', 'csatPct', 'dsatPct', 'reviewedPct'];
   const AVG_TIME = ['avg1stResponse', 'avgRespTime', 'closingTime'];
   const out = {};
