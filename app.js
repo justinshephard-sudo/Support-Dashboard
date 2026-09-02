@@ -332,6 +332,8 @@ function buildAnnualSeries() {
   set('Conversations Assigned', 'Conversations Assigned');
   set('Answer Rate', 'Phone Answer Rate');
   set('AI Resolution Rate', 'AI Resolution Rate');
+  set('Total Calls', 'Total Calls');
+  set('Avg Response Time', 'Avg Response Time');
   set('Total Help Article Search', 'Total Article Views');
   set('CSAT%', overallCsatPct);
   set('Avg Assigned Convers Per Team Member', avgAssignedPerMember);
@@ -516,28 +518,50 @@ function fmtPct(n) {
   return n == null ? null : `${(Math.round(n * 10) / 10)}%`;
 }
 
+// Quarter aggregators over a metric's monthly values (idxs = the quarter's month indexes).
+const qSeriesVals = (s, label, idxs) => idxs.map((i) => toNumber((s.get(label.toLowerCase()) || [])[i])).filter((v) => v != null);
+const qSum = (s, label, idxs) => { const v = qSeriesVals(s, label, idxs); return v.length ? v.reduce((a, b) => a + b, 0) : null; };
+const qAvg = (s, label, idxs) => { const v = qSeriesVals(s, label, idxs); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const qAvgTime = (s, label, idxs) => {
+  const v = idxs.map((i) => parseTimeToSeconds((s.get(label.toLowerCase()) || [])[i])).filter((x) => x != null);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
+// True weighted team CSAT for the quarter: Σ positive ratings / Σ all ratings.
+const qTeamCsat = (members) => {
+  let pos = 0, tot = 0;
+  (members || []).forEach((m) => { const c = toNumber(m.csat), d = toNumber(m.dsat); if (c != null) { pos += c; tot += c + (d || 0); } });
+  return tot > 0 ? (pos / tot) * 100 : null;
+};
+
+// Same team cards as the monthly tiles, aggregated correctly for a quarter.
 const QUARTER_TILE_DEFS = [
-  { label: 'New Conversations', icon: '💬', slot: 1, source: 'annual', series: 'New Conversations', agg: 'sum', fmt: fmtNum },
-  { label: 'Phone Answer Rate', icon: '📞', slot: 2, source: 'annual', series: 'Answer Rate', agg: 'avg', fmt: fmtPct },
-  { label: 'AI Resolution Rate', icon: '🤖', slot: 5, source: 'annual', series: 'AI Resolution Rate', agg: 'avg', fmt: fmtPct },
+  { label: 'New Conversations', icon: '💬', slot: 1, goodDir: 'up', num: (i, s) => qSum(s, 'New Conversations', i), fmt: fmtNum },
+  { label: 'Phone Answer Rate', icon: '📞', slot: 2, goodDir: 'up', num: (i, s) => qAvg(s, 'Answer Rate', i), fmt: fmtPct },
+  { label: 'Team CSAT', icon: '⭐', slot: 3, goodDir: 'up', num: (i, s, m) => qTeamCsat(m), fmt: fmtPct },
+  { label: 'Avg Response Time', icon: '⏱️', slot: 4, goodDir: 'down', num: (i, s) => qAvgTime(s, 'Avg Response Time', i), fmt: (n) => (n != null ? secToTime(n) : null) },
+  { label: 'AI Resolution Rate', icon: '🤖', slot: 5, goodDir: 'up', num: (i, s) => qAvg(s, 'AI Resolution Rate', i), fmt: fmtPct },
+  { label: 'Total Calls', icon: '☎️', slot: 6, goodDir: 'up', num: (i, s) => qSum(s, 'Total Calls', i), fmt: fmtNum },
 ];
 
-function extractQuarterTiles(annualSeries, monthlyTileValues, monthIndexes) {
+function extractQuarterTiles(annualSeries, quarters, quarterKey) {
+  const idxs = QUARTER_MONTH_INDEXES[quarterKey];
+  const members = (quarters[quarterKey] || {}).members || [];
+  const pIdx = QUARTER_NAMES.indexOf(quarterKey) - 1;
+  const prevKey = pIdx >= 0 ? QUARTER_NAMES[pIdx] : null;
+  const prevOk = prevKey && quarters[prevKey] && quarters[prevKey].hasData;
+  const prevIdxs = prevKey ? QUARTER_MONTH_INDEXES[prevKey] : null;
+  const prevMembers = prevKey ? ((quarters[prevKey] || {}).members || []) : [];
   return QUARTER_TILE_DEFS.map((def) => {
-    const values = monthIndexes
-      .map((idx) => {
-        if (def.source === 'monthlyTile') {
-          const tile = (monthlyTileValues[idx] || []).find((t) => t.label === def.series);
-          return tile ? toNumber(tile.value) : null;
-        }
-        return toNumber((annualSeries.get(def.series.toLowerCase()) || [])[idx]);
-      })
-      .filter((v) => v != null);
-    let agg = null;
-    if (values.length) {
-      agg = def.agg === 'sum' ? values.reduce((a, b) => a + b, 0) : values.reduce((a, b) => a + b, 0) / values.length;
+    const cur = def.num(idxs, annualSeries, members);
+    let delta = null;
+    if (prevOk) {
+      const prev = def.num(prevIdxs, annualSeries, prevMembers);
+      if (cur != null && prev != null && prev !== 0) {
+        const pct = ((cur - prev) / Math.abs(prev)) * 100;
+        delta = { pct, good: def.goodDir === 'down' ? pct < 0 : pct > 0 };
+      }
     }
-    return { label: def.label, icon: def.icon, slot: def.slot, value: def.fmt(agg) };
+    return { label: def.label, icon: def.icon, slot: def.slot, value: def.fmt(cur), delta };
   });
 }
 
@@ -587,7 +611,7 @@ function showError(message) {
   el.hidden = false;
 }
 
-function renderTiles(containerId, tiles) {
+function renderTiles(containerId, tiles, deltaLabel = 'vs last mo') {
   const el = document.getElementById(containerId);
   el.innerHTML = '';
   tiles.forEach(({ label, icon, slot, value, delta }) => {
@@ -599,7 +623,7 @@ function renderTiles(containerId, tiles) {
       const arrow = delta.pct > 0 ? '▲' : (delta.pct < 0 ? '▼' : '');
       const color = delta.good ? '#1f9d57' : '#d64545';
       deltaHtml = `<div class="tile-delta" style="color:${color};font-size:.8em;font-weight:600;margin-top:2px;">`
-        + `${arrow} ${Math.abs(delta.pct).toFixed(1)}% <span style="opacity:.6;font-weight:400;">vs last mo</span></div>`;
+        + `${arrow} ${Math.abs(delta.pct).toFixed(1)}% <span style="opacity:.6;font-weight:400;">${deltaLabel}</span></div>`;
     }
     div.innerHTML = `<span class="icon">${icon}</span><div class="label">${label}</div>`
       + `<div class="value">${value != null ? value : '–'}</div>${deltaHtml}`;
@@ -1290,7 +1314,7 @@ function launchConfetti() {
 function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
   const q = quarters[quarterKey];
   if (!q) return;
-  renderTiles('quarter-tiles', extractQuarterTiles(annualSeries, monthlyTileValues, QUARTER_MONTH_INDEXES[quarterKey]));
+  renderTiles('quarter-tiles', extractQuarterTiles(annualSeries, quarters, quarterKey), 'vs last qtr');
   renderQuarterlyLeaderboard(q.members);
 }
 
