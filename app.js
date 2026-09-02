@@ -599,16 +599,6 @@ function renderTiles(containerId, tiles) {
   });
 }
 
-function moodFace(csatPct) {
-  const n = toNumber(csatPct);
-  if (n == null) return '';
-  if (n >= 97) return '🤩';
-  if (n >= 92) return '😄';
-  if (n >= 85) return '🙂';
-  if (n >= 75) return '😐';
-  return '😟';
-}
-
 function computeIncentiveWinner(members, def) {
   let winner = null;
   let bestVal = def.better === 'lower' ? Infinity : -Infinity;
@@ -969,7 +959,7 @@ function createLeaderboardRenderer(tableId, editable) {
   return function renderLeaderboard(members) {
     const thead = document.querySelector(`#${tableId} thead`);
     const tbody = document.querySelector(`#${tableId} tbody`);
-    const columns = [{ key: 'name', label: 'Name' }, { key: 'mood', label: '' }, ...LEADERBOARD_COLUMNS];
+    const columns = [{ key: 'name', label: 'Name' }, ...LEADERBOARD_COLUMNS];
 
     thead.innerHTML = '';
     const headRow = document.createElement('tr');
@@ -981,15 +971,11 @@ function createLeaderboardRenderer(tableId, editable) {
         th.classList.add('sorted');
         if (sortState.dir === -1) th.classList.add('asc');
       }
-      if (col.key !== 'mood') {
-        th.addEventListener('click', () => {
-          if (sortState.key === col.key) sortState.dir *= -1;
-          else { sortState.key = col.key; sortState.dir = 1; }
-          renderLeaderboard(members);
-        });
-      } else {
-        th.style.cursor = 'default';
-      }
+      th.addEventListener('click', () => {
+        if (sortState.key === col.key) sortState.dir *= -1;
+        else { sortState.key = col.key; sortState.dir = 1; }
+        renderLeaderboard(members);
+      });
       headRow.appendChild(th);
     });
     thead.appendChild(headRow);
@@ -1030,9 +1016,6 @@ function createLeaderboardRenderer(tableId, editable) {
             crown.title = `${m.name} has the fastest average response time this period!`;
             td.appendChild(crown);
           }
-        } else if (col.key === 'mood') {
-          td.textContent = moodFace(m.csatPct);
-          td.className = 'mood-cell';
         } else {
           const v = m[col.key];
           td.textContent = v && v !== '' ? v : '–';

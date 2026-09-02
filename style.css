@@ -106,7 +106,6 @@ tbody td{text-align:right;padding:11px 12px;border-bottom:1px solid var(--border
 tbody td:first-child{font-weight:700;color:var(--text-1)}
 tbody tr:hover td{background:var(--surface-2)}
 tbody tr:hover td:first-child{background:var(--surface-2)}
-.mood-cell{font-size:15px}
 .crown{margin-left:6px}
 
 /* ---------- incentives ---------- */
