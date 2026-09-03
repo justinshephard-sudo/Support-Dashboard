@@ -778,9 +778,10 @@ function renderIncentives(members, monthKey) {
     const statEl = card.querySelector('.incentive-stat');
     const tiedEl = card.querySelector('.incentive-tied');
 
-    const override = overridesMap.get(`${monthKey}:${def.key}`);
-    const winners = override && override.winnerName
-      ? override.winnerName.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const winnersOv = incentiveMetaMap.get(`${monthKey}:${def.key}:winners`);
+    const noteOv = incentiveMetaMap.get(`${monthKey}:${def.key}:note`);
+    const winners = winnersOv
+      ? winnersOv.split(',').map((s) => s.trim()).filter(Boolean) : [];
 
     // Editable title + $ amount (FaceTime): apply overrides, else fall back to defaults.
     if (def.editableMeta) {
@@ -799,7 +800,7 @@ function renderIncentives(members, monthKey) {
 
     if (winners.length) {
       displayName = winners.join(', ');
-      if (override.statText) displayStat = override.statText;
+      if (noteOv) displayStat = noteOv;
       else if (!def.manualOnly && winners.length === 1) {
         const m = members.find((x) => x.name === winners[0]);
         displayStat = m ? def.displayStat(m) : '–';
@@ -823,11 +824,11 @@ function renderIncentives(members, monthKey) {
     }
     card.classList.toggle('is-empty', !displayName);
 
-    renderOverrideControl(card, def, members, monthKey, override);
+    renderOverrideControl(card, def, members, monthKey);
   });
 }
 
-function renderOverrideControl(card, def, members, monthKey, override) {
+function renderOverrideControl(card, def, members, monthKey) {
   let wrap = card.querySelector('.incentive-override-wrap');
   if (!overridesUnlocked) {
     if (wrap) wrap.remove();
@@ -858,8 +859,9 @@ function renderOverrideControl(card, def, members, monthKey, override) {
   }
 
   // Multi-select winners (checkboxes).
+  const winnersOv = incentiveMetaMap.get(`${monthKey}:${def.key}:winners`);
   const selected = new Set(
-    (override && override.winnerName ? override.winnerName.split(',') : []).map((s) => s.trim()).filter(Boolean),
+    (winnersOv ? winnersOv.split(',') : []).map((s) => s.trim()).filter(Boolean),
   );
   const box = document.createElement('div');
   box.className = 'incentive-winner-checks';
@@ -878,15 +880,16 @@ function renderOverrideControl(card, def, members, monthKey, override) {
   const statInput = document.createElement('input');
   statInput.type = 'text'; statInput.className = 'incentive-override-stat-input';
   statInput.placeholder = def.statPlaceholder || 'Optional note (shown under winners)';
-  statInput.value = override ? (override.statText || '') : '';
+  statInput.value = incentiveMetaMap.get(`${monthKey}:${def.key}:note`) || '';
   wrap.appendChild(statInput);
 
   const commit = () => {
     const winnersStr = [...box.querySelectorAll('input:checked')].map((cb) => cb.value).join(', ');
     const stat = statInput.value.trim();
     const key = `${monthKey}:${def.key}`;
-    if (winnersStr || stat) overridesMap.set(key, { winnerName: winnersStr, statText: stat });
-    else overridesMap.delete(key);
+    const wkey = `${key}:winners`, nkey = `${key}:note`;
+    if (winnersStr) incentiveMetaMap.set(wkey, winnersStr); else incentiveMetaMap.delete(wkey);
+    if (stat) incentiveMetaMap.set(nkey, stat); else incentiveMetaMap.delete(nkey);
 
     let tPost = '', aPost = '';
     if (def.editableMeta) {
@@ -901,7 +904,8 @@ function renderOverrideControl(card, def, members, monthKey, override) {
 
     renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
 
-    scheduleOverridePost(key, () => postOverride(monthKey, def.key, winnersStr, stat));
+    scheduleOverridePost(wkey, () => postIncentiveMeta(monthKey, def.key, 'winners', winnersStr));
+    scheduleOverridePost(nkey, () => postIncentiveMeta(monthKey, def.key, 'note', stat));
     if (def.editableMeta) {
       scheduleOverridePost(`${key}:title`, () => postIncentiveMeta(monthKey, def.key, 'title', tPost));
       scheduleOverridePost(`${key}:amount`, () => postIncentiveMeta(monthKey, def.key, 'amount', aPost));
