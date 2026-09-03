@@ -1564,7 +1564,13 @@ async function main() {
 
     const monthsWithData = monthResults.filter((m) => m.parsed.hasData);
     const optionList = monthsWithData.length ? monthsWithData : monthResults;
-    const defaultEntry = optionList[optionList.length - 1];
+    // Default to the latest COMPLETE month, not the in-progress current month —
+    // landing on a 3-days-in month would show partial headline stats and an
+    // as-yet-undecided fastest responder. The in-progress month stays selectable.
+    const inc = incompleteMonthIndex();
+    const completeWithData = monthsWithData.filter((m) => inc < 0 || MONTH_NAMES.indexOf(m.name) < inc);
+    const defaultPool = completeWithData.length ? completeWithData : optionList;
+    const defaultEntry = defaultPool[defaultPool.length - 1];
 
     populateSelect('month-select', optionList, defaultEntry.gid, 'gid', 'name');
     renderMonth(defaultEntry);
@@ -1583,7 +1589,14 @@ async function main() {
       .filter((q) => quarters[q] && quarters[q].hasData)
       .map((q) => ({ key: q, label: q }));
     const finalQuarterOptions = quarterOptions.length ? quarterOptions : [{ key: 'Q1', label: 'Q1' }];
-    const defaultQuarter = finalQuarterOptions[finalQuarterOptions.length - 1].key;
+    // Same rule as the month selector: default to the latest COMPLETE quarter
+    // (its last month is already finished), not the in-progress one.
+    const completeQuarters = finalQuarterOptions.filter((o) => {
+      const idxs = QUARTER_MONTH_INDEXES[o.key];
+      return inc < 0 || (idxs && idxs[idxs.length - 1] < inc);
+    });
+    const defaultQuarter = (completeQuarters.length ? completeQuarters : finalQuarterOptions)
+      .slice(-1)[0].key;
 
     populateSelect('quarter-select', finalQuarterOptions, defaultQuarter, 'key', 'label');
     renderQuarter(defaultQuarter, quarters, annualSeries, monthlyTileValues);
