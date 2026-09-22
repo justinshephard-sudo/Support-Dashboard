@@ -1688,9 +1688,17 @@ function parseAccounts(rows) {
   return out;
 }
 
-function firmSearchScore(q, name) {
-  q = q.toLowerCase().trim(); name = String(name).toLowerCase();
+function firmSearchScore(q, f) {
+  q = q.toLowerCase().trim();
   if (!q) return -1;
+  const name = String(f.name || '').toLowerCase();
+  // FirmId match: exact wins outright, then prefix, then substring — ranked above name matches.
+  const id = String(f.firmId || '').toLowerCase();
+  if (id) {
+    if (id === q) return 300;
+    if (id.startsWith(q)) return 200;
+    if (id.includes(q)) return 150;
+  }
   if (name.includes(q)) return 100 - name.indexOf(q);
   let qi = 0;
   for (let i = 0; i < name.length && qi < q.length; i++) if (name[i] === q[qi]) qi++;
@@ -1729,7 +1737,7 @@ function onFirmSearch() {
   const results = document.getElementById('results');
   if (!v.trim()) { results.classList.remove('show'); return; }
   const list = FIRMS.list
-    .map((f) => ({ f, s: firmSearchScore(v, f.name) }))
+    .map((f) => ({ f, s: firmSearchScore(v, f) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s)
     .slice(0, 8)
@@ -1742,7 +1750,7 @@ function renderFirmResults(list) {
   if (!list.length) { results.classList.remove('show'); return; }
   results.innerHTML = list.map((f) => {
     const h = HEALTH[healthOf(f)];
-    const meta = [f.area, f.am ? 'AM ' + f.am : '', f.mrr ? fmtMoney(f.mrr) + '/mo' : ''].filter(Boolean).join(' · ');
+    const meta = [f.firmId ? 'ID ' + f.firmId : '', f.area, f.am ? 'AM ' + f.am : '', f.mrr ? fmtMoney(f.mrr) + '/mo' : ''].filter(Boolean).join(' · ');
     return `<div class="res" data-id="${esc(f.firmId)}" data-name="${esc(f.name)}">
       <div class="res-logo">${esc(firmInitials(f.name))}</div>
       <div class="res-main"><div class="res-name">${esc(f.name)}</div><div class="res-meta">${esc(meta)}</div></div>
