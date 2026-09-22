@@ -1688,16 +1688,24 @@ function parseAccounts(rows) {
   return out;
 }
 
+// Normalize an ID for comparison: the Sheets API returns values as displayed,
+// so a numeric FirmId can arrive as "12,345", "12345.0", or with stray spaces.
+// Strip grouping commas, all whitespace (incl. non-breaking), and a trailing ".0".
+function normId(s) {
+  return String(s == null ? '' : s).toLowerCase().trim().replace(/[,\s ]/g, '').replace(/\.0+$/, '');
+}
+
 function firmSearchScore(q, f) {
   q = q.toLowerCase().trim();
   if (!q) return -1;
   const name = String(f.name || '').toLowerCase();
   // FirmId match: exact wins outright, then prefix, then substring — ranked above name matches.
-  const id = String(f.firmId || '').toLowerCase();
-  if (id) {
-    if (id === q) return 300;
-    if (id.startsWith(q)) return 200;
-    if (id.includes(q)) return 150;
+  const id = normId(f.firmId);
+  const qn = normId(q);
+  if (id && qn) {
+    if (id === qn) return 300;
+    if (id.startsWith(qn)) return 200;
+    if (id.includes(qn)) return 150;
   }
   if (name.includes(q)) return 100 - name.indexOf(q);
   let qi = 0;
