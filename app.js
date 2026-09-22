@@ -1650,6 +1650,8 @@ function parseAccounts(rows) {
     const r = rows[i];
     const name = get(r, 'Name');
     if (!name) continue;
+    // Drop placeholder rows: ChurnZero "Account …" defaults and raw Chargebee "cus_…" ids.
+    if (/^(account|cus_)/i.test(name.trim())) continue;
     out.push({
       name,
       firmId: get(r, 'FirmId'),
