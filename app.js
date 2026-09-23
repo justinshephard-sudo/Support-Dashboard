@@ -52,6 +52,15 @@ const QUARTER_MONTH_INDEXES = {
 };
 
 const EXCLUDED_NAMES = new Set(['justin', 'dakota', 'erika']);
+// Still counted in TEAM stats (tiles, CSAT, response times, trends) but not shown
+// individually (leaderboard rows, incentive winners, manager-mode options) from the
+// given month index on (0 = Jan). Earlier months still show them. Matched on first name.
+const TEAM_ONLY_FROM = { adele: 8 };   // September 2026 onward
+const isTeamOnly = (m, monthIdx) => {
+  const from = TEAM_ONLY_FROM[String(m.name || '').trim().split(/\s+/)[0].toLowerCase()];
+  return from != null && monthIdx >= from;
+};
+const individualsOnly = (members, monthIdx) => (members || []).filter((m) => !isTeamOnly(m, monthIdx));
 
 const LEADERBOARD_COLUMNS = [
   { key: 'convAssigned', label: 'Conv Assigned' },
@@ -1139,9 +1148,10 @@ function renderMonth(entry) {
   const prevRaw = idx > 0 ? PARSED_BY_MONTH[MONTH_NAMES[idx - 1].toLowerCase()] : null;
   const prevParsed = prevRaw && prevRaw.hasData ? prevRaw : null;
   renderTiles('tiles', extractTiles(entry.parsed, prevParsed));
-  renderMonthlyLeaderboard(entry.parsed.members);
-  renderIncentives(entry.parsed.members, entry.gid);
-  updateMascot(entry.parsed.members, entry.name);
+  const people = individualsOnly(entry.parsed.members, idx);
+  renderMonthlyLeaderboard(people);
+  renderIncentives(people, entry.gid);
+  updateMascot(people, entry.name);
 }
 
 function populateSelect(selectId, entries, selectedValue, valueKey, labelKey) {
@@ -1543,7 +1553,8 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
   const q = quarters[quarterKey];
   if (!q) return;
   renderTiles('quarter-tiles', extractQuarterTiles(annualSeries, quarters, quarterKey), 'vs last qtr');
-  renderQuarterlyLeaderboard(q.members);
+  const qMonths = QUARTER_MONTH_INDEXES[quarterKey];
+  renderQuarterlyLeaderboard(individualsOnly(q.members, qMonths[qMonths.length - 1]));
 }
 
 async function main() {
