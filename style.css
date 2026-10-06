@@ -307,6 +307,8 @@ tbody tr:hover td{background:var(--surface-2)}
 .impl-note{font-size:13.5px;color:var(--text-3);margin-top:12px}
 .impl-note[hidden]{display:none}
 .stage-row{grid-template-columns:170px 1fr auto}
+#impl-reps tbody tr.row-muted td{color:var(--text-3)}
+#impl-reps td small{font-weight:400}
 @media(max-width:520px){.stage-row{grid-template-columns:120px 1fr auto}.stage-row .chan-label{font-size:13px}}
 #impl-over td:nth-child(2){font-weight:700;color:var(--text-1)}
 

@@ -2004,6 +2004,66 @@ function renderImplMonth(label) {
     ? 'Open onboardings, need-to-schedule, 70+ days, and stages are daily snapshots — ChurnZero keeps no history for them, so they start October 2026.'
     : '';
   renderImplStages(m);
+  renderImplReps(m);
+}
+
+// Per-rep table for the selected month (RepStats JSON written by the sync).
+const IMPL_REP_COLS = [
+  { key: 'rep', label: 'Rep' },
+  { key: 'open', label: 'Open' },
+  { key: 'preKick', label: 'Pre-Kickoff' },
+  { key: 'needsSched', label: 'Need to Schedule' },
+  { key: 'over70', label: '70+ Days' },
+  { key: 'closed', label: 'Closed' },
+  { key: 'medianDays', label: 'Median Days' },
+  { key: 'csatPct', label: 'CSAT' },
+];
+const implRepSort = { key: 'open', dir: -1 };
+
+function renderImplReps(m) {
+  const table = document.getElementById('impl-reps');
+  let stats = {};
+  try { stats = m.RepStats ? JSON.parse(m.RepStats) : {}; } catch (e) { stats = {}; }
+  const rows = Object.entries(stats).map(([rep, s]) => ({ rep, ...s }));
+  const head = document.createElement('tr');
+  IMPL_REP_COLS.forEach((c) => {
+    const th = document.createElement('th');
+    th.textContent = c.label;
+    if (implRepSort.key === c.key) th.classList.add('sorted', ...(implRepSort.dir === 1 ? ['asc'] : []));
+    th.addEventListener('click', () => {
+      if (implRepSort.key === c.key) implRepSort.dir *= -1;
+      else { implRepSort.key = c.key; implRepSort.dir = c.key === 'rep' ? 1 : -1; }
+      renderImplReps(m);
+    });
+    head.appendChild(th);
+  });
+  table.querySelector('thead').replaceChildren(head);
+  if (!rows.length) {
+    table.querySelector('tbody').innerHTML = `<tr><td colspan="${IMPL_REP_COLS.length}">No rep breakdown for this month yet.</td></tr>`;
+    return;
+  }
+  const { key, dir } = implRepSort;
+  rows.sort((a, b) => {
+    // "Unassigned" always sits at the bottom.
+    if ((a.rep === 'Unassigned') !== (b.rep === 'Unassigned')) return a.rep === 'Unassigned' ? 1 : -1;
+    if (key === 'rep') return a.rep.localeCompare(b.rep) * dir;
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return a.rep.localeCompare(b.rep);
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (av - bv) * dir || a.rep.localeCompare(b.rep);
+  });
+  const cell = (r, k) => {
+    const v = r[k];
+    if (k === 'rep') return esc(v);
+    if (k === 'closed' || k === 'csatPct') {
+      if (k === 'closed') return fmtNum(v || 0);
+      return v == null ? '–' : `${fmtPct(v)}<small class="muted"> (${fmtNum(r.csatN)})</small>`;
+    }
+    return v == null ? '–' : fmtNum(v);
+  };
+  table.querySelector('tbody').innerHTML = rows.map((r) =>
+    `<tr${r.rep === 'Unassigned' ? ' class="row-muted"' : ''}>${IMPL_REP_COLS.map((c) => `<td>${cell(r, c.key)}</td>`).join('')}</tr>`).join('');
 }
 
 function renderImplStages(m) {

@@ -15,10 +15,16 @@
           MedianDays         median NewTimeInOnboarding of those firms (the field is the
                              final total, populated when onboarding completes)
           CsatPct / CsatResponses   "Onboarding CSAT" survey: share of 4–5 scores
+        RepStats (JSON)  the same metrics per rep (ChurnZero "Account Manager", blank →
+                         "Unassigned"): { rep: { open, preKick, needsSched, over70,
+                         closed, medianDays, csatPct, csatN } }. Snapshot keys follow the
+                         snapshot rule above; closed/median/CSAT are recomputed using
+                         each firm's CURRENT account manager.
      "Impl - Open Firms" today's open onboardings, one row per firm
 
    Definitions (active accounts only, IsActive eq true):
      open onboarding  = OnboardingStatus "Pre-Kickoff" or "Open"
+     rep              = AccountManager (blank → "Unassigned")
      stage            = NewOnboardingCall (blank → "No stage set")
      needs scheduling = open onboarding with no upcoming ChurnZero meeting
      days in onboarding (open firms) = TenureInDays (days since account start)
@@ -29,9 +35,10 @@ var IMPL_OPEN_TAB = 'Impl - Open Firms';
 var IMPL_OPEN_STATUSES = ['Pre-Kickoff', 'Open'];
 var IMPL_CSAT_SURVEY_ID = 2;          // ChurnZero survey "Onboarding CSAT"
 var IMPL_OVER_DAYS = 70;
+var IMPL_UNASSIGNED = 'Unassigned';
 var IMPL_HISTORY_MONTHS = 24;         // months of completion/CSAT history kept in the tab
 var IMPL_MONTHLY_COLUMNS = ['Month', 'OpenOnboardings', 'PreKickoff', 'OpenStatus', 'NeedsScheduling', 'Over70',
-  'ClosedOnboardings', 'MedianDays', 'CsatPct', 'CsatResponses', 'StageCounts', 'UpdatedAt'];
+  'ClosedOnboardings', 'MedianDays', 'CsatPct', 'CsatResponses', 'StageCounts', 'UpdatedAt', 'RepStats'];
 var IMPL_OPEN_COLUMNS = ['Name', 'FirmId', 'Status', 'Stage', 'Specialist', 'AccountManager',
   'DaysInOnboarding', 'NextMeeting', 'ImplementationType'];
 
@@ -46,8 +53,15 @@ function syncImplementation() {
   var now = new Date();
 
   var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers);
-  var activeIds = {};
-  accounts.forEach(function (a) { activeIds[String(a.Id)] = true; });
+  var activeIds = {}, repOf = {};
+  accounts.forEach(function (a) {
+    activeIds[String(a.Id)] = true;
+    repOf[String(a.Id)] = (a.Cf || {}).AccountManager || IMPL_UNASSIGNED;
+  });
+  var repSnap = {};   // rep -> today's open-onboarding counts
+  function repBucket_(rep) {
+    return repSnap[rep] = repSnap[rep] || { open: 0, preKick: 0, needsSched: 0, over70: 0 };
+  }
 
   // Upcoming meetings → next meeting per account.
   var meetings = fetchAllCZ_(base + '/Meeting?$top=' + CZ_PAGE_SIZE + '&$select=AccountId,StartDate&$filter=' +
@@ -65,11 +79,13 @@ function syncImplementation() {
     var cf = a.Cf || {};
     var stage = cf.NewOnboardingCall || 'No stage set';
     stages[stage] = (stages[stage] || 0) + 1;
-    if (cf.OnboardingStatus === 'Pre-Kickoff') preKick++; else openStatus++;
+    var rb = repBucket_(repOf[String(a.Id)]);
+    rb.open++;
+    if (cf.OnboardingStatus === 'Pre-Kickoff') { preKick++; rb.preKick++; } else openStatus++;
     var next = nextMeeting[String(a.Id)] || '';
-    if (!next) needsSched++;
+    if (!next) { needsSched++; rb.needsSched++; }
     var days = a.TenureInDays == null ? '' : Math.round(a.TenureInDays);
-    if (days !== '' && days >= IMPL_OVER_DAYS) over++;
+    if (days !== '' && days >= IMPL_OVER_DAYS) { over++; rb.over70++; }
     return [a.Name || '', a.ExternalId || cf.FirmId || '', cf.OnboardingStatus || '', stage,
       cf.ImplementationSpecialist || '', cf.AccountManager || '', days,
       next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || ''];
@@ -77,25 +93,33 @@ function syncImplementation() {
   openRows.sort(function (x, y) { return (Number(y[6]) || 0) - (Number(x[6]) || 0); });
 
   // --- completions per month (active firms) ---
-  var completed = {};   // 'yyyy-MM' -> [days]
+  var completed = {};      // 'yyyy-MM' -> [days]
+  var repCompleted = {};   // 'yyyy-MM' -> rep -> [days]
   accounts.forEach(function (a) {
     var cf = a.Cf || {};
     if (!cf.OnboardingCompletedDate) return;
     var mk = String(cf.OnboardingCompletedDate).slice(0, 7);
     (completed[mk] = completed[mk] || []).push(cf.NewTimeInOnboarding);
+    var byRep = repCompleted[mk] = repCompleted[mk] || {};
+    var rep = repOf[String(a.Id)];
+    (byRep[rep] = byRep[rep] || []).push(cf.NewTimeInOnboarding);
   });
 
   // --- Onboarding CSAT per month (active firms) ---
   var since = new Date(now.getFullYear(), now.getMonth() - IMPL_HISTORY_MONTHS + 1, 1);
   var responses = fetchAllCZ_(base + '/SurveyResponse?$top=' + CZ_PAGE_SIZE + '&$select=AccountId,Score,ResponseDate,IsPending&$filter=' +
     encodeURIComponent('SurveyId eq ' + IMPL_CSAT_SURVEY_ID + ' and ResponseDate ge ' + since.toISOString().replace(/\.\d+Z$/, 'Z')), headers);
-  var csat = {};   // 'yyyy-MM' -> {pos, n}
+  var csat = {};      // 'yyyy-MM' -> {pos, n}
+  var repCsat = {};   // 'yyyy-MM' -> rep -> {pos, n}
   responses.forEach(function (r) {
     if (r.IsPending || r.Score == null || !r.ResponseDate || !activeIds[String(r.AccountId)]) return;
     var mk = Utilities.formatDate(new Date(r.ResponseDate), tz, 'yyyy-MM');
-    var c = csat[mk] = csat[mk] || { pos: 0, n: 0 };
-    c.n++;
-    if (Number(r.Score) >= 4) c.pos++;
+    var byRep = repCsat[mk] = repCsat[mk] || {};
+    var rep = repOf[String(r.AccountId)];
+    [csat[mk] = csat[mk] || { pos: 0, n: 0 }, byRep[rep] = byRep[rep] || { pos: 0, n: 0 }].forEach(function (c) {
+      c.n++;
+      if (Number(r.Score) >= 4) c.pos++;
+    });
   });
 
   // --- merge into the monthly tab ---
@@ -124,6 +148,7 @@ function syncImplementation() {
       c ? c.n : 0,
       stageJson,
       mk === curKey ? now.toISOString() : (prev[11] || ''),
+      JSON.stringify(repStats_(mk === curKey ? repSnap : parseJson_(prev[12]), repCompleted[mk] || {}, repCsat[mk] || {})),
     ]));
   }
   sheet.clearContents();
@@ -134,6 +159,35 @@ function syncImplementation() {
   var openOut = [IMPL_OPEN_COLUMNS].concat(openRows);
   openSheet.getRange(1, 1, openOut.length, IMPL_OPEN_COLUMNS.length).setValues(openOut);
   return { open: open.length, needsScheduling: needsSched, over70: over };
+}
+
+// Per-rep stats for one month: snapshot counts (today's for the current month, the
+// saved ones otherwise) plus closed / median days / CSAT from history.
+function repStats_(snap, closedByRep, csatByRep) {
+  var out = {};
+  function row(rep) { return out[rep] = out[rep] || {}; }
+  Object.keys(snap || {}).forEach(function (rep) {
+    var s = snap[rep] || {}, r = row(rep);
+    ['open', 'preKick', 'needsSched', 'over70'].forEach(function (k) { if (s[k] != null) r[k] = s[k]; });
+  });
+  Object.keys(closedByRep).forEach(function (rep) {
+    var all = closedByRep[rep];
+    var days = all.filter(function (v) { return v != null && v !== ''; });
+    var r = row(rep);
+    r.closed = all.length;
+    if (days.length) r.medianDays = median_(days);
+  });
+  Object.keys(csatByRep).forEach(function (rep) {
+    var c = csatByRep[rep], r = row(rep);
+    r.csatN = c.n;
+    if (c.n) r.csatPct = Math.round((c.pos / c.n) * 1000) / 10;
+  });
+  return out;
+}
+
+function parseJson_(v) {
+  if (!v) return {};
+  try { return JSON.parse(String(v)); } catch (e) { return {}; }
 }
 
 function median_(arr) {
