@@ -1644,7 +1644,7 @@ const CB_COLORS = ['#068bff', '#00cfdc', '#ff9011', '#ff612c', '#ffd23f', '#ff4f
 const CB_PLAYMATES = [
   'merlin-play-cat-feather', 'merlin-play-corgi-ball', 'merlin-play-pitbull-tug', 'merlin-play-kitten-wand',
   'merlin-play-pup-highfive', 'merlin-play-sphynx-ribbon', 'merlin-play-golden-fetch', 'merlin-play-stbernard-tug',
-  'merlin-dog',
+  'merlin-play-bluepit-tug', 'merlin-dog',
 ];
 const CB_PHRASES = ['Team crushed it!', 'Support superstars!', 'Absolute legends!', 'Incredible work!', 'Let’s gooo!'];
 
