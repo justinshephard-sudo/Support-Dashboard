@@ -2095,16 +2095,34 @@ function renderImplStages(m) {
   }).join('');
 }
 
+const IMPL_OVER_PAGE_SIZE = 15;
+let implOverPage = 0;
+
 function renderImplOverList() {
   const over = IMPL.open.filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70);
   document.getElementById('impl-over-note').textContent = `As of today · ${over.length} firm${over.length === 1 ? '' : 's'}`;
   const cols = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
     ['Specialist', 'Specialist'], ['AccountManager', 'Account Manager'], ['NextMeeting', 'Next meeting']];
+  const pages = Math.max(1, Math.ceil(over.length / IMPL_OVER_PAGE_SIZE));
+  implOverPage = Math.min(Math.max(implOverPage, 0), pages - 1);
+  const start = implOverPage * IMPL_OVER_PAGE_SIZE;
+  const shown = over.slice(start, start + IMPL_OVER_PAGE_SIZE);
   const table = document.getElementById('impl-over');
   table.querySelector('thead').innerHTML = `<tr>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr>`;
-  table.querySelector('tbody').innerHTML = over.length
-    ? over.map((f) => `<tr>${cols.map(([k]) => `<td>${esc(f[k] || '–')}</td>`).join('')}</tr>`).join('')
+  table.querySelector('tbody').innerHTML = shown.length
+    ? shown.map((f) => `<tr>${cols.map(([k]) => `<td>${esc(f[k] || '–')}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${cols.length}">No open onboardings at 70+ days.</td></tr>`;
+
+  const pager = document.getElementById('impl-over-pager');
+  pager.hidden = pages <= 1;
+  if (pages <= 1) return;
+  pager.innerHTML = `<button type="button" class="pager-btn" data-dir="-1"${implOverPage === 0 ? ' disabled' : ''}>‹ Prev</button>`
+    + `<span class="pager-info">${fmtNum(start + 1)}–${fmtNum(start + shown.length)} of ${fmtNum(over.length)}</span>`
+    + `<button type="button" class="pager-btn" data-dir="1"${implOverPage >= pages - 1 ? ' disabled' : ''}>Next ›</button>`;
+  pager.querySelectorAll('.pager-btn').forEach((b) => b.addEventListener('click', () => {
+    implOverPage += Number(b.dataset.dir);
+    renderImplOverList();
+  }));
 }
 
 function drawImplCharts() {

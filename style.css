@@ -308,6 +308,14 @@ tbody tr:hover td{background:var(--surface-2)}
 .impl-note[hidden]{display:none}
 .stage-row{grid-template-columns:170px 1fr auto}
 #impl-reps tbody tr.row-muted td{color:var(--text-3)}
+.pager{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:14px 14px 4px}
+.pager[hidden]{display:none}
+@media(max-width:520px){.pager{justify-content:center;gap:8px;padding:14px 0 4px}.pager-btn{padding:8px 12px}}
+.pager-info{white-space:nowrap;font-size:13.5px;color:var(--text-3);font-variant-numeric:tabular-nums}
+.pager-btn{white-space:nowrap;font:600 14px var(--font);color:var(--text-1);background:var(--surface-2);border:none;border-radius:999px;padding:8px 16px;cursor:pointer}
+.pager-btn:hover:not([disabled]){color:var(--lm-blue)}
+.pager-btn[disabled]{opacity:.4;cursor:default}
+.pager-btn:focus-visible{outline:2px solid var(--lm-blue);outline-offset:2px}
 #impl-reps td small{font-weight:400}
 @media(max-width:520px){.stage-row{grid-template-columns:120px 1fr auto}.stage-row .chan-label{font-size:13px}}
 #impl-over td:nth-child(2){font-weight:700;color:var(--text-1)}
