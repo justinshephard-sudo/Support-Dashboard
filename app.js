@@ -2099,7 +2099,9 @@ const IMPL_OVER_PAGE_SIZE = 15;
 let implOverPage = 0;
 
 function renderImplOverList() {
-  const over = IMPL.open.filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70);
+  // Lowest days first: firms that just crossed 70 days are the easiest to rescue.
+  const over = IMPL.open.filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70)
+    .sort((a, b) => toNumber(a.DaysInOnboarding) - toNumber(b.DaysInOnboarding) || a.Name.localeCompare(b.Name));
   document.getElementById('impl-over-note').textContent = `As of today · ${over.length} firm${over.length === 1 ? '' : 's'}`;
   const cols = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
     ['Specialist', 'Specialist'], ['AccountManager', 'Account Manager'], ['NextMeeting', 'Next meeting']];
