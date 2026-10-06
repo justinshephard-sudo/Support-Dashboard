@@ -126,7 +126,12 @@ function syncImplementation() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(IMPL_MONTHLY_TAB) || ss.insertSheet(IMPL_MONTHLY_TAB);
   var existing = {};
-  sheet.getDataRange().getValues().slice(1).forEach(function (r) { if (r[0]) existing[String(r[0])] = r; });
+  sheet.getDataRange().getValues().slice(1).forEach(function (r) {
+    if (!r[0]) return;
+    // Sheets may have auto-converted "October 2026" into a date; key it back by its label.
+    var k = r[0] instanceof Date ? Utilities.formatDate(r[0], tz, 'MMMM yyyy') : String(r[0]);
+    existing[k] = r;
+  });
 
   var curKey = Utilities.formatDate(now, tz, 'yyyy-MM');
   var out = [];
@@ -152,12 +157,14 @@ function syncImplementation() {
     ]));
   }
   sheet.clearContents();
-  sheet.getRange(1, 1, out.length + 1, IMPL_MONTHLY_COLUMNS.length).setValues([IMPL_MONTHLY_COLUMNS].concat(out));
+  // Plain text, so Sheets keeps "October 2026" and the ISO timestamp as written.
+  sheet.getRange(1, 1, out.length + 1, IMPL_MONTHLY_COLUMNS.length).setNumberFormat('@')
+    .setValues([IMPL_MONTHLY_COLUMNS].concat(out));
 
   var openSheet = ss.getSheetByName(IMPL_OPEN_TAB) || ss.insertSheet(IMPL_OPEN_TAB);
   openSheet.clearContents();
   var openOut = [IMPL_OPEN_COLUMNS].concat(openRows);
-  openSheet.getRange(1, 1, openOut.length, IMPL_OPEN_COLUMNS.length).setValues(openOut);
+  openSheet.getRange(1, 1, openOut.length, IMPL_OPEN_COLUMNS.length).setNumberFormat('@').setValues(openOut);
   return { open: open.length, needsScheduling: needsSched, over70: over };
 }
 

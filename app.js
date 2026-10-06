@@ -1936,7 +1936,7 @@ async function initImplementation() {
       fetchSheetByTitle('Impl - Monthly'),
       fetchSheetByTitle('Impl - Open Firms').catch(() => []),
     ]);
-    IMPL.months = sheetObjects(monthly).filter((m) => m.Month);
+    IMPL.months = sheetObjects(monthly).filter((m) => m.Month).map((m) => ({ ...m, Month: implMonthLabel(m.Month) }));
     IMPL.months.forEach((m) => IMPL.byLabel.set(m.Month, m));
     IMPL.open = sheetObjects(open);
     IMPL.loaded = true;
@@ -1959,6 +1959,14 @@ async function initImplementation() {
   if (latest) renderImplMonth(latest.Month);
   renderImplOverList();
   if (document.getElementById('view-impl').classList.contains('active')) drawImplCharts();
+}
+
+// "October 2026", or a date Sheets auto-converted it to (e.g. "10/1/2026") → "October 2026".
+function implMonthLabel(v) {
+  if (/^[A-Za-z]+ \d{4}$/.test(v)) return v;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
+  const d = iso ? new Date(+iso[1], iso[2] - 1, +iso[3]) : new Date(v);
+  return Number.isNaN(d.getTime()) ? v : d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function implPrevLabel(label) {
