@@ -66,6 +66,8 @@ function syncChurnZeroAccounts() {
   }
 
   writeAccountsTab_(rows);
+  // Implementation tab data (implementation-sync.gs). A failure there shouldn't block the Accounts sync.
+  try { syncImplementation(); } catch (e) { console.error('syncImplementation failed: ' + e); }
   return rows.length;
 }
 

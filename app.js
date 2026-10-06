@@ -97,6 +97,7 @@ const MONTH_NAMES = MONTH_TABS.map((m) => m.name);
    which lets the spreadsheet be private instead of "anyone with the link".
    -------------------------------------------------------------------------- */
 const AUTH = { token: null, email: null, tokenClient: null, gidTitle: {} };
+window.AUTH = AUTH;   // the embedded Additional Services app (services/) reuses this sign-in
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -1853,6 +1854,7 @@ async function main() {
     setupCelebrate();
     await loadGidTitleMap();
     initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
+    initImplementation().catch((err) => console.error('Implementation load failed', err));
 
     await loadReportTables();
     await fetchSheet(OVERRIDES_GID)
@@ -1908,6 +1910,156 @@ async function main() {
     console.error(err);
     showError(`Couldn't load dashboard data: ${err.message}`);
   }
+}
+
+/* ==========================================================================
+   Implementation tab — onboarding metrics from ChurnZero, written daily by
+   apps-script/implementation-sync.gs into "Impl - Monthly" / "Impl - Open Firms".
+   ========================================================================== */
+const IMPL = { months: [], byLabel: new Map(), open: [], loaded: false, chartsDrawn: false };
+const IMPL_STAGE_ORDER = ['Needs to Schedule', 'First Onboarding', 'Second Onboarding', 'Third Onboarding',
+  'Fourth Onboarding', 'Fifth Onboarding', 'Sixth Onboarding', 'Additional Onboarding'];
+
+function sheetObjects(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map((h) => String(h || '').trim());
+  return rows.slice(1).map((r) => {
+    const o = {};
+    header.forEach((h, i) => { o[h] = r[i] == null ? '' : String(r[i]).trim(); });
+    return o;
+  });
+}
+
+async function initImplementation() {
+  try {
+    const [monthly, open] = await Promise.all([
+      fetchSheetByTitle('Impl - Monthly'),
+      fetchSheetByTitle('Impl - Open Firms').catch(() => []),
+    ]);
+    IMPL.months = sheetObjects(monthly).filter((m) => m.Month);
+    IMPL.months.forEach((m) => IMPL.byLabel.set(m.Month, m));
+    IMPL.open = sheetObjects(open);
+    IMPL.loaded = true;
+  } catch (err) {
+    console.error('Implementation data not available', err);
+    const el = document.getElementById('impl-error');
+    el.textContent = 'Implementation data isn’t available yet — the ChurnZero sync hasn’t written the “Impl - Monthly” tab.';
+    el.hidden = false;
+    document.getElementById('impl-updated').textContent = '';
+    return;
+  }
+  const withData = IMPL.months.filter((m) => toNumber(m.ClosedOnboardings) || m.OpenOnboardings !== '' || toNumber(m.CsatResponses));
+  const options = withData.map((m) => ({ key: m.Month, label: m.Month.replace(/ \d{4}$/, (y) => (y.trim() === String(new Date().getFullYear()) ? '' : y)) }));
+  const latest = withData[withData.length - 1];
+  populateSelect('impl-month', options, latest ? latest.Month : '', 'key', 'label');
+  document.getElementById('impl-month').addEventListener('change', (e) => renderImplMonth(e.target.value));
+  const updated = latest && latest.UpdatedAt ? new Date(latest.UpdatedAt) : null;
+  document.getElementById('impl-updated').textContent = updated && !Number.isNaN(updated.getTime())
+    ? `ChurnZero data synced ${updated.toLocaleString()}` : 'ChurnZero data';
+  if (latest) renderImplMonth(latest.Month);
+  renderImplOverList();
+  if (document.getElementById('view-impl').classList.contains('active')) drawImplCharts();
+}
+
+function implPrevLabel(label) {
+  const i = IMPL.months.findIndex((m) => m.Month === label);
+  return i > 0 ? IMPL.months[i - 1].Month : null;
+}
+
+const IMPL_TILES = [
+  { label: 'Open Onboardings', slot: 1, kind: 'count', col: 'OpenOnboardings',
+    sub: (m) => (m.PreKickoff !== '' ? `${fmtNum(toNumber(m.PreKickoff))} Pre-Kickoff · ${fmtNum(toNumber(m.OpenStatus))} Open` : null) },
+  { label: 'Median Time in Onboarding', slot: 4, kind: 'days', goodDir: 'down', col: 'MedianDays',
+    sub: (m) => (toNumber(m.ClosedOnboardings) ? `Across ${fmtNum(toNumber(m.ClosedOnboardings))} closed this month` : null) },
+  { label: 'Onboardings Closed', slot: 3, kind: 'count', goodDir: 'up', col: 'ClosedOnboardings' },
+  { label: 'Onboarding CSAT', slot: 6, kind: 'pct', goodDir: 'up', col: 'CsatPct',
+    sub: (m) => (toNumber(m.CsatResponses) ? `${fmtNum(toNumber(m.CsatResponses))} responses (4–5 = satisfied)` : null) },
+  { label: 'Need to Schedule', slot: 5, kind: 'count', goodDir: 'down', col: 'NeedsScheduling', sub: () => 'Open, no upcoming meeting' },
+  { label: '70+ Days, Still Open', slot: 7, kind: 'count', goodDir: 'down', col: 'Over70', sub: () => 'Days since account start' },
+];
+
+function renderImplMonth(label) {
+  const m = IMPL.byLabel.get(label);
+  if (!m) return;
+  const prev = IMPL.byLabel.get(implPrevLabel(label)) || null;
+  const isCurrent = label === IMPL.months[IMPL.months.length - 1].Month;
+  const tiles = IMPL_TILES.map((d) => {
+    const cur = toNumber(m[d.col]);
+    let delta = null;
+    const p = prev ? toNumber(prev[d.col]) : null;
+    // Partial current month: skip the delta on counts that accumulate over the month.
+    const partial = isCurrent && (d.col === 'ClosedOnboardings');
+    if (d.goodDir && cur != null && p != null && p !== 0 && !partial) {
+      const pct = ((cur - p) / Math.abs(p)) * 100;
+      delta = { pct, good: d.goodDir === 'down' ? pct < 0 : pct > 0 };
+    }
+    const value = cur == null ? null : d.kind === 'pct' ? fmtPct(cur) : d.kind === 'days' ? `${fmtNum(cur)} days` : fmtNum(cur);
+    return { label: d.label, slot: d.slot, value, delta, sub: d.sub ? d.sub(m) : null };
+  });
+  renderTiles('impl-tiles', tiles);
+  const note = document.getElementById('impl-note');
+  const snapshotMissing = m.OpenOnboardings === '';
+  note.hidden = !snapshotMissing;
+  note.textContent = snapshotMissing
+    ? 'Open onboardings, need-to-schedule, 70+ days, and stages are daily snapshots — ChurnZero keeps no history for them, so they start October 2026.'
+    : '';
+  renderImplStages(m);
+}
+
+function renderImplStages(m) {
+  const el = document.getElementById('impl-stages');
+  let counts = {};
+  try { counts = m.StageCounts ? JSON.parse(m.StageCounts) : {}; } catch (e) { counts = {}; }
+  const rows = Object.entries(counts).map(([label, value]) => ({ label, value: Number(value) || 0 }))
+    .sort((a, b) => {
+      const ia = IMPL_STAGE_ORDER.indexOf(a.label), ib = IMPL_STAGE_ORDER.indexOf(b.label);
+      const ra = a.label === 'No stage set' ? 999 : (ia < 0 ? 500 : ia), rb = b.label === 'No stage set' ? 999 : (ib < 0 ? 500 : ib);
+      return ra - rb || b.value - a.value;
+    });
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  if (!total) { el.innerHTML = '<div class="empty-note">No stage snapshot for this month.</div>'; return; }
+  const max = Math.max(...rows.map((r) => r.value));
+  el.innerHTML = rows.map((r) => {
+    const color = r.label === 'No stage set' ? 'var(--slot-8)' : r.label === 'Needs to Schedule' ? 'var(--slot-5)' : 'var(--slot-1)';
+    return `<div class="chan-row stage-row"><span class="chan-label">${esc(r.label)}</span>`
+      + `<span class="chan-track"><span class="chan-fill" style="width:${(r.value / max) * 100}%;background:${color}"></span></span>`
+      + `<span class="chan-val">${fmtNum(r.value)}<small>${Math.round((r.value / total) * 100)}%</small></span></div>`;
+  }).join('');
+}
+
+function renderImplOverList() {
+  const over = IMPL.open.filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70);
+  document.getElementById('impl-over-note').textContent = `As of today · ${over.length} firm${over.length === 1 ? '' : 's'}`;
+  const cols = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
+    ['Specialist', 'Specialist'], ['AccountManager', 'Account Manager'], ['NextMeeting', 'Next meeting']];
+  const table = document.getElementById('impl-over');
+  table.querySelector('thead').innerHTML = `<tr>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr>`;
+  table.querySelector('tbody').innerHTML = over.length
+    ? over.map((f) => `<tr>${cols.map(([k]) => `<td>${esc(f[k] || '–')}</td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${cols.length}">No open onboardings at 70+ days.</td></tr>`;
+}
+
+function drawImplCharts() {
+  if (!IMPL.loaded || IMPL.chartsDrawn) return;
+  IMPL.chartsDrawn = true;
+  const done = IMPL.months.slice(-13, -1);   // last 12 completed months
+  const labels = done.map((m) => m.Month.replace(/ (\d{4})$/, (y, yr) => ` ’${yr.slice(2)}`).replace(/^(\w{3})\w*/, '$1'));
+  const series = (col) => done.map((m) => toNumber(m[col]));
+  drawLineChart('chart-impl-closed', labels, [{ label: 'Onboardings Closed', data: series('ClosedOnboardings'), borderColor: cssVar('--slot-3') }]);
+  drawLineChart('chart-impl-median', labels, [{ label: 'Median days', data: series('MedianDays'), borderColor: cssVar('--slot-4') }]);
+  drawLineChart('chart-impl-csat', labels, [{ label: 'Onboarding CSAT %', data: series('CsatPct'), borderColor: cssVar('--slot-6') }], { max: 100 });
+}
+
+// Additional Services: the Builds board + quote builder app (services/), embedded on first open.
+// Same origin, so it borrows this page's Google sign-in (window.AUTH) instead of signing in again.
+function mountServices() {
+  const root = document.getElementById('services-root');
+  if (!root || root.querySelector('iframe')) return;
+  const frame = document.createElement('iframe');
+  frame.src = 'services/index.html?v=7';
+  frame.title = 'Additional Services';
+  frame.className = 'services-frame';
+  root.appendChild(frame);
 }
 
 /* ==========================================================================
@@ -2206,6 +2358,8 @@ function setupTabs() {
     const v = document.getElementById('view-' + t.dataset.tab);
     if (v) v.classList.add('active');
     if (t.dataset.tab === 'firm') { const q = document.getElementById('q'); if (q) q.focus(); }
+    if (t.dataset.tab === 'impl') drawImplCharts();
+    if (t.dataset.tab === 'services') mountServices();
   }));
 }
 

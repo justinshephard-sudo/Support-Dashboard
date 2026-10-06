@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Additional Services</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css?v=7">
+  <script>/* Only the standalone app needs the Google sign-in button; the CS Dashboard tab reuses its sign-in. */
+    try { if (window.parent === window || !window.parent.AUTH) document.write('<script src="https://accounts.google.com/gsi/client" async defer><\/script>'); } catch (e) { document.write('<script src="https://accounts.google.com/gsi/client" async defer><\/script>'); }</script>
+</head>
+<body>
+  <!-- Sign-in gate: shown until a verified @lawmatics.com Google account signs in -->
+  <div id="gate">
+    <div class="gate">
+      <img class="gate-logo" src="assets/lawmatics-logo.svg" alt="Lawmatics" width="150" height="25">
+      <h1>Additional Services</h1>
+      <p>Sign in with your Lawmatics Google account to see current builds and create quotes.</p>
+      <div id="gsiButton"></div>
+      <p class="gerr" id="gateErr" hidden></p>
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <header class="appbar">
+      <div class="appbar-in">
+        <div class="brand"><img src="assets/lawmatics-logo.svg" alt="Lawmatics" width="128" height="21"><span class="product">Implementation Specialists</span></div>
+        <nav class="tabs" role="tablist" aria-label="Sections">
+          <button type="button" role="tab" id="tab-builds" aria-controls="view-builds" aria-selected="true">Builds</button>
+          <button type="button" role="tab" id="tab-quote" aria-controls="view-quote" aria-selected="false">New quote</button>
+        </nav>
+        <div class="who"><div class="avatar" id="avatar" aria-hidden="true"></div><span class="who-name" id="whoName"></span><button class="linkbtn" type="button" id="signOut">Sign out</button></div>
+      </div>
+    </header>
+
+    <div class="band">
+      <div class="wrap band-in">
+        <div class="band-title">
+          <div class="eyebrow">Additional Services</div>
+          <h1 id="pageTitle">Current builds</h1>
+          <p class="band-sub" id="pageSub">Every Additional Services request, by stage. Click a card to update it.</p>
+        </div>
+        <div class="summary" id="summary"></div>
+      </div>
+    </div>
+
+    <main class="wrap">
+    <div class="mockbar" role="note" id="mockBar" hidden>
+      <span><strong>Test mode.</strong> Sample prices and data, no sign-in, and nothing is written to Asana.</span>
+    </div>
+
+    <section id="view-builds" role="tabpanel" aria-labelledby="tab-builds">
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="Search firm, Firm ID, quote ID…" aria-label="Search requests">
+        <select id="fAssignee" aria-label="Filter by assignee"><option value="">All assignees</option></select>
+        <select id="fCsm" aria-label="Filter by CSM"><option value="">All CSMs</option></select>
+        <select id="fPeriod" aria-label="Revenue period">
+          <option value="month">Revenue: this month</option>
+          <option value="lastmonth">Revenue: last month</option>
+          <option value="quarter">Revenue: this quarter</option>
+          <option value="ytd">Revenue: year to date</option>
+          <option value="all">Revenue: all time</option>
+        </select>
+        <span class="spacer"></span>
+        <span class="updated" id="updated"></span>
+        <button class="btn small" type="button" id="refresh">Refresh</button>
+        <button class="btn small" type="button" id="csv">Download CSV</button>
+      </div>
+      <div class="board-wrap"><div class="board" id="board"><div class="state">Loading builds…</div></div></div>
+    </section>
+
+    <section id="view-quote" role="tabpanel" aria-labelledby="tab-quote" hidden>
+    <form class="grid" id="qform" novalidate>
+      <div class="col">
+        <section class="block" aria-labelledby="h-acct">
+          <h2 id="h-acct">Account</h2>
+          <div class="fields">
+            <div class="combo">
+              <label class="f"><span>Firm <span class="req">*</span></span><input type="text" id="firm" autocomplete="off" spellcheck="false" placeholder="Start typing a firm name or ID…" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="firmList"></label>
+              <div class="combo-list" id="firmList" role="listbox" aria-label="Firms on file" hidden></div>
+            </div>
+            <label class="f"><span>Firm ID <span class="req">*</span></span><input type="text" id="firmId" inputmode="numeric" autocomplete="off" placeholder="Filled in when you pick a firm"></label>
+            <div class="firm-status full" id="firmStatus" aria-live="polite"></div>
+            <label class="f">Decision-maker name<input type="text" id="dmName" autocomplete="off"></label>
+            <label class="f"><span>Decision-maker email <span class="req">*</span></span><input type="email" id="dmEmail" autocomplete="off"></label>
+            <label class="f">CSM (cc'd on the quote)<select id="csm"><option value="">Select CSM…</option></select></label>
+            <label class="f">Practice area
+              <select id="pa">
+                <option value="">Select…</option>
+                <option>Personal Injury</option><option>Family Law</option><option>Estate Planning</option><option>Immigration</option>
+                <option>Criminal Defense</option><option>Employment Law</option><option>Bankruptcy</option><option>Business</option><option>Other</option>
+              </select>
+            </label>
+            <label class="f full">Notes
+              <textarea id="notes" placeholder="Anything the offshore rep should know: context from the call, links, preferences"></textarea>
+            </label>
+            <label class="f">Needed by (preference)<input type="date" id="needBy"></label>
+            <label class="f">Files link (optional)<input type="text" id="files" placeholder="Drive folder link"></label>
+            <div class="full qfiles">
+              <label class="dropzone" id="qDrop">
+                <input type="file" id="qFiles" multiple>
+                <span><strong>Attach files</strong>: paper forms, letters, reports to copy</span>
+                <span class="dz-sub">Uploaded to the Asana card when you create it · up to 25 MB each</span>
+              </label>
+              <div id="qFileList" class="files"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="block" aria-labelledby="h-svc">
+          <h2 id="h-svc">Services</h2>
+          <p class="hint">Set a quantity for each item. Detail questions open for each service you add.</p>
+          <div id="catalog" style="display:grid;gap:12px"></div>
+        </section>
+
+        <section class="block" aria-labelledby="h-waive">
+          <h2 id="h-waive">Waiver</h2>
+          <label class="check"><input type="checkbox" id="waived"> Waive every item on this quote</label>
+          <p class="hint" style="margin:0">To waive only some items, tick <strong>Waive</strong> next to each one under Services. Waivers are for accounts in the 6-month upsell window. Waived items still go through the full process, their list value is recorded for reporting, and they aren't charged in Chargebee.</p>
+        </section>
+      </div>
+
+      <aside class="desk" aria-label="Quote">
+        <div class="totals" aria-live="polite">
+          <div class="row"><span>Line items</span><span id="tItems">0</span></div>
+          <div class="row"><span>List value</span><span id="tList">$0</span></div>
+          <div class="row" id="tWaivedRow" hidden><span>Waived</span><span id="tWaived">−$0</span></div>
+          <div class="row big-row"><span>Quote total</span><span class="big" id="tTotal">$0</span></div>
+          <div class="flags" id="flags"></div>
+        </div>
+
+        <div class="paper-wrap">
+          <div class="paper-cap"><span>Quote card, ready to screenshot</span><span id="validCap"></span></div>
+          <div class="paper" id="paper"></div>
+        </div>
+
+        <div class="btns">
+          <button class="btn" type="button" id="copyBtn">Copy quote email</button>
+          <button class="btn cta" type="submit" id="createBtn">Quote sent – create card</button>
+          <div class="toast full" id="toast" role="status"></div>
+        </div>
+
+        <div class="success" id="success" hidden></div>
+
+        <div class="panel" id="emailPanel" hidden>
+          <h3>Quote email <button class="btn small" type="button" id="hideEmail">Hide</button></h3>
+          <pre class="email" id="emailText" tabindex="0"></pre>
+        </div>
+      </aside>
+    </form>
+    </section>
+    </main>
+  </div>
+
+  <!-- Request detail drawer -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
+    <div class="drawer-head">
+      <div><h2 id="dTitle"></h2><div class="sub" id="dSub"></div></div>
+      <button class="btn small" type="button" id="dClose">Close</button>
+    </div>
+    <div class="drawer-body" id="dBody"></div>
+  </aside>
+
+  <script src="assets/config.js?v=7"></script>
+  <script src="assets/app.js?v=7"></script>
+  <script src="assets/quote.js?v=7"></script>
+  <script src="assets/board.js?v=7"></script>
+  <script src="assets/boot.js?v=7"></script>
+</body>
+</html>

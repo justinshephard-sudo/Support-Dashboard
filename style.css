@@ -302,3 +302,21 @@ tbody tr:hover td{background:var(--surface-2)}
 .pf-link:hover{filter:brightness(1.06)}
 .pf-link:disabled{opacity:.7;cursor:progress}
 .pf-flag{font-size:12.5px;font-weight:600;color:var(--st-warn);margin-top:5px}
+
+/* ---------- Implementation tab ---------- */
+.impl-note{font-size:13.5px;color:var(--text-3);margin-top:12px}
+.impl-note[hidden]{display:none}
+.stage-row{grid-template-columns:170px 1fr auto}
+@media(max-width:520px){.stage-row{grid-template-columns:120px 1fr auto}.stage-row .chan-label{font-size:13px}}
+#impl-over td:nth-child(2){font-weight:700;color:var(--text-1)}
+
+/* ---------- CSM: under construction ---------- */
+.construction{max-width:560px;margin:30px auto 10px;text-align:center}
+.construction img{width:min(260px,70vw);height:auto;display:block;margin:0 auto 16px;filter:drop-shadow(0 16px 24px rgba(31,52,76,.2))}
+.construction h2{font-size:clamp(26px,3vw,34px);font-weight:700;margin-top:6px}
+.construction p{font-size:17px;color:var(--text-2);margin-top:8px}
+@media(max-width:760px){.hero .tabbar{display:flex;max-width:100%;overflow-x:auto;scrollbar-width:none;justify-content:flex-start}.hero .tabbar::-webkit-scrollbar{display:none}.tab{flex:none}}
+
+/* ---------- Additional Services (embedded app) ---------- */
+.services-frame-wrap{max-width:1440px;margin:0 auto;padding:0 16px 24px}
+.services-frame{display:block;width:100%;height:calc(100vh - 80px);min-height:640px;border:1px solid var(--border);border-radius:var(--radius);background:#fff;box-shadow:var(--shadow-sm)}
