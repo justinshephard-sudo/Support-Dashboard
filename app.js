@@ -1638,7 +1638,15 @@ function launchConfetti() {
 
 /* ======================= 🎉 THE CELEBRATION ======================= */
 let _celebrating = false;
-const CB_COLORS = ['#ff2d75', '#ffd23f', '#3ec1ff', '#7cff5b', '#b06bff', '#ff8a3d', '#ff5bd0'];
+// Lawmatics palette: blue, cyan, orange, amber, plus a pop of pink/violet and white.
+const CB_COLORS = ['#068bff', '#00cfdc', '#ff9011', '#ff612c', '#ffd23f', '#ff4fa3', '#8a6bff', '#ffffff'];
+// Merlin's playdate parade — every scene of Merlin playing with a pet.
+const CB_PLAYMATES = [
+  'merlin-play-cat-feather', 'merlin-play-corgi-ball', 'merlin-play-pitbull-tug', 'merlin-play-kitten-wand',
+  'merlin-play-pup-highfive', 'merlin-play-sphynx-ribbon', 'merlin-play-golden-fetch', 'merlin-play-stbernard-tug',
+  'merlin-dog',
+];
+const CB_PHRASES = ['Team crushed it!', 'Support superstars!', 'Absolute legends!', 'Incredible work!', 'Let’s gooo!'];
 
 function ensureCelebrateStyles() {
   if (document.getElementById('cb-styles')) return;
@@ -1729,76 +1737,98 @@ function cbFirework(layer, xvw, yvh) {
   }
 }
 
+// Gentle brand-colored confetti falling for the whole celebration.
+function cbRain(layer, count, seconds) {
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    const w = 6 + Math.random() * 7;
+    Object.assign(p.style, { position: 'absolute', top: '-4vh', left: Math.random() * 100 + 'vw', width: w + 'px', height: (w * 0.45) + 'px',
+      background: CB_COLORS[(Math.random() * CB_COLORS.length) | 0], borderRadius: '2px', opacity: '.9', zIndex: 1,
+      animation: `cbFall ${3.5 + Math.random() * 3}s linear ${Math.random() * Math.max(0, seconds - 4)}s forwards` });
+    layer.appendChild(p);
+  }
+}
+
 function celebrate() {
   if (_celebrating) return;
   _celebrating = true;
   ensureCelebrateStyles();
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const DURATION = reduced ? 5000 : 11500;
 
   const layer = document.createElement('div');
   layer.id = 'celebrate-layer';
-  Object.assign(layer.style, { position: 'fixed', inset: '0', zIndex: 99999, pointerEvents: 'none', overflow: 'hidden' });
+  layer.className = 'cb-layer';
+  layer.title = 'Click anywhere to close';
   document.body.appendChild(layer);
 
-  // rainbow flashes
-  const flash = document.createElement('div');
-  Object.assign(flash.style, { position: 'absolute', inset: '0',
-    background: 'radial-gradient(circle at 50% 40%, rgba(255,45,117,.55), rgba(62,193,255,.4) 42%, rgba(176,107,255,.3) 72%, transparent)',
-    animation: 'cbFlash 1.5s ease-in-out 3' });
-  layer.appendChild(flash);
+  // center stage: confetti Merlin + rotating headline
+  const stage = document.createElement('div');
+  stage.className = 'cb-stage';
+  stage.innerHTML = '<img class="cb-star" src="assets/merlin-confetti.webp" alt="">'
+    + '<div class="eyebrow cb-eyebrow">CS Support Team</div>'
+    + '<div class="cb-headline"></div>'
+    + '<div class="cb-sub">Merlin and friends are celebrating with you.</div>';
+  layer.appendChild(stage);
+  const headline = stage.querySelector('.cb-headline');
+  const phrases = CB_PHRASES.slice().sort(() => Math.random() - 0.5);
+  let pi = 0;
+  const nextPhrase = () => {
+    headline.textContent = phrases[pi++ % phrases.length];
+    headline.classList.remove('pop'); void headline.offsetWidth; headline.classList.add('pop');
+  };
+  nextPhrase();
+  const phraseTimer = setInterval(nextPhrase, 1900);
 
-  // emoji monsoon
-  const EMO = ['🎉', '🎊', '🥳', '🦄', '🚀', '⭐', '🏆', '💥', '✨', '💫', '🌈', '🔥', '👏', '💯', '🎈', '🍾', '🎆'];
-  for (let i = 0; i < 170; i++) {
-    const s = document.createElement('div');
-    s.textContent = EMO[(Math.random() * EMO.length) | 0];
-    Object.assign(s.style, { position: 'absolute', left: Math.random() * 100 + 'vw', top: '-12vh',
-      fontSize: (18 + Math.random() * 40) + 'px', willChange: 'transform',
-      animation: `cbFall ${2.4 + Math.random() * 3.2}s linear ${Math.random() * 2.8}s forwards` });
-    layer.appendChild(s);
+  // the parade: two lanes of Merlin playing with pets, hopping across the screen
+  const mates = CB_PLAYMATES.slice().sort(() => Math.random() - 0.5);
+  if (reduced) {
+    const row = document.createElement('div');
+    row.className = 'cb-static-row';
+    row.innerHTML = mates.slice(0, 6).map((n) => `<img src="assets/${n}.webp" alt="">`).join('');
+    layer.appendChild(row);
+  } else {
+    // Each lane loops continuously; negative delays spread the walkers out so the
+    // screen is full of playmates from the very first frame.
+    const narrow = window.innerWidth < 700;
+    const LAP = narrow ? 7 : 9;   // seconds for one crossing
+    const perLane = narrow ? 3 : 5;  // fewer walkers on phones so they don't pile up
+    const lanes = { top: mates.filter((_, i) => i % 2 === 0).slice(0, perLane), bottom: mates.filter((_, i) => i % 2 === 1).slice(0, perLane) };
+    Object.entries(lanes).forEach(([lane, names]) => {
+      names.forEach((name, k) => {
+        const walker = document.createElement('div');
+        walker.className = `cb-walker cb-lane-${lane}`;
+        walker.style.animationDuration = `${LAP}s`;
+        walker.style.animationDelay = `${-(k * LAP / names.length + (lane === 'bottom' ? LAP / names.length / 2 : 0)).toFixed(2)}s`;
+        walker.innerHTML = `<img src="assets/${name}.webp" alt="" style="animation-delay:${(Math.random() * 0.4).toFixed(2)}s">`;
+        layer.appendChild(walker);
+      });
+    });
+    cbRain(layer, 140, DURATION / 1000);
+
+    // brand-colored confetti cannons + a few fireworks behind the stage
+    cbCannon(layer, 4); cbCannon(layer, 96);
+    setTimeout(() => { cbCannon(layer, 20); cbCannon(layer, 80); }, 600);
+    setTimeout(() => { cbCannon(layer, 8); cbCannon(layer, 92); }, 4200);
+    for (let k = 0; k < 6; k++) {
+      setTimeout(() => cbFirework(layer, 18 + Math.random() * 64, 22 + Math.random() * 30), 500 + k * 900);
+    }
+    const btn = document.getElementById('celebrateBtn');
+    if (btn) { btn.style.animation = 'cbSpin .6s linear 3'; setTimeout(() => { btn.style.animation = ''; }, 1900); }
   }
-
-  // confetti cannons (staggered)
-  cbCannon(layer, 5); cbCannon(layer, 95);
-  setTimeout(() => { cbCannon(layer, 22); cbCannon(layer, 78); }, 550);
-  setTimeout(() => { cbCannon(layer, 50); }, 1150);
-
-  // fireworks all over
-  for (let k = 0; k < 9; k++) {
-    setTimeout(() => cbFirework(layer, 12 + Math.random() * 76, 12 + Math.random() * 48), 300 + k * 520);
-  }
-
-  // giant cycling hero banners
-  const PHRASES = ['🎉 WOOHOO! 🎉', '🏆 TEAM CRUSHED IT! 🏆', '🚀 ABSOLUTE LEGENDS! 🚀', '🥳 LET’S GOOO! 🥳', '💯 INCREDIBLE WORK! 💯', '⭐ SUPPORT SUPERSTARS! ⭐'];
-  PHRASES.slice().sort(() => Math.random() - 0.5).slice(0, 4).forEach((txt, i) => {
-    setTimeout(() => {
-      const h = document.createElement('div');
-      h.textContent = txt;
-      Object.assign(h.style, { position: 'fixed', left: '50%', top: '42%', transform: 'translate(-50%,-50%)',
-        font: '800 clamp(30px,6.5vw,72px) Barlow,system-ui,sans-serif', textAlign: 'center', whiteSpace: 'nowrap',
-        background: 'linear-gradient(90deg,#ff2d75,#ffd23f,#3ec1ff,#7cff5b,#b06bff)',
-        WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent',
-        filter: 'drop-shadow(0 6px 26px rgba(0,0,0,.45))', animation: 'cbHero 1.5s ease-out forwards', zIndex: 100000 });
-      layer.appendChild(h);
-      setTimeout(() => h.remove(), 1600);
-    }, i * 1300);
-  });
-
-  // confetti Merlin jumps up from the bottom of the screen to join the party
-  const merlin = document.createElement('img');
-  merlin.src = 'assets/merlin-confetti.webp';
-  merlin.alt = '';
-  merlin.className = 'cb-merlin';
-  layer.appendChild(merlin);
-
-  // shake the whole app + spin the button
-  const app = document.getElementById('app');
-  if (app) { app.style.animation = 'cbShake .6s ease-in-out 2'; setTimeout(() => { app.style.animation = ''; }, 1300); }
-  const btn = document.getElementById('celebrateBtn');
-  if (btn) { btn.style.animation = 'cbSpin .6s linear 3'; setTimeout(() => { btn.style.animation = ''; }, 1900); }
 
   celebrateSound();
 
-  setTimeout(() => { layer.remove(); _celebrating = false; }, 7000);
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(phraseTimer);
+    layer.classList.add('out');
+    setTimeout(() => { layer.remove(); _celebrating = false; }, 450);
+  };
+  layer.addEventListener('click', close);
+  setTimeout(close, DURATION);
 }
 
 function setupCelebrate() {
