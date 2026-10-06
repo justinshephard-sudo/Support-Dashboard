@@ -79,7 +79,7 @@ function plan_(b) {
     pendingDocs++;
   });
   var accounts = Object.keys(pending);
-  var max = Math.min(Number(b.maxAccounts) || MAX_ACCOUNTS_PER_PLAN, 200);
+  var max = Math.min(Number(b.maxAccounts) || MAX_ACCOUNTS_PER_PLAN, 1000);   // large values only for one-off backfills
   return { ok: true, totalLinks: (b.links || []).length, pendingDocs: pendingDocs,
     pendingAccounts: accounts.length, accounts: accounts.slice(0, max) };
 }
