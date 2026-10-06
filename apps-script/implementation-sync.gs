@@ -11,10 +11,12 @@
         and frozen once the month ends (ChurnZero keeps no status history):
           OpenOnboardings, PreKickoff, OpenStatus, NeedsScheduling, Over70, StageCounts (JSON)
         Recomputed from history for every month:
-          ClosedOnboardings  firms whose OnboardingCompletedDate falls in the month
+          ClosedOnboardings  firms whose OnboardingCompletedDate falls in the month (skipping
+                         negative NewTimeInOnboarding: completed before the current start)
           MedianDays         median NewTimeInOnboarding of those firms (the field is the
                              final total, populated when onboarding completes)
           CsatPct / CsatResponses   "Onboarding CSAT" survey: share of 4–5 scores
+                                    (responses on/after the firm's current start only)
         RepStats (JSON)  the same metrics per rep (ChurnZero "Account Manager", blank →
                          "Unassigned"): { rep: { open, preKick, needsSched, over70,
                          closed, medianDays, csatPct, csatN } }. Snapshot keys follow the
@@ -22,13 +24,17 @@
                          each firm's CURRENT account manager.
      "Impl - Open Firms" today's open onboardings, one row per firm
 
-   Definitions (active accounts only, IsActive eq true; agency firms and agency
-   client firms — Cf.AgencyFirm / Cf.AgencyClientFirm true — are left out of everything):
+   Which firms count (applies to every number): active accounts (IsActive eq true)
+   that started on or after IMPL_MIN_START (StartDate, or Cf.CurrentTermStart when
+   StartDate is blank), excluding agency firms and agency client firms
+   (Cf.AgencyFirm / Cf.AgencyClientFirm true).
+
+   Definitions:
      open onboarding  = OnboardingStatus "Pre-Kickoff" or "Open"
      rep              = AccountManager (blank → "Unassigned")
      stage            = NewOnboardingCall (blank → "No stage set")
      needs scheduling = open onboarding with no upcoming ChurnZero meeting
-     days in onboarding (open firms) = TenureInDays (days since account start)
+     days in onboarding (open firms) = days since that start date
    ========================================================================== */
 
 var IMPL_MONTHLY_TAB = 'Impl - Monthly';
@@ -37,6 +43,7 @@ var IMPL_OPEN_STATUSES = ['Pre-Kickoff', 'Open'];
 var IMPL_CSAT_SURVEY_ID = 2;          // ChurnZero survey "Onboarding CSAT"
 var IMPL_OVER_DAYS = 70;
 var IMPL_UNASSIGNED = 'Unassigned';
+var IMPL_MIN_START = new Date('2025-01-01T00:00:00-08:00');   // only firms that started on/after this
 var IMPL_HISTORY_MONTHS = 24;         // months of completion/CSAT history kept in the tab
 var IMPL_MONTHLY_COLUMNS = ['Month', 'OpenOnboardings', 'PreKickoff', 'OpenStatus', 'NeedsScheduling', 'Over70',
   'ClosedOnboardings', 'MedianDays', 'CsatPct', 'CsatResponses', 'StageCounts', 'UpdatedAt', 'RepStats'];
@@ -54,10 +61,14 @@ function syncImplementation() {
   var now = new Date();
 
   var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
-    .filter(function (a) { var cf = a.Cf || {}; return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true; });
-  var activeIds = {}, repOf = {};
+    .filter(function (a) {
+      var cf = a.Cf || {};
+      var start = implStart_(a);
+      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && start && start >= IMPL_MIN_START;
+    });
+  var activeIds = {}, repOf = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {
-    activeIds[String(a.Id)] = true;
+    activeIds[String(a.Id)] = implStart_(a);
     repOf[String(a.Id)] = (a.Cf || {}).AccountManager || IMPL_UNASSIGNED;
   });
   var repSnap = {};   // rep -> today's open-onboarding counts
@@ -86,7 +97,7 @@ function syncImplementation() {
     if (cf.OnboardingStatus === 'Pre-Kickoff') { preKick++; rb.preKick++; } else openStatus++;
     var next = nextMeeting[String(a.Id)] || '';
     if (!next) { needsSched++; rb.needsSched++; }
-    var days = a.TenureInDays == null ? '' : Math.round(a.TenureInDays);
+    var days = Math.floor((now - implStart_(a)) / 86400000);
     if (days !== '' && days >= IMPL_OVER_DAYS) { over++; rb.over70++; }
     return [a.Name || '', a.ExternalId || cf.FirmId || '', cf.OnboardingStatus || '', stage,
       cf.ImplementationSpecialist || '', cf.AccountManager || '', days,
@@ -100,6 +111,9 @@ function syncImplementation() {
   accounts.forEach(function (a) {
     var cf = a.Cf || {};
     if (!cf.OnboardingCompletedDate) return;
+    // A negative total means the completion predates the firm's current start date
+    // (a returning customer's earlier contract), so it doesn't belong to this onboarding.
+    if (cf.NewTimeInOnboarding != null && cf.NewTimeInOnboarding !== '' && Number(cf.NewTimeInOnboarding) < 0) return;
     var mk = String(cf.OnboardingCompletedDate).slice(0, 7);
     (completed[mk] = completed[mk] || []).push(cf.NewTimeInOnboarding);
     var byRep = repCompleted[mk] = repCompleted[mk] || {};
@@ -114,7 +128,9 @@ function syncImplementation() {
   var csat = {};      // 'yyyy-MM' -> {pos, n}
   var repCsat = {};   // 'yyyy-MM' -> rep -> {pos, n}
   responses.forEach(function (r) {
-    if (r.IsPending || r.Score == null || !r.ResponseDate || !activeIds[String(r.AccountId)]) return;
+    var start = activeIds[String(r.AccountId)];
+    // Only responses from this onboarding (on/after the firm's current start).
+    if (r.IsPending || r.Score == null || !r.ResponseDate || !start || new Date(r.ResponseDate) < start) return;
     var mk = Utilities.formatDate(new Date(r.ResponseDate), tz, 'yyyy-MM');
     var byRep = repCsat[mk] = repCsat[mk] || {};
     var rep = repOf[String(r.AccountId)];
@@ -168,6 +184,14 @@ function syncImplementation() {
   var openOut = [IMPL_OPEN_COLUMNS].concat(openRows);
   openSheet.getRange(1, 1, openOut.length, IMPL_OPEN_COLUMNS.length).setNumberFormat('@').setValues(openOut);
   return { open: open.length, needsScheduling: needsSched, over70: over };
+}
+
+// When the firm started: the account StartDate, or its current term start if that's blank.
+function implStart_(a) {
+  var v = a.StartDate || (a.Cf || {}).CurrentTermStart;
+  if (!v) return null;
+  var d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // Per-rep stats for one month: snapshot counts (today's for the current month, the
