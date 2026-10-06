@@ -1325,6 +1325,59 @@ function renderPhoneSplit(mk) {
   el.hidden = !html;
 }
 
+// Phones, per rep: from the same teammate rows as the leaderboard (manager overrides applied).
+const PHONE_REP_COLS = [
+  { key: 'name', label: 'Rep' },
+  { key: 'totalCalls', label: 'Total Calls' },
+  { key: 'answered', label: 'Answered' },
+  { key: 'missedCalls', label: 'Missed' },
+  { key: 'declinedCalls', label: 'Declined' },
+  { key: 'phoneAnswerRate', label: 'Answer Rate' },
+  { key: 'supportCalls', label: 'Support Calls' },
+];
+const phoneRepSort = { key: 'totalCalls', dir: -1 };
+
+function renderPhoneReps(people) {
+  const table = document.getElementById('phone-reps');
+  if (!table) return;
+  const rows = (people || []).map((m) => {
+    const total = toNumber(m.totalCalls);
+    const against = (toNumber(m.missedCalls) || 0) + (toNumber(m.declinedCalls) || 0);
+    return { ...m, answered: total == null ? null : String(Math.max(0, total - against)) };
+  }).filter((m) => toNumber(m.totalCalls) || toNumber(m.supportCalls));
+
+  const head = document.createElement('tr');
+  PHONE_REP_COLS.forEach((c) => {
+    const th = document.createElement('th');
+    th.textContent = c.label;
+    if (phoneRepSort.key === c.key) th.classList.add('sorted', ...(phoneRepSort.dir === 1 ? ['asc'] : []));
+    th.addEventListener('click', () => {
+      if (phoneRepSort.key === c.key) phoneRepSort.dir *= -1;
+      else { phoneRepSort.key = c.key; phoneRepSort.dir = c.key === 'name' ? 1 : -1; }
+      renderPhoneReps(people);
+    });
+    head.appendChild(th);
+  });
+  table.querySelector('thead').replaceChildren(head);
+  if (!rows.length) {
+    table.querySelector('tbody').innerHTML = `<tr><td colspan="${PHONE_REP_COLS.length}">No phone activity by rep this month.</td></tr>`;
+    return;
+  }
+  const { key, dir } = phoneRepSort;
+  rows.sort((a, b) => {
+    const av = sortValue(a[key]), bv = sortValue(b[key]);
+    if (av == null && bv == null) return a.name.localeCompare(b.name);
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * dir;
+    return (av - bv) * dir || a.name.localeCompare(b.name);
+  });
+  table.querySelector('tbody').innerHTML = rows.map((m) => `<tr>${PHONE_REP_COLS.map((c) => {
+    const v = m[c.key];
+    return `<td>${esc(v != null && String(v).trim() !== '' ? v : '–')}</td>`;
+  }).join('')}</tr>`).join('');
+}
+
 function renderManualSection(monthName) {
   const tiles = statTiles(MANUAL_DEFS, monthName);
   if (overridesUnlocked && DATA_OVERRIDES_WEBAPP_URL) {
@@ -1403,6 +1456,7 @@ function renderMonth(entry) {
   renderMonthSections(entry.name);
   const people = individualsOnly(entry.parsed.members, idx);
   renderMonthlyLeaderboard(people);
+  renderPhoneReps(people);
   renderIncentives(people, entry.gid);
   updateMascot(people, entry.name);
 }
