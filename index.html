@@ -6,8 +6,8 @@
 <title>CS Support Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=16">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=17">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -32,15 +32,13 @@
 <div id="app" class="hidden">
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand">
-        <span class="brand-mark"><img src="assets/logo-icon.png" alt="Lawmatics"></span>
-        <div class="brand-text">
-          <h1>CS Support Dashboard</h1>
-          <p><span class="lm">Lawmatics</span> Customer Support</p>
-        </div>
-      </div>
+      <a class="brand" href="./" aria-label="CS Support Dashboard home">
+        <img class="brand-logo" src="assets/logo-wordmark.png" alt="Lawmatics">
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-name">CS Support Dashboard</span>
+      </a>
       <div class="topbar-actions">
-        <button id="celebrateBtn" class="celebrate-btn" title="Celebrate the team!" style="border:none;cursor:pointer;font:800 13px system-ui,sans-serif;padding:7px 15px;border-radius:20px;color:#fff;background:linear-gradient(90deg,#ff2d75,#b06bff,#3ec1ff);background-size:200% 100%;box-shadow:0 2px 12px rgba(176,107,255,.55);transition:transform .12s;">🎉 Celebrate</button>
+        <button id="celebrateBtn" class="celebrate-btn" title="Celebrate the team!">🎉 Celebrate</button>
         <span class="live-badge" id="liveBadge"><span class="dot"></span><span class="txt">Live</span></span>
         <button class="icon-btn" id="themeBtn" title="Toggle light / dark" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
         <span class="user-chip hidden" id="userChip"></span>
@@ -48,18 +46,23 @@
     </div>
   </header>
 
-  <div class="tab-strip">
-    <nav class="tabbar">
-      <button class="tab active" data-tab="team">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Team Performance
-      </button>
-      <button class="tab" data-tab="firm">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
-        Firm Lookup
-      </button>
-    </nav>
-  </div>
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="eyebrow">Customer Support</div>
+      <h1>Support performance, <span class="grad-text">at a glance</span></h1>
+      <p class="hero-sub">Team results, Fin, phones, and firm context — live from Intercom and ChurnZero.</p>
+      <nav class="tabbar">
+        <button class="tab active" data-tab="team">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Team Performance
+        </button>
+        <button class="tab" data-tab="firm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+          Firm Lookup
+        </button>
+      </nav>
+    </div>
+  </section>
 
   <!-- ===================== TEAM VIEW ===================== -->
   <div class="view active" id="view-team">
@@ -77,12 +80,12 @@
       <section class="section"><div id="tiles" class="tiles"></div></section>
 
       <section class="section">
-        <div class="section-head"><h2>🏆 Team Leaderboard</h2><span class="rule"></span><span class="note">Click a column to sort</span></div>
+        <div class="section-head"><h2>Team Leaderboard</h2><span class="rule"></span><span class="note">Click a column to sort</span></div>
         <div class="panel"><div class="table-wrap"><table id="leaderboard"><thead></thead><tbody></tbody></table></div></div>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>🎯 Monthly Incentives</h2><span class="rule"></span></div>
+        <div class="section-head"><h2>Monthly Incentives</h2><span class="rule"></span></div>
         <div class="incentives-grid">
           <div class="incentive-card" data-incentive="speed" style="--ac:var(--slot-5)">
             <span class="incentive-secret-corner" data-corner="tl" aria-hidden="true"></span>
@@ -136,29 +139,29 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>🤖 Fin AI Agent</h2><span class="rule"></span><span class="note">Fin AI Agent (CS only)</span></div>
+        <div class="section-head"><h2>Fin AI Agent</h2><span class="rule"></span><span class="note">Fin AI Agent (CS only)</span></div>
         <div id="fin-tiles" class="tiles"></div>
         <div class="panel section-panel split-panel" id="fin-splits"></div>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>💬 Conversation Volume</h2><span class="rule"></span><span class="note">CS team conversations, by source</span></div>
+        <div class="section-head"><h2>Conversation Volume</h2><span class="rule"></span><span class="note">CS team conversations, by source</span></div>
         <div class="panel" id="channel-panel"></div>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>☎️ Phones</h2><span class="rule"></span></div>
+        <div class="section-head"><h2>Phones</h2><span class="rule"></span></div>
         <div id="phone-tiles" class="tiles"></div>
         <div class="panel section-panel split-panel" id="phone-split"></div>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>📝 Programs &amp; Content</h2><span class="rule"></span><span class="note">Entered by managers in manager mode</span></div>
+        <div class="section-head"><h2>Programs &amp; Content</h2><span class="rule"></span><span class="note">Entered by managers in manager mode</span></div>
         <div id="manual-tiles" class="tiles"></div>
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>📅 Quarterly Stats</h2><span class="rule"></span>
+        <div class="section-head"><h2>Quarterly Stats</h2><span class="rule"></span>
           <span class="meta-sel"><label for="quarter-select">Quarter</label><select id="quarter-select" class="fb-select"></select></span>
         </div>
         <section class="section-sub"><div id="quarter-tiles" class="tiles"></div></section>
@@ -173,7 +176,7 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>📈 Trends</h2><span class="rule"></span><span class="note">Completed months only</span></div>
+        <div class="section-head"><h2>Trends</h2><span class="rule"></span><span class="note">Completed months only</span></div>
         <div class="charts-grid">
           <div class="chart-card"><h3>Conversations</h3><canvas id="chart-conversations"></canvas></div>
           <div class="chart-card"><h3>Phone Answer Rate</h3><canvas id="chart-answer-rate"></canvas></div>
@@ -212,6 +215,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>

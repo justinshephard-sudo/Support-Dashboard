@@ -968,8 +968,7 @@ function updateManagerToggleUI() {
   if (!btn) return;
   btn.textContent = overridesUnlocked ? '🔓 Manager mode: ON' : '🔒 Manager mode';
   btn.setAttribute('aria-pressed', overridesUnlocked ? 'true' : 'false');
-  btn.style.background = overridesUnlocked ? '#1f7a4d' : 'var(--card, #fff)';
-  btn.style.color = overridesUnlocked ? '#fff' : 'inherit';
+  btn.classList.toggle('on', overridesUnlocked);
 }
 
 function showManagerBadge() {
@@ -978,8 +977,8 @@ function showManagerBadge() {
   b.id = 'manager-mode-badge';
   b.textContent = '🔓 Manager mode — click a leaderboard value or a manual metric to edit';
   Object.assign(b.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 1001,
-    background: '#1f7a4d', color: '#fff', padding: '8px 14px', borderRadius: '20px',
-    font: '13px system-ui, sans-serif', boxShadow: '0 4px 16px rgba(0,0,0,.3)' });
+    background: '#233043', color: '#fff', padding: '9px 16px', borderRadius: '999px',
+    font: '600 14px Barlow, system-ui, sans-serif', boxShadow: '0 4px 16px rgba(0,0,0,.3)' });
   document.body.appendChild(b);
 }
 
@@ -991,11 +990,10 @@ function setupManagerToggle() {
   if (!document.getElementById('manager-toggle')) {
     const btn = document.createElement('button');
     btn.id = 'manager-toggle';
-    Object.assign(btn.style, { position: 'fixed', top: '12px', right: '12px', zIndex: 1002,
-      padding: '8px 14px', borderRadius: '20px', border: '1px solid rgba(128,128,128,.4)',
-      cursor: 'pointer', font: '13px system-ui, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,.15)' });
+    btn.className = 'mgr-btn';
     btn.addEventListener('click', () => setManagerMode(!overridesUnlocked));
-    document.body.appendChild(btn);
+    const bar = document.querySelector('.topbar-actions');
+    if (bar) bar.insertBefore(btn, document.getElementById('userChip')); else document.body.appendChild(btn);
   }
   let restore = false;
   try { restore = sessionStorage.getItem('cs-manager-mode') === 'on'; } catch (e) {}
@@ -1040,7 +1038,7 @@ function openCellEditor(member, col, td) {
     `<div class="coe-hint">“Adjust by” keeps new data accruing (recommended). “Set to” pins an exact value.</div>`;
   Object.assign(pop.style, { position: 'fixed', zIndex: 1000, background: 'var(--card, #fff)', color: 'inherit',
     border: '1px solid rgba(128,128,128,.35)', borderRadius: '10px', padding: '12px', width: '288px',
-    boxShadow: '0 8px 30px rgba(0,0,0,.25)', font: '13px system-ui, sans-serif' });
+    boxShadow: '0 8px 30px rgba(0,0,0,.25)', font: '400 14px Barlow, system-ui, sans-serif' });
   document.body.appendChild(pop);
   const r = td.getBoundingClientRect();
   pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 210)}px`;
@@ -1358,7 +1356,7 @@ function openManualEditor(def, anchor) {
     `<div class="coe-actions"><button id="coe-save">Save</button><button id="coe-clear" title="Remove the entered value">Clear</button><button id="coe-cancel">Cancel</button></div>`;
   Object.assign(pop.style, { position: 'fixed', zIndex: 1000, background: 'var(--surface-1, #fff)', color: 'inherit',
     border: '1px solid rgba(128,128,128,.35)', borderRadius: '10px', padding: '12px', width: '260px',
-    boxShadow: '0 8px 30px rgba(0,0,0,.25)', font: '13px system-ui, sans-serif' });
+    boxShadow: '0 8px 30px rgba(0,0,0,.25)', font: '400 14px Barlow, system-ui, sans-serif' });
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 170)}px`;
@@ -1446,6 +1444,8 @@ function updateChartBuddy(canvasId, data) {
 function drawLineChart(canvasId, labels, datasets, yOpts = {}) {
   const ctx = document.getElementById(canvasId);
   if (charts[canvasId]) charts[canvasId].destroy();
+  Chart.defaults.font.family = 'Barlow, Arial, sans-serif';
+  Chart.defaults.font.size = 13;
   const gridColor = cssVar('--border');
   const tickColor = cssVar('--faint');
   // Anchoring the y-axis at 0 (and at 100 for percentage metrics), rather than
@@ -1774,7 +1774,7 @@ function celebrate() {
       const h = document.createElement('div');
       h.textContent = txt;
       Object.assign(h.style, { position: 'fixed', left: '50%', top: '42%', transform: 'translate(-50%,-50%)',
-        font: '900 clamp(30px,6.5vw,72px) system-ui,sans-serif', textAlign: 'center', whiteSpace: 'nowrap',
+        font: '800 clamp(30px,6.5vw,72px) Barlow,system-ui,sans-serif', textAlign: 'center', whiteSpace: 'nowrap',
         background: 'linear-gradient(90deg,#ff2d75,#ffd23f,#3ec1ff,#7cff5b,#b06bff)',
         WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent',
         filter: 'drop-shadow(0 6px 26px rgba(0,0,0,.45))', animation: 'cbHero 1.5s ease-out forwards', zIndex: 100000 });
