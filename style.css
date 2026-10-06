@@ -266,7 +266,7 @@ tbody tr:hover td{background:var(--surface-2)}
 .merlin-bubble{position:relative;background:var(--surface-1);border:1px solid var(--border);box-shadow:var(--shadow-sm);color:var(--text-1);font-size:14px;font-weight:600;padding:9px 15px;border-radius:999px;margin-bottom:40px;white-space:nowrap}
 .merlin-bubble::after{content:"";position:absolute;right:-6px;bottom:10px;width:12px;height:12px;background:var(--surface-1);border-right:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg)}
 @media(max-width:640px){.merlin-callout{width:100%;justify-content:flex-end}.merlin-bubble{white-space:normal}}
-.empty .merlin-look{display:block;width:120px;height:auto;margin:0 auto 14px;filter:drop-shadow(0 10px 14px rgba(31,52,76,.18))}
+.empty .merlin-look{display:block;width:150px;height:auto;margin:0 auto 14px;filter:drop-shadow(0 10px 14px rgba(31,52,76,.18))}
 .gate-card{position:relative;margin-top:96px;padding-top:104px}
 .gate-merlin{position:absolute;left:50%;top:-110px;width:200px;margin-left:-100px;filter:drop-shadow(0 14px 20px rgba(0,0,0,.35))}
 
