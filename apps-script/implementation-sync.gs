@@ -22,7 +22,8 @@
                          each firm's CURRENT account manager.
      "Impl - Open Firms" today's open onboardings, one row per firm
 
-   Definitions (active accounts only, IsActive eq true):
+   Definitions (active accounts only, IsActive eq true; agency firms and agency
+   client firms — Cf.AgencyFirm / Cf.AgencyClientFirm true — are left out of everything):
      open onboarding  = OnboardingStatus "Pre-Kickoff" or "Open"
      rep              = AccountManager (blank → "Unassigned")
      stage            = NewOnboardingCall (blank → "No stage set")
@@ -52,7 +53,8 @@ function syncImplementation() {
   var tz = Session.getScriptTimeZone() || 'America/Los_Angeles';
   var now = new Date();
 
-  var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers);
+  var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
+    .filter(function (a) { var cf = a.Cf || {}; return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true; });
   var activeIds = {}, repOf = {};
   accounts.forEach(function (a) {
     activeIds[String(a.Id)] = true;
