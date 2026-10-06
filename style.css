@@ -197,3 +197,29 @@ tbody tr:hover td:first-child{background:var(--surface-2)}
 .gate-error{margin-top:14px;font-size:12.5px;color:var(--st-critical);font-weight:600}
 .gate-note{font-size:11.5px;color:var(--text-3);margin-top:14px}
 .foot{text-align:center;color:var(--text-3);font-size:11.5px;margin-top:40px;padding-bottom:20px}
+
+/* ---------- monthly sections: headline, Fin, volume, phones, manual ---------- */
+.tile-hero{grid-column:span 2}
+.tile-hero .value{font-size:34px}
+@media(max-width:640px){.tile-hero{grid-column:1/-1}}
+.tile .tile-sub{font-size:12px;color:var(--text-2);margin-top:4px}
+.tile-editable{cursor:pointer;outline:2px dashed var(--lm-blue);outline-offset:-6px}
+.tile-editable:hover{background:var(--surface-2)}
+.section-panel{margin-top:14px}
+.split-panel[hidden]{display:none}
+.split+.split{margin-top:16px}
+.split-head{font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px}
+.split-bar{display:flex;gap:2px;height:12px;border-radius:6px;overflow:hidden;background:var(--surface-2)}
+.split-bar span{display:block;height:100%}
+.split-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:8px;font-size:12.5px;color:var(--text-2)}
+.split-legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px}
+.split-legend b{color:var(--text-1);font-weight:700;font-variant-numeric:tabular-nums}
+.chan-total{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:6px}
+.chan-total b{font-size:20px;font-weight:800;color:var(--text-1);font-variant-numeric:tabular-nums}
+.chan-row{display:grid;grid-template-columns:54px 1fr auto;align-items:center;gap:12px;padding:7px 0}
+.chan-label{font-size:13px;font-weight:600;color:var(--text-2)}
+.chan-track{height:12px;background:var(--surface-2);border-radius:6px;overflow:hidden}
+.chan-fill{display:block;height:100%;border-radius:6px}
+.chan-val{text-align:right;font-size:13px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums}
+.chan-val small{font-size:12px;font-weight:500;color:var(--text-3);margin-left:6px}
+.empty-note{font-size:13px;color:var(--text-3)}

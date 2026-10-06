@@ -181,7 +181,7 @@ async function fetchTitleFrom(sheetId, title) {
    from the flat "Data - Monthly" + "Data - Teammates" tabs. The old sheet's
    Accounts (firm lookup) + Overrides tabs are still read from SHEET_ID above.
    ========================================================================== */
-const REPORT = { monthly: new Map(), teammates: new Map() };  // monthKey -> rowObj / [members]
+const REPORT = { monthly: new Map(), teammates: new Map(), categories: new Map() };  // monthKey -> rowObj / [members] / Map(section -> [{cat, val}])
 const monthKeyOf = (label) => String(label || '').trim().split(/\s+/)[0].toLowerCase();
 
 // Data-Teammates columns, by exact sheet header name -> member key. Looked up by name (not
@@ -212,11 +212,21 @@ const TEAM_COL_TO_KEY = {
 };
 
 async function loadReportTables() {
-  const [monthlyRows, teammateRows, overrideRows] = await Promise.all([
+  const [monthlyRows, teammateRows, overrideRows, categoryRows] = await Promise.all([
     fetchTitleFrom(REPORT_SHEET_ID, 'Data - Monthly'),
     fetchTitleFrom(REPORT_SHEET_ID, 'Data - Teammates'),
     fetchTitleFrom(REPORT_SHEET_ID, 'Overrides').catch(() => []),
+    fetchTitleFrom(REPORT_SHEET_ID, 'Data - Categories').catch(() => []),
   ]);
+  // Data - Categories: Month | Section | Category | Value (e.g. Section "Channel" -> Email/Chat/Phone/SMS).
+  categoryRows.slice(1).forEach(([month, section, cat, val]) => {
+    const mk = monthKeyOf(month);
+    if (!mk || !section || !cat) return;
+    if (!REPORT.categories.has(mk)) REPORT.categories.set(mk, new Map());
+    const secs = REPORT.categories.get(mk);
+    if (!secs.has(section.trim())) secs.set(section.trim(), []);
+    secs.get(section.trim()).push({ cat: cat.trim(), val: val == null ? '' : String(val).trim() });
+  });
   const mHeader = (monthlyRows[0] || []).map((h) => String(h || '').trim());
   monthlyRows.slice(1).forEach((r) => {
     const o = {};
@@ -632,9 +642,9 @@ function showError(message) {
 function renderTiles(containerId, tiles, deltaLabel = 'vs last mo') {
   const el = document.getElementById(containerId);
   el.innerHTML = '';
-  tiles.forEach(({ label, icon, slot, value, delta }) => {
+  tiles.forEach(({ label, icon, slot, value, delta, sub, hero, onEdit }) => {
     const div = document.createElement('div');
-    div.className = 'tile';
+    div.className = 'tile' + (hero ? ' tile-hero' : '');
     div.style.setProperty('--tile-accent', `var(--slot-${slot})`);
     let deltaHtml = '';
     if (delta) {
@@ -644,7 +654,13 @@ function renderTiles(containerId, tiles, deltaLabel = 'vs last mo') {
         + `${arrow} ${Math.abs(delta.pct).toFixed(1)}% <span style="opacity:.6;font-weight:400;">${deltaLabel}</span></div>`;
     }
     div.innerHTML = `<span class="icon">${icon}</span><div class="label">${label}</div>`
-      + `<div class="value">${value != null ? value : '–'}</div>${deltaHtml}`;
+      + `<div class="value">${value != null ? value : '–'}</div>${deltaHtml}`
+      + (sub ? `<div class="tile-sub">${esc(sub)}</div>` : '');
+    if (onEdit) {
+      div.classList.add('tile-editable');
+      div.title = 'Manager: click to enter a value';
+      div.addEventListener('click', () => onEdit(div));
+    }
     el.appendChild(div);
   });
 }
@@ -942,6 +958,7 @@ function setManagerMode(on) {
   updateManagerToggleUI();
   try { renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey); } catch (e) {}
   try { renderMonthlyLeaderboard(currentIncentiveMembers); } catch (e) {}
+  try { if (currentMonthName) renderManualSection(currentMonthName); } catch (e) {}
   const badge = document.getElementById('manager-mode-badge');
   if (on) showManagerBadge(); else if (badge) badge.remove();
 }
@@ -959,7 +976,7 @@ function showManagerBadge() {
   if (document.getElementById('manager-mode-badge')) return;
   const b = document.createElement('div');
   b.id = 'manager-mode-badge';
-  b.textContent = '🔓 Manager mode — click a leaderboard value to adjust';
+  b.textContent = '🔓 Manager mode — click a leaderboard value or a manual metric to edit';
   Object.assign(b.style, { position: 'fixed', bottom: '14px', right: '14px', zIndex: 1001,
     background: '#1f7a4d', color: '#fff', padding: '8px 14px', borderRadius: '20px',
     font: '13px system-ui, sans-serif', boxShadow: '0 4px 16px rgba(0,0,0,.3)' });
@@ -1142,12 +1159,245 @@ function createLeaderboardRenderer(tableId, editable) {
 const renderMonthlyLeaderboard = createLeaderboardRenderer('leaderboard', true);
 const renderQuarterlyLeaderboard = createLeaderboardRenderer('quarterly-leaderboard', false);
 
+/* ==========================================================================
+   Monthly sections — headline tiles (closing time + CSAT), Fin, conversation
+   volume, phones, and manually entered metrics. All read Data - Monthly (plus
+   Data - Teammates for CSAT and Data - Categories for channels) for one month.
+   ========================================================================== */
+const colNum = (col) => (mk) => toNumber(mval(mk, col));
+const colDur = (col) => (mk) => parseTimeToSeconds(mval(mk, col));
+
+function fmtDur(sec) {
+  if (sec == null) return null;
+  sec = Math.round(sec);
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return m ? `${m}m ${s}s` : `${s}s`;
+}
+const fmtKind = (kind, n) => (kind === 'dur' ? fmtDur(n) : kind === 'pct' ? fmtPct(n) : fmtNum(n));
+
+// Teammate CSAT, raw vs revised. Raw = Σ positive / Σ all ratings. Revised uses each rep's
+// "Adjusted Teammate CSAT" % (Reviewd CSAT): Intercom drops excused/rebutted ratings, so the
+// rep's revised total = positives / adjusted %, and the difference is the excluded count.
+function csatBreakdown(mk) {
+  let pos = 0, raw = 0, revised = 0, any = false;
+  (REPORT.teammates.get(mk) || []).forEach((m) => {
+    const c = toNumber(m.csat);
+    if (c == null) return;
+    any = true;
+    const total = c + (toNumber(m.dsat) || 0);
+    const adj = toNumber(m.reviewedPct);
+    const revTotal = adj && adj > 0 ? Math.min(total, Math.round(c / (adj / 100))) : total;
+    pos += c; raw += total; revised += revTotal;
+  });
+  if (!any || !raw) return null;
+  return { pos, raw, excluded: raw - revised, rawPct: (pos / raw) * 100, revPct: revised ? (pos / revised) * 100 : null };
+}
+
+const TOP_DEFS = [
+  { label: 'Closing Time', icon: '🏁', slot: 1, kind: 'dur', goodDir: 'down', hero: true,
+    get: colDur('Avg Assign to Close'), sub: () => 'Avg time from assignment to close' },
+  { label: 'Teammate CSAT · Raw', icon: '⭐', slot: 3, kind: 'pct', goodDir: 'up',
+    get: (mk) => { const b = csatBreakdown(mk); return b ? b.rawPct : null; },
+    sub: (mk) => { const b = csatBreakdown(mk); return b ? `${b.pos} of ${b.raw} ratings positive` : null; } },
+  { label: 'Teammate CSAT · Revised', icon: '✅', slot: 3, kind: 'pct', goodDir: 'up',
+    get: (mk) => { const b = csatBreakdown(mk); return b ? b.revPct : null; },
+    sub: (mk) => { const b = csatBreakdown(mk); return b ? `${b.excluded} rating${b.excluded === 1 ? '' : 's'} excluded` : null; } },
+  { label: 'Fin CSAT', icon: '🤖', slot: 6, kind: 'pct', goodDir: 'up',
+    get: colNum('AI CSAT Score'),
+    sub: (mk) => { const n = toNumber(mval(mk, 'AI Total CSAT')); return n != null ? `${fmtNum(n)} ratings` : null; } },
+  { label: 'Avg Response Time', icon: '⏱️', slot: 4, kind: 'dur', goodDir: 'down', get: colDur('Avg Response Time') },
+];
+
+const FIN_DEFS = [
+  { label: 'Resolved', icon: '✅', slot: 3, kind: 'count', goodDir: 'up', get: colNum('AI Resolved') },
+  { label: 'Unresolved', icon: '↩️', slot: 8, kind: 'count', goodDir: 'down', get: colNum('AI Unresolved') },
+  { label: 'Resolution Rate', icon: '🎯', slot: 6, kind: 'pct', goodDir: 'up', get: colNum('AI Resolution Rate') },
+  { label: 'Routed to Teammate', icon: '🙋', slot: 1, kind: 'pct', goodDir: 'down', get: colNum('AI Routed to Teammate') },
+  { label: 'Abandonment Rate', icon: '🚪', slot: 5, kind: 'pct', goodDir: 'down', get: colNum('AI Abandonment Rate') },
+  { label: 'Deflection Rate', icon: '🛡️', slot: 2, kind: 'pct', goodDir: 'up', get: colNum('AI Deflection Rate') },
+];
+
+const PHONE_DEFS = [
+  { label: 'Total Calls', icon: '☎️', slot: 1, kind: 'count', goodDir: 'up', get: colNum('Total Calls') },
+  { label: 'Inbound', icon: '📥', slot: 2, kind: 'count', goodDir: 'up', get: colNum('Inbound Calls') },
+  { label: 'Outbound', icon: '📤', slot: 4, kind: 'count', goodDir: 'up', get: colNum('Outbound Calls') },
+  { label: 'Answer Rate', icon: '📞', slot: 3, kind: 'pct', goodDir: 'up', get: colNum('Phone Answer Rate') },
+  { label: 'Outside Business Hours', icon: '🌙', slot: 6, kind: 'pct', goodDir: 'down', get: colNum('Calls Outside Business Hours') },
+  { label: 'Avg Talk Time', icon: '🎧', slot: 7, kind: 'dur', get: colDur('Avg Call Talk Time') },
+];
+
+// Entered by managers (stored as Monthly rows on the Overrides tab, applied live at read time).
+const MANUAL_DEFS = [
+  { label: 'Office Hours Sessions', icon: '🗓️', slot: 1, kind: 'count', goodDir: 'up', col: 'OH Total Sessions' },
+  { label: 'Office Hours Attendees', icon: '👥', slot: 2, kind: 'count', goodDir: 'up', col: 'OH Total Attendees' },
+  { label: 'Office Hours Avg Duration', icon: '⏳', slot: 4, kind: 'dur', col: 'OH Avg Duration' },
+  { label: 'Wednesday Workshop Attendance', icon: '🛠️', slot: 5, kind: 'count', goodDir: 'up', col: 'Wednesday Workshop Attendance' },
+  { label: 'CS Training Sessions', icon: '🎓', slot: 6, kind: 'count', goodDir: 'up', col: 'CS Training Sessions' },
+  { label: 'Help Article Views', icon: '📚', slot: 3, kind: 'count', goodDir: 'up', col: 'Total Article Views' },
+].map((d) => ({ ...d, get: d.kind === 'dur' ? colDur(d.col) : colNum(d.col) }));
+
+const prevMonthKey = (monthName) => {
+  const i = MONTH_NAMES.indexOf(monthName);
+  return i > 0 ? MONTH_NAMES[i - 1].toLowerCase() : null;
+};
+
+// Month-over-month deltas; count metrics skip the delta on the in-progress month
+// (a partial month vs a full one would always read as a big drop).
+function statTiles(defs, monthName) {
+  const mk = monthName.toLowerCase();
+  const prevMk = prevMonthKey(monthName);
+  const inProgress = MONTH_NAMES.indexOf(monthName) === incompleteMonthIndex();
+  return defs.map((d) => {
+    const cur = d.get(mk);
+    let delta = null;
+    if (prevMk && d.goodDir && !(inProgress && d.kind === 'count')) {
+      const prev = d.get(prevMk);
+      if (cur != null && prev != null && prev !== 0) {
+        const pct = ((cur - prev) / Math.abs(prev)) * 100;
+        delta = { pct, good: d.goodDir === 'down' ? pct < 0 : pct > 0 };
+      }
+    }
+    return { label: d.label, icon: d.icon, slot: d.slot, value: fmtKind(d.kind, cur), delta, sub: d.sub ? d.sub(mk) : null, hero: d.hero };
+  });
+}
+
+// One stacked bar + legend. parts: [{ label, value, color }]; fmt formats each value.
+function splitBarHtml(title, parts, fmt) {
+  const total = parts.reduce((s, p) => s + (p.value || 0), 0);
+  if (!total) return '';
+  const segs = parts.filter((p) => p.value > 0)
+    .map((p) => `<span style="width:${(p.value / total) * 100}%;background:${p.color}" title="${esc(p.label)}"></span>`).join('');
+  const legend = parts.map((p) => `<span><i style="background:${p.color}"></i>${esc(p.label)} <b>${esc(fmt(p.value, total))}</b></span>`).join('');
+  return `<div class="split"><div class="split-head">${esc(title)}</div><div class="split-bar">${segs}</div><div class="split-legend">${legend}</div></div>`;
+}
+const pctOf = (v, total) => `${Math.round((v / total) * 100)}%`;
+
+function renderFinSplits(mk) {
+  const el = document.getElementById('fin-splits');
+  const confirmed = toNumber(mval(mk, 'AI Confirmed Resolution Rate'));
+  const assumed = toNumber(mval(mk, 'AI Assumed Resolution Rate'));
+  const resolved = toNumber(mval(mk, 'AI Resolved'));
+  const unresolved = toNumber(mval(mk, 'AI Unresolved'));
+  const html = splitBarHtml('Resolved vs. unresolved', [
+    { label: 'Resolved', value: resolved, color: 'var(--slot-3)' },
+    { label: 'Unresolved', value: unresolved, color: 'var(--slot-8)' },
+  ], (v, t) => `${fmtNum(v)} (${pctOf(v, t)})`) + splitBarHtml('How Fin’s resolutions were confirmed', [
+    { label: 'Confirmed', value: confirmed, color: 'var(--slot-6)' },
+    { label: 'Assumed', value: assumed, color: 'color-mix(in srgb, var(--slot-6) 45%, transparent)' },
+  ], (v) => fmtPct(v));
+  el.innerHTML = html;
+  el.hidden = !html;
+}
+
+const CHANNEL_ORDER = ['Email', 'Chat', 'Phone', 'SMS'];
+const CHANNEL_COLORS = { Email: '--slot-1', Chat: '--slot-2', Phone: '--slot-3', SMS: '--slot-6' };
+
+function renderChannels(mk) {
+  const el = document.getElementById('channel-panel');
+  const rows = (((REPORT.categories.get(mk) || new Map()).get('Channel')) || [])
+    .map((r) => ({ label: r.cat, value: toNumber(r.val) || 0 }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => {
+      const ia = CHANNEL_ORDER.indexOf(a.label), ib = CHANNEL_ORDER.indexOf(b.label);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || b.value - a.value;
+    });
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  if (!total) { el.innerHTML = '<div class="empty-note">No channel breakdown recorded for this month.</div>'; return; }
+  const max = Math.max(...rows.map((r) => r.value));
+  el.innerHTML = `<div class="chan-total"><span>Conversations by channel</span><b>${fmtNum(total)}</b></div>`
+    + rows.map((r) => `<div class="chan-row"><span class="chan-label">${esc(r.label)}</span>`
+      + `<span class="chan-track"><span class="chan-fill" style="width:${(r.value / max) * 100}%;background:var(${CHANNEL_COLORS[r.label] || '--slot-8'})"></span></span>`
+      + `<span class="chan-val">${fmtNum(r.value)}<small>${pctOf(r.value, total)}</small></span></div>`).join('');
+}
+
+function renderPhoneSplit(mk) {
+  const el = document.getElementById('phone-split');
+  const html = splitBarHtml('Inbound vs. outbound', [
+    { label: 'Inbound', value: toNumber(mval(mk, 'Inbound Calls')), color: 'var(--slot-2)' },
+    { label: 'Outbound', value: toNumber(mval(mk, 'Outbound Calls')), color: 'var(--slot-4)' },
+  ], (v, t) => `${fmtNum(v)} (${pctOf(v, t)})`);
+  el.innerHTML = html;
+  el.hidden = !html;
+}
+
+function renderManualSection(monthName) {
+  const tiles = statTiles(MANUAL_DEFS, monthName);
+  if (overridesUnlocked && DATA_OVERRIDES_WEBAPP_URL) {
+    tiles.forEach((t, i) => {
+      t.onEdit = (el) => openManualEditor(MANUAL_DEFS[i], el);
+      if (t.value == null) t.sub = 'Click to enter';
+    });
+  }
+  renderTiles('manual-tiles', tiles);
+}
+
+function renderMonthSections(monthName) {
+  const mk = monthName.toLowerCase();
+  renderTiles('tiles', statTiles(TOP_DEFS, monthName));
+  renderTiles('fin-tiles', statTiles(FIN_DEFS, monthName));
+  renderFinSplits(mk);
+  renderChannels(mk);
+  renderTiles('phone-tiles', statTiles(PHONE_DEFS, monthName));
+  renderPhoneSplit(mk);
+  renderManualSection(monthName);
+}
+
+// Manager editor for a manual metric: writes an absolute Monthly override for the month.
+function openManualEditor(def, anchor) {
+  closeCellEditor();
+  const month = fullMonthLabel(currentMonthName);
+  const current = mval(currentMonthName.toLowerCase(), def.col);
+  const pop = document.createElement('div');
+  pop.id = 'cell-override-editor';
+  pop.innerHTML =
+    `<div class="coe-title">${esc(def.label)} <span class="coe-sub">${esc(month)}</span></div>` +
+    `<input id="coe-value" type="text" placeholder="${def.kind === 'dur' ? 'e.g. 1h 30m' : 'e.g. 12'}" value="${esc(current)}" />` +
+    `<input id="coe-note" type="text" placeholder="Note (optional)" />` +
+    `<div class="coe-actions"><button id="coe-save">Save</button><button id="coe-clear" title="Remove the entered value">Clear</button><button id="coe-cancel">Cancel</button></div>`;
+  Object.assign(pop.style, { position: 'fixed', zIndex: 1000, background: 'var(--surface-1, #fff)', color: 'inherit',
+    border: '1px solid rgba(128,128,128,.35)', borderRadius: '10px', padding: '12px', width: '260px',
+    boxShadow: '0 8px 30px rgba(0,0,0,.25)', font: '13px system-ui, sans-serif' });
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 170)}px`;
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 272))}px`;
+  pop.querySelectorAll('button').forEach((b) => Object.assign(b.style, { marginRight: '6px', padding: '5px 10px', borderRadius: '7px', cursor: 'pointer', border: '1px solid rgba(128,128,128,.35)' }));
+  pop.querySelectorAll('input').forEach((el) => Object.assign(el.style, { padding: '5px 7px', borderRadius: '7px', border: '1px solid rgba(128,128,128,.35)', margin: '4px 0', width: '100%', boxSizing: 'border-box' }));
+  const valEl = pop.querySelector('#coe-value');
+  valEl.focus(); valEl.select();
+  const submit = async (rawValue) => {
+    // A leading +/- would be read as a delta by applyOverridesLive; manual metrics are absolute.
+    const value = rawValue.replace(/^\+/, '');
+    if (value && def.kind !== 'dur' && toNumber(value) == null) { alert('Please enter a number.'); return; }
+    if (value && def.kind === 'dur' && parseTimeToSeconds(value) == null) { alert('Please enter a duration like 1h 30m or 1:30:00.'); return; }
+    pop.querySelector('#coe-save').textContent = 'Saving…';
+    try {
+      await postDataOverride(month, 'Monthly', '', def.col, value, pop.querySelector('#coe-note').value.trim());
+      pop.querySelector('#coe-save').textContent = 'Saved ✓';
+      await new Promise((res) => setTimeout(res, 1400));   // let the write commit before re-reading
+      location.reload();
+    } catch (err) {
+      alert('Could not save: ' + err.message);
+      pop.querySelector('#coe-save').textContent = 'Save';
+    }
+  };
+  pop.querySelector('#coe-save').addEventListener('click', () => submit(valEl.value.trim()));
+  pop.querySelector('#coe-clear').addEventListener('click', () => submit(''));
+  pop.querySelector('#coe-cancel').addEventListener('click', closeCellEditor);
+  valEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(valEl.value.trim()); if (e.key === 'Escape') closeCellEditor(); });
+  const outside = (e) => { if (!pop.contains(e.target)) closeCellEditor(); };
+  pop._outside = outside;
+  setTimeout(() => document.addEventListener('mousedown', outside), 0);
+}
+
 function renderMonth(entry) {
   currentMonthName = entry.name;
   const idx = MONTH_NAMES.indexOf(entry.name);
   const prevRaw = idx > 0 ? PARSED_BY_MONTH[MONTH_NAMES[idx - 1].toLowerCase()] : null;
   const prevParsed = prevRaw && prevRaw.hasData ? prevRaw : null;
-  renderTiles('tiles', extractTiles(entry.parsed, prevParsed));
+  renderMonthSections(entry.name);
   const people = individualsOnly(entry.parsed.members, idx);
   renderMonthlyLeaderboard(people);
   renderIncentives(people, entry.gid);
