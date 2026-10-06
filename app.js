@@ -27,6 +27,10 @@ const CONFIG = {
   SCOPES: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email',
 };
 const ACCOUNTS_TAB = 'Accounts';   // tab the ChurnZero sync writes (see apps-script/sync-accounts.gs)
+// Signed contracts: metadata in the "Contracts" tab (written by apps-script/contracts), PDFs served
+// by that web app only after it verifies the viewer's Google sign-in. No one needs Drive access.
+const CONTRACTS_TAB = 'Contracts';
+const CONTRACTS_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzRJh5DWQxxDmkUAtyjKgvAlr2H0y758VlizVq09SkZ68EAoGEM2M9_m6CZoeVJg-xr9g/exec';
 
 const MONTH_TABS = [
   { name: 'January', gid: '749310542' },
@@ -1910,15 +1914,19 @@ async function main() {
    Firm Lookup — reads the "Accounts" tab (written by the ChurnZero sync),
    fuzzy-searches firms, and renders a customer profile.
    ========================================================================== */
-const FIRMS = { list: [], loaded: false };
+const FIRMS = { list: [], loaded: false, contracts: new Map() };   // contracts: 'id:'/'name:' key -> newest-first list
 
 async function initFirmLookup() {
   const input = document.getElementById('q');
   const emptyMsg = document.getElementById('firmEmptyMsg');
   const cnt = document.getElementById('firmCount');
   try {
-    const rows = await fetchSheetByTitle(ACCOUNTS_TAB);
+    const [rows, contractRows] = await Promise.all([
+      fetchSheetByTitle(ACCOUNTS_TAB),
+      fetchSheetByTitle(CONTRACTS_TAB).catch(() => []),
+    ]);
     FIRMS.list = parseAccounts(rows);
+    FIRMS.contracts = parseContracts(contractRows);
     FIRMS.loaded = true;
     if (cnt) cnt.textContent = FIRMS.list.length ? `${FIRMS.list.length} firms` : '';
     if (emptyMsg) emptyMsg.textContent = FIRMS.list.length
@@ -1985,6 +1993,70 @@ function parseAccounts(rows) {
 // Normalize an ID for comparison: the Sheets API returns values as displayed,
 // so a numeric FirmId can arrive as "12,345", "12345.0", or with stray spaces.
 // Strip grouping commas, all whitespace (incl. non-breaking), and a trailing ".0".
+function parseContracts(rows) {
+  const map = new Map();
+  if (!rows.length) return map;
+  const header = rows[0].map((h) => String(h || '').trim());
+  const col = (name) => header.indexOf(name);
+  const iFirm = col('FirmId'), iName = col('AccountName'), iDoc = col('ContentDocumentId'), iTitle = col('Title'), iAt = col('UploadedAt');
+  // Indexed by Firm ID, and by name too: some Salesforce accounts have no Firm ID.
+  const add = (key, entry) => { if (!map.has(key)) map.set(key, []); map.get(key).push(entry); };
+  rows.slice(1).forEach((r) => {
+    if (!r[iDoc]) return;
+    const entry = { docId: String(r[iDoc]), title: String(r[iTitle] || ''), at: String(r[iAt] || '') };
+    const firm = normId(r[iFirm]);
+    if (firm) add('id:' + firm, entry);
+    const name = normFirmName(r[iName]);
+    if (name) add('name:' + name, entry);
+  });
+  map.forEach((list) => list.sort((a, b) => String(b.at).localeCompare(String(a.at))));
+  return map;
+}
+function normFirmName(s) {
+  return String(s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(llc|pllc|llp|pc|p c|pa|inc|ltd|the)\b/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function contractsFor(f) {
+  return FIRMS.contracts.get('id:' + normId(f.firmId)) || FIRMS.contracts.get('name:' + normFirmName(f.name)) || [];
+}
+function fmtContractDate(s) {
+  const d = new Date(String(s).replace(/\+0000$/, 'Z'));
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function contractRowHtml(f) {
+  const list = contractsFor(f);
+  if (!list.length) return pfRow('Signed contract', 'None on file');
+  const newest = list[0];
+  const date = fmtContractDate(newest.at);
+  const more = list.length > 1 ? `<div class="pf-flag">⚠ ${list.length} contracts on file — showing newest</div>` : '';
+  return `<div class="pf-row"><span class="k">Signed contract</span><span class="v">`
+    + `<button type="button" class="pf-link" data-contract="${esc(newest.docId)}">View PDF${date ? ' · ' + esc(date) : ''}</button>${more}</span></div>`;
+}
+// Opens the window synchronously (so popup blockers allow it), then fills it with the PDF
+// once the contracts web app has verified the viewer and returned the file.
+async function openContract(docId, btn) {
+  const w = window.open('', '_blank');
+  if (w) w.document.write('<title>Loading contract…</title><p style="font:16px Barlow,system-ui,sans-serif;padding:24px;color:#516379">Loading contract…</p>');
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+  try {
+    const res = await fetch(CONTRACTS_WEBAPP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'get', token: AUTH.token, docId }),
+    });
+    const out = await res.json();
+    if (!out.ok) throw new Error(out.error || 'could not load the contract');
+    const bytes = Uint8Array.from(atob(out.data), (c) => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    if (w) w.location.href = url; else window.open(url, '_blank');
+  } catch (err) {
+    if (w) w.close();
+    alert('Couldn’t open the contract: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
 function normId(s) {
   return String(s == null ? '' : s).toLowerCase().trim().replace(/[,\s ]/g, '').replace(/\.0+$/, '');
 }
@@ -2100,6 +2172,7 @@ function openFirm(firmId, name) {
         ${f.cbStart ? pfRow('Start date', f.cbStart) : ''}
         ${pfRow('Term ends', orDash(f.term))}
         ${pfRow('Licenses', orDash(f.lic))}
+        ${contractRowHtml(f)}
         ${f.addons ? `<div class="pf-row"><span class="k">Add-ons</span><span class="v">${f.addons.split(';').map((s) => esc(s.trim())).filter(Boolean).join('<br>')}</span></div>` : ''}
         ${f.invBalance ? pfRow('Balance due', f.invBalance, 'bad') : ''}
         ${f.legacy ? pfRow('Legacy contract', f.legacy) : ''}
@@ -2116,6 +2189,9 @@ function openFirm(firmId, name) {
         ${pfRow('SMS plan', orDash(f.smsPlan))}
       </div>
     </div>`;
+  document.getElementById('profile').querySelectorAll('[data-contract]').forEach((b) => {
+    b.addEventListener('click', () => openContract(b.dataset.contract, b));
+  });
   document.getElementById('profile').classList.add('show');
 }
 
