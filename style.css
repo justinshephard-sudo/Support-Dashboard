@@ -308,6 +308,8 @@ tbody tr:hover td{background:var(--surface-2)}
 .impl-note[hidden]{display:none}
 .stage-row{grid-template-columns:170px 1fr auto}
 #impl-reps tbody tr.row-muted td{color:var(--text-3)}
+.rep-stage-chart{position:relative;width:100%}
+.rep-stage-chart[hidden]{display:none}
 .pager{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:14px 14px 4px}
 .pager[hidden]{display:none}
 @media(max-width:520px){.pager{justify-content:center;gap:8px;padding:14px 0 4px}.pager-btn{padding:8px 12px}}

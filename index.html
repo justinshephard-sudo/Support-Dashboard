@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=28">
+<link rel="stylesheet" href="style.css?v=30">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -236,6 +236,11 @@
       </section>
 
       <section class="section">
+        <div class="section-head"><h2>Onboarding Stages by Rep</h2><span class="rule"></span><span class="note">Open onboardings by current call, per account manager</span></div>
+        <div class="panel"><div class="rep-stage-chart" id="impl-rep-stages-wrap"><canvas id="chart-impl-rep-stages"></canvas></div><div class="empty-note" id="impl-rep-stages-empty" hidden>No stage snapshot for this month.</div></div>
+      </section>
+
+      <section class="section">
         <div class="section-head"><h2>70+ Days in Onboarding</h2><span class="rule"></span><span class="note" id="impl-over-note">As of today</span></div>
         <div class="panel"><div class="table-wrap"><table id="impl-over"><thead></thead><tbody></tbody></table></div><div class="pager" id="impl-over-pager" hidden></div></div>
       </section>
@@ -295,6 +300,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=29"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>

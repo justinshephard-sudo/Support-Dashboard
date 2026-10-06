@@ -1916,7 +1916,7 @@ async function main() {
    Implementation tab — onboarding metrics from ChurnZero, written daily by
    apps-script/implementation-sync.gs into "Impl - Monthly" / "Impl - Open Firms".
    ========================================================================== */
-const IMPL = { months: [], byLabel: new Map(), open: [], loaded: false, chartsDrawn: false };
+const IMPL = { months: [], byLabel: new Map(), open: [], loaded: false, chartsDrawn: false, current: null };
 const IMPL_STAGE_ORDER = ['Needs to Schedule', 'First Onboarding', 'Second Onboarding', 'Third Onboarding',
   'Fourth Onboarding', 'Fifth Onboarding', 'Sixth Onboarding', 'Additional Onboarding'];
 
@@ -2013,6 +2013,9 @@ function renderImplMonth(label) {
     : '';
   renderImplStages(m);
   renderImplReps(m);
+  IMPL.current = label;
+  // Chart.js can't size a canvas inside a hidden tab; drawImplCharts() catches up on open.
+  if (document.getElementById('view-impl').classList.contains('active')) renderImplRepStages(label);
 }
 
 // Per-rep table for the selected month (RepStats JSON written by the sync).
@@ -2098,6 +2101,91 @@ function renderImplStages(m) {
 const IMPL_OVER_PAGE_SIZE = 15;
 let implOverPage = 0;
 
+// Stage colors: orange = still needs scheduling, light → dark blue = 1st → 6th call,
+// purple = additional calls, grey = no stage set.
+const IMPL_STAGE_COLORS = {
+  'Needs to Schedule': '--slot-5',
+  'First Onboarding': '#b9dcff', 'Second Onboarding': '#8cc5ff', 'Third Onboarding': '#5aaaff',
+  'Fourth Onboarding': '--slot-1', 'Fifth Onboarding': '#0569c2', 'Sixth Onboarding': '#06478a',
+  'Additional Onboarding': '--slot-6', 'No stage set': '--slot-8',
+};
+function implStageRank(label) {
+  if (label === 'No stage set') return 999;
+  const i = IMPL_STAGE_ORDER.indexOf(label);
+  return i < 0 ? 500 : i;
+}
+
+// Per-rep stage counts for a month: saved in RepStats by the sync; for the current
+// month, fall back to today's open-firm list (rows written before stages were tracked).
+function implRepStageCounts(label) {
+  const m = IMPL.byLabel.get(label);
+  let stats = {};
+  try { stats = m && m.RepStats ? JSON.parse(m.RepStats) : {}; } catch (e) { stats = {}; }
+  const out = {};
+  Object.entries(stats).forEach(([rep, st]) => { if (st.stages) out[rep] = st.stages; });
+  const isCurrent = IMPL.months.length && label === IMPL.months[IMPL.months.length - 1].Month;
+  if (!Object.keys(out).length && isCurrent) {
+    IMPL.open.forEach((f) => {
+      const rep = f.AccountManager || 'Unassigned';
+      const stage = f.Stage || 'No stage set';
+      out[rep] = out[rep] || {};
+      out[rep][stage] = (out[rep][stage] || 0) + 1;
+    });
+  }
+  return out;
+}
+
+function renderImplRepStages(label) {
+  const counts = implRepStageCounts(label);
+  const reps = Object.keys(counts).map((rep) => ({ rep, total: Object.values(counts[rep]).reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => ((a.rep === 'Unassigned') - (b.rep === 'Unassigned')) || b.total - a.total || a.rep.localeCompare(b.rep));
+  const wrap = document.getElementById('impl-rep-stages-wrap');
+  const empty = document.getElementById('impl-rep-stages-empty');
+  const id = 'chart-impl-rep-stages';
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+  wrap.hidden = !reps.length;
+  empty.hidden = !!reps.length;
+  if (!reps.length) return;
+
+  const stages = [...new Set(reps.flatMap((r) => Object.keys(counts[r.rep])))].sort((a, b) => implStageRank(a) - implStageRank(b));
+  const color = (stage) => { const c = IMPL_STAGE_COLORS[stage] || '--slot-2'; return c.startsWith('--') ? cssVar(c) : c; };
+  wrap.style.height = `${reps.length * 34 + 70}px`;
+  Chart.defaults.font.family = 'Barlow, Arial, sans-serif';
+  Chart.defaults.font.size = 13;
+  const tickColor = cssVar('--faint');
+  charts[id] = new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: {
+      labels: reps.map((r) => r.rep),
+      datasets: stages.map((stage) => ({
+        label: stage,
+        data: reps.map((r) => counts[r.rep][stage] || 0),
+        backgroundColor: color(stage),
+        borderColor: cssVar('--surface-1'),
+        borderWidth: 1,
+        barThickness: 20,
+      })),
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', axis: 'y', intersect: false },
+      plugins: {
+        legend: { position: 'top', align: 'start', labels: { color: tickColor, boxWidth: 10, boxHeight: 10, usePointStyle: true, padding: 14 } },
+        tooltip: {
+          filter: (item) => item.raw > 0,
+          callbacks: { footer: (items) => (items.length ? `Total: ${reps[items[0].dataIndex].total}` : '') },
+        },
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, grid: { color: cssVar('--border') }, ticks: { color: tickColor, precision: 0 } },
+        y: { stacked: true, grid: { display: false }, ticks: { color: cssVar('--text-2'), font: { weight: 600 } } },
+      },
+    },
+  });
+}
+
 function renderImplOverList() {
   // Lowest days first: firms that just crossed 70 days are the easiest to rescue.
   const over = IMPL.open.filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70)
@@ -2128,7 +2216,9 @@ function renderImplOverList() {
 }
 
 function drawImplCharts() {
-  if (!IMPL.loaded || IMPL.chartsDrawn) return;
+  if (!IMPL.loaded) return;
+  if (IMPL.current) renderImplRepStages(IMPL.current);
+  if (IMPL.chartsDrawn) return;
   IMPL.chartsDrawn = true;
   const done = IMPL.months.slice(-13, -1);   // last 12 completed months
   const labels = done.map((m) => m.Month.replace(/ (\d{4})$/, (y, yr) => ` ’${yr.slice(2)}`).replace(/^(\w{3})\w*/, '$1'));

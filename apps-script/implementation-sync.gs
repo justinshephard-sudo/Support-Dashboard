@@ -19,7 +19,7 @@
                                     (responses on/after the firm's current start only)
         RepStats (JSON)  the same metrics per rep (ChurnZero "Account Manager", blank →
                          "Unassigned"): { rep: { open, preKick, needsSched, over70,
-                         closed, medianDays, csatPct, csatN } }. Snapshot keys follow the
+                         stages: { stage: n }, closed, medianDays, csatPct, csatN } }. Snapshot keys follow the
                          snapshot rule above; closed/median/CSAT are recomputed using
                          each firm's CURRENT account manager.
      "Impl - Open Firms" today's open onboardings, one row per firm
@@ -74,7 +74,7 @@ function syncImplementation() {
   });
   var repSnap = {};   // rep -> today's open-onboarding counts
   function repBucket_(rep) {
-    return repSnap[rep] = repSnap[rep] || { open: 0, preKick: 0, needsSched: 0, over70: 0 };
+    return repSnap[rep] = repSnap[rep] || { open: 0, preKick: 0, needsSched: 0, over70: 0, stages: {} };
   }
 
   // Upcoming meetings → next meeting per account.
@@ -95,6 +95,7 @@ function syncImplementation() {
     stages[stage] = (stages[stage] || 0) + 1;
     var rb = repBucket_(repOf[String(a.Id)]);
     rb.open++;
+    rb.stages[stage] = (rb.stages[stage] || 0) + 1;
     if (cf.OnboardingStatus === 'Pre-Kickoff') { preKick++; rb.preKick++; } else openStatus++;
     var next = nextMeeting[String(a.Id)] || '';
     if (!next) { needsSched++; rb.needsSched++; }
@@ -202,7 +203,7 @@ function repStats_(snap, closedByRep, csatByRep) {
   function row(rep) { return out[rep] = out[rep] || {}; }
   Object.keys(snap || {}).forEach(function (rep) {
     var s = snap[rep] || {}, r = row(rep);
-    ['open', 'preKick', 'needsSched', 'over70'].forEach(function (k) { if (s[k] != null) r[k] = s[k]; });
+    ['open', 'preKick', 'needsSched', 'over70', 'stages'].forEach(function (k) { if (s[k] != null) r[k] = s[k]; });
   });
   Object.keys(closedByRep).forEach(function (rep) {
     var all = closedByRep[rep];
