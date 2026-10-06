@@ -26,8 +26,8 @@
 
    Which firms count (applies to every number): active accounts (IsActive eq true)
    that started on or after IMPL_MIN_START (StartDate, or Cf.CurrentTermStart when
-   StartDate is blank), excluding agency firms and agency client firms
-   (Cf.AgencyFirm / Cf.AgencyClientFirm true).
+   StartDate is blank), excluding agency firms, agency client firms, and consultants
+   (Cf.AgencyFirm / Cf.AgencyClientFirm / Cf.Consultant true).
 
    Definitions:
      open onboarding  = OnboardingStatus "Pre-Kickoff" or "Open"
@@ -64,7 +64,8 @@ function syncImplementation() {
     .filter(function (a) {
       var cf = a.Cf || {};
       var start = implStart_(a);
-      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && start && start >= IMPL_MIN_START;
+      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true &&
+        start && start >= IMPL_MIN_START;
     });
   var activeIds = {}, repOf = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {
