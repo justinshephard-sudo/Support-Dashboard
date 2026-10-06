@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -16,6 +16,7 @@
 <!-- ===================== SIGN-IN GATE ===================== -->
 <div class="gate" id="gate">
   <div class="gate-card">
+    <img class="gate-merlin" src="assets/merlin-wizard.png" alt="Merlin, the Lawmatics wizard">
     <div class="gate-logo-chip"><img class="gate-logo" src="assets/logo-wordmark.png" alt="Lawmatics"></div>
     <h2>CS Support Dashboard</h2>
     <p>Sign in with your <b>@lawmatics.com</b> Google account to view team performance and firm data.</p>
@@ -51,6 +52,9 @@
       <div class="eyebrow">Customer Support</div>
       <h1>Support performance, <span class="grad-text">at a glance</span></h1>
       <p class="hero-sub">Team results, Fin, phones, and firm context — live from Intercom and ChurnZero.</p>
+      <button class="hero-merlin" id="heroMerlin" type="button" title="Merlin wears different hats — click to swap">
+        <img src="assets/merlin-wizard.png" alt="Merlin, the Lawmatics wizard">
+      </button>
       <nav class="tabbar">
         <button class="tab active" data-tab="team">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -85,7 +89,9 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>Monthly Incentives</h2><span class="rule"></span></div>
+        <div class="section-head"><h2>Monthly Incentives</h2><span class="rule"></span>
+          <div class="merlin-callout"><span class="merlin-bubble">Yeehaw! Roundin’ up this month’s winners.</span><img src="assets/merlin-cowboy.svg" alt="Merlin in a cowboy hat"></div>
+        </div>
         <div class="incentives-grid">
           <div class="incentive-card" data-incentive="speed" style="--ac:var(--slot-5)">
             <span class="incentive-secret-corner" data-corner="tl" aria-hidden="true"></span>
@@ -204,7 +210,7 @@
         <div class="results" id="results"></div>
       </div>
       <div class="empty" id="firmEmpty">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+        <img class="merlin-look" src="assets/merlin-back.png" alt="Merlin, on the lookout">
         <div id="firmEmptyMsg">Start typing a firm name to pull up their profile.</div>
       </div>
       <div class="profile" id="profile"></div>
@@ -215,6 +221,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

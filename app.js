@@ -2096,6 +2096,26 @@ function setupTabs() {
   }));
 }
 
+// Merlin wears different hats: clicking him in the hero swaps wizard ↔ cowboy.
+function setupMerlin() {
+  const btn = document.getElementById('heroMerlin');
+  if (!btn) return;
+  const img = btn.querySelector('img');
+  const hats = [
+    { src: 'assets/merlin-wizard.png', alt: 'Merlin, the Lawmatics wizard' },
+    { src: 'assets/merlin-cowboy.svg', alt: 'Merlin in a cowboy hat' },
+  ];
+  let i = 0;
+  btn.addEventListener('click', () => {
+    i = (i + 1) % hats.length;
+    img.src = hats[i].src;
+    img.alt = hats[i].alt;
+    btn.classList.remove('swap');
+    void btn.offsetWidth;   // restart the hop animation
+    btn.classList.add('swap');
+  });
+}
+
 function setupTheme() {
   const btn = document.getElementById('themeBtn');
   if (!btn) return;
@@ -2108,6 +2128,7 @@ function setupTheme() {
 function bootstrap() {
   setupTabs();
   setupTheme();
+  setupMerlin();
   const start = () => initAuth(main);
   if (window.google && google.accounts && google.accounts.oauth2) {
     start();

@@ -251,3 +251,21 @@ tbody tr:hover td{background:var(--surface-2)}
 .mgr-btn{cursor:pointer;font:600 14px var(--font);color:var(--text-1);background:var(--surface-2);border:none;padding:9px 16px;border-radius:999px;white-space:nowrap;transition:filter .15s}
 .mgr-btn:hover{filter:brightness(.97)}
 .mgr-btn.on{color:#fff;background:var(--grad-blue)}
+
+/* ---------- Merlin (the Lawmatics wizard) — wears different hats ---------- */
+.hero-inner{position:relative}
+.hero-merlin{position:absolute;right:8px;bottom:-10px;width:180px;padding:0;border:none;background:none;cursor:pointer;z-index:2;filter:drop-shadow(0 12px 18px rgba(0,0,0,.35));transition:transform .2s}
+.hero-merlin:hover{transform:translateY(-4px) rotate(-3deg)}
+.hero-merlin img{display:block;width:100%;height:auto}
+.hero-merlin.swap{animation:merlinHop .45s ease}
+@keyframes merlinHop{0%{transform:translateY(0)}40%{transform:translateY(-22px) rotate(6deg)}100%{transform:translateY(0)}}
+@media(max-width:1000px){.hero-merlin{width:110px;right:0}}
+@media(max-width:760px){.hero-merlin{display:none}}
+.merlin-callout{display:flex;align-items:flex-end;gap:10px;margin-left:auto}
+.merlin-callout img{width:100px;height:auto;filter:drop-shadow(0 8px 12px rgba(31,52,76,.18))}
+.merlin-bubble{position:relative;background:var(--surface-1);border:1px solid var(--border);box-shadow:var(--shadow-sm);color:var(--text-1);font-size:14px;font-weight:600;padding:9px 15px;border-radius:999px;margin-bottom:40px;white-space:nowrap}
+.merlin-bubble::after{content:"";position:absolute;right:-6px;bottom:10px;width:12px;height:12px;background:var(--surface-1);border-right:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg)}
+@media(max-width:640px){.merlin-callout{width:100%;justify-content:flex-end}.merlin-bubble{white-space:normal}}
+.empty .merlin-look{display:block;width:120px;height:auto;margin:0 auto 14px;filter:drop-shadow(0 10px 14px rgba(31,52,76,.18))}
+.gate-card{position:relative;margin-top:70px;padding-top:86px}
+.gate-merlin{position:absolute;left:50%;top:-84px;width:150px;margin-left:-75px;filter:drop-shadow(0 14px 20px rgba(0,0,0,.35))}
