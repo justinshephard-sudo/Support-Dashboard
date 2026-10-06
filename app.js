@@ -1783,6 +1783,13 @@ function celebrate() {
     }, i * 1300);
   });
 
+  // confetti Merlin jumps up from the bottom of the screen to join the party
+  const merlin = document.createElement('img');
+  merlin.src = 'assets/merlin-confetti.webp';
+  merlin.alt = '';
+  merlin.className = 'cb-merlin';
+  layer.appendChild(merlin);
+
   // shake the whole app + spin the button
   const app = document.getElementById('app');
   if (app) { app.style.animation = 'cbShake .6s ease-in-out 2'; setTimeout(() => { app.style.animation = ''; }, 1300); }
@@ -2096,14 +2103,15 @@ function setupTabs() {
   }));
 }
 
-// Merlin wears different hats: clicking him in the hero swaps wizard ↔ cowboy.
+// Merlin wears different hats: clicking him in the hero cycles through his looks.
 function setupMerlin() {
   const btn = document.getElementById('heroMerlin');
   if (!btn) return;
   const img = btn.querySelector('img');
   const hats = [
-    { src: 'assets/merlin-wizard.png', alt: 'Merlin, the Lawmatics wizard' },
-    { src: 'assets/merlin-cowboy.svg', alt: 'Merlin in a cowboy hat' },
+    { src: 'assets/merlin-dog.webp', alt: 'Merlin, the Lawmatics wizard, playing with a boxer pup' },
+    { src: 'assets/merlin-lasso.webp', alt: 'Merlin in a cowboy hat, twirling a lasso' },
+    { src: 'assets/merlin-confetti.webp', alt: 'Merlin celebrating in a shower of confetti' },
   ];
   let i = 0;
   btn.addEventListener('click', () => {
