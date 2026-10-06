@@ -647,7 +647,7 @@ function showError(message) {
 function renderTiles(containerId, tiles, deltaLabel = 'vs last mo') {
   const el = document.getElementById(containerId);
   el.innerHTML = '';
-  tiles.forEach(({ label, icon, slot, value, delta, sub, hero, onEdit }) => {
+  tiles.forEach(({ label, icon, slot, value, delta, sub, hero, onEdit, onClick }) => {
     const div = document.createElement('div');
     div.className = 'tile' + (hero ? ' tile-hero' : '');
     div.style.setProperty('--tile-accent', `var(--slot-${slot})`);
@@ -665,6 +665,13 @@ function renderTiles(containerId, tiles, deltaLabel = 'vs last mo') {
       div.classList.add('tile-editable');
       div.title = 'Manager: click to enter a value';
       div.addEventListener('click', () => onEdit(div));
+    } else if (onClick) {
+      div.classList.add('tile-clickable');
+      div.setAttribute('role', 'button');
+      div.tabIndex = 0;
+      div.title = 'Click to see the firms behind this number';
+      div.addEventListener('click', () => onClick(div));
+      div.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(div); } });
     }
     el.appendChild(div);
   });
@@ -1970,7 +1977,7 @@ async function main() {
    Implementation tab — onboarding metrics from ChurnZero, written daily by
    apps-script/implementation-sync.gs into "Impl - Monthly" / "Impl - Open Firms".
    ========================================================================== */
-const IMPL = { months: [], byLabel: new Map(), open: [], loaded: false, chartsDrawn: false, current: null };
+const IMPL = { months: [], byLabel: new Map(), open: [], events: [], loaded: false, chartsDrawn: false, current: null };
 const IMPL_STAGE_ORDER = ['Needs to Schedule', 'First Onboarding', 'Second Onboarding', 'Third Onboarding',
   'Fourth Onboarding', 'Fifth Onboarding', 'Sixth Onboarding', 'Additional Onboarding'];
 
@@ -1986,10 +1993,12 @@ function sheetObjects(rows) {
 
 async function initImplementation() {
   try {
-    const [monthly, open] = await Promise.all([
+    const [monthly, open, events] = await Promise.all([
       fetchSheetByTitle('Impl - Monthly'),
       fetchSheetByTitle('Impl - Open Firms').catch(() => []),
+      fetchSheetByTitle('Impl - Firm Events').catch(() => []),
     ]);
+    IMPL.events = sheetObjects(events);
     IMPL.months = sheetObjects(monthly).filter((m) => m.Month).map((m) => ({ ...m, Month: implMonthLabel(m.Month) }));
     IMPL.months.forEach((m) => IMPL.byLabel.set(m.Month, m));
     IMPL.open = sheetObjects(open);
@@ -2056,7 +2065,7 @@ function renderImplMonth(label) {
       delta = { pct, good: d.goodDir === 'down' ? pct < 0 : pct > 0 };
     }
     const value = cur == null ? null : d.kind === 'pct' ? fmtPct(cur) : d.kind === 'days' ? `${fmtNum(cur)} days` : fmtNum(cur);
-    return { label: d.label, slot: d.slot, value, delta, sub: d.sub ? d.sub(m) : null };
+    return { label: d.label, slot: d.slot, value, delta, sub: d.sub ? d.sub(m) : null, onClick: () => openImplDrill(d.col, label) };
   });
   renderTiles('impl-tiles', tiles);
   const note = document.getElementById('impl-note');
@@ -2154,6 +2163,103 @@ function renderImplStages(m) {
 
 const IMPL_OVER_PAGE_SIZE = 15;
 let implOverPage = 0;
+
+/* ---- Tile drill-down: the firms behind each Implementation number ---- */
+const IMPL_FIRM_COLS = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
+  ['AccountManager', 'Account Manager'], ['Specialist', 'Specialist'], ['NextMeeting', 'Next meeting']];
+
+function implDrillSpec(col, label) {
+  const latest = IMPL.months[IMPL.months.length - 1].Month;
+  const snapshot = (title, note, rows) => (label === latest
+    ? { title, note, cols: IMPL_FIRM_COLS, rows: rows.sort((a, b) => toNumber(b.DaysInOnboarding) - toNumber(a.DaysInOnboarding)) }
+    : { title, empty: `Firm-level detail for this number is only kept for today — switch the month to ${latest}.` });
+  const days = (f) => toNumber(f.DaysInOnboarding) || 0;
+  const evs = (type) => IMPL.events.filter((e) => e.Type === type && e.Month === label);
+  switch (col) {
+    case 'OpenOnboardings':
+      return snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today', [...IMPL.open]);
+    case 'NeedsScheduling':
+      return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today', IMPL.open.filter((f) => !f.NextMeeting));
+    case 'Over70':
+      return snapshot('70+ Days, Still Open', 'Open onboardings at 70 or more days since start, as of today', IMPL.open.filter((f) => days(f) >= 70));
+    case 'ClosedOnboardings':
+    case 'MedianDays': {
+      const rows = evs('closed').sort((a, b) => (toNumber(a.Days) ?? 1e9) - (toNumber(b.Days) ?? 1e9));
+      const m = IMPL.byLabel.get(label);
+      return {
+        title: col === 'MedianDays' ? 'Median Time in Onboarding' : 'Onboardings Closed',
+        note: `Completed in ${label}` + (m && m.MedianDays !== '' ? ` · median ${fmtNum(toNumber(m.MedianDays))} days` : ''),
+        cols: [['Name', 'Firm'], ['Date', 'Completed'], ['Days', 'Days in onboarding'], ['AccountManager', 'Account Manager'], ['Specialist', 'Specialist']],
+        rows, median: col === 'MedianDays' && m ? toNumber(m.MedianDays) : null,
+        empty: IMPL.events.length ? 'No onboardings completed this month.' : 'Firm detail appears after the next ChurnZero sync.',
+      };
+    }
+    case 'CsatPct': {
+      const rows = evs('csat').sort((a, b) => toNumber(a.Score) - toNumber(b.Score) || a.Date.localeCompare(b.Date));
+      return {
+        title: 'Onboarding CSAT', note: `Responses in ${label} · 4–5 counts as satisfied`,
+        cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['AccountManager', 'Account Manager'], ['Comment', 'Comment']],
+        rows, empty: IMPL.events.length ? 'No survey responses this month.' : 'Firm detail appears after the next ChurnZero sync.',
+      };
+    }
+    default: return null;
+  }
+}
+
+// "2026-10-03" → "Oct 3, 2026" (parsed as a local date, so it never shifts a day).
+function implFmtDate(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
+  if (!m) return v;
+  return new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function implDrillCell(key, row, median) {
+  const v = row[key];
+  if (key === 'Date' && v) return esc(implFmtDate(v));
+  if (key === 'Score' && v !== '') {
+    const n = toNumber(v);
+    return `<span class="score-pill ${n >= 4 ? 'good' : n === 3 ? 'mid' : 'bad'}">${esc(v)}</span>`;
+  }
+  if (key === 'Days' && median != null && toNumber(v) === median) return `${esc(v)} <span class="muted">· median</span>`;
+  if (key === 'Comment') return v ? `<span class="drill-comment">${esc(v)}</span>` : '<span class="muted">–</span>';
+  return esc(v || '–');
+}
+
+function openImplDrill(col, label) {
+  const spec = implDrillSpec(col, label);
+  if (!spec) return;
+  closeImplDrill();
+  const back = document.createElement('div');
+  back.className = 'drill-backdrop';
+  back.id = 'impl-drill';
+  const count = spec.rows ? spec.rows.length : 0;
+  const body = spec.rows && spec.rows.length
+    ? `<div class="table-wrap"><table class="drill-table"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>`
+      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+    : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
+  back.innerHTML = `<div class="drill" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
+      <div class="drill-head">
+        <div><h3 id="impl-drill-title">${esc(spec.title)}${spec.rows ? ` <span class="drill-count">${fmtNum(count)}</span>` : ''}</h3>
+          ${spec.note ? `<div class="drill-note">${esc(spec.note)}</div>` : ''}</div>
+        <button type="button" class="drill-close" aria-label="Close">×</button>
+      </div>
+      <div class="drill-body">${body}</div>
+    </div>`;
+  back.addEventListener('click', (e) => { if (e.target === back) closeImplDrill(); });
+  back.querySelector('.drill-close').addEventListener('click', closeImplDrill);
+  document.addEventListener('keydown', implDrillKey);
+  document.body.appendChild(back);
+  document.body.classList.add('drill-open');
+  back.querySelector('.drill-close').focus();
+}
+function implDrillKey(e) { if (e.key === 'Escape') closeImplDrill(); }
+function closeImplDrill() {
+  const el = document.getElementById('impl-drill');
+  if (!el) return;
+  el.remove();
+  document.body.classList.remove('drill-open');
+  document.removeEventListener('keydown', implDrillKey);
+}
 
 // Stage colors: orange = still needs scheduling, light → dark blue = 1st → 6th call,
 // purple = additional calls, grey = no stage set.

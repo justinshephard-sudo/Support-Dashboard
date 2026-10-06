@@ -230,6 +230,32 @@ tbody tr:hover td{background:var(--surface-2)}
 .tile .tile-sub{font-size:13.5px;color:var(--text-2);margin-top:6px}
 .tile-editable{cursor:pointer;outline:2px dashed var(--lm-blue);outline-offset:-6px}
 .tile-editable:hover{background:var(--surface-2)}
+.tile-clickable{cursor:pointer}
+.tile-clickable::after{content:"View firms ›";position:absolute;right:16px;top:18px;font-size:12px;font-weight:600;color:var(--lm-blue);opacity:0;transition:opacity .15s}
+.tile-clickable:hover::after,.tile-clickable:focus-visible::after{opacity:1}
+.tile-clickable:focus-visible{outline:2px solid var(--lm-blue);outline-offset:2px}
+
+/* ---------- drill-down panel ---------- */
+body.drill-open{overflow:hidden}
+.drill-backdrop{position:fixed;inset:0;z-index:900;background:rgba(15,25,40,.45);display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.drill{background:var(--surface-1);color:var(--text-1);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);width:min(1000px,100%);max-height:min(82vh,900px);display:flex;flex-direction:column;overflow:hidden}
+.drill-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 22px 14px;border-bottom:1px solid var(--border)}
+.drill-head h3{font-size:21px;font-weight:700;display:flex;align-items:center;gap:10px}
+.drill-count{font-size:13px;font-weight:700;color:var(--lm-blue);background:var(--surface-2);border-radius:999px;padding:3px 10px}
+.drill-note{font-size:13.5px;color:var(--text-3);margin-top:4px}
+.drill-close{flex:none;width:36px;height:36px;border:none;border-radius:999px;background:var(--surface-2);color:var(--text-1);font-size:22px;line-height:1;cursor:pointer}
+.drill-close:hover{color:var(--lm-blue)}
+.drill-close:focus-visible{outline:2px solid var(--lm-blue);outline-offset:2px}
+.drill-body{overflow:auto;padding:6px 10px 14px}
+.drill-body .table-wrap{overflow:visible}
+.drill-body .empty-note{padding:28px 14px;text-align:center;color:var(--text-3)}
+.drill-table td,.drill-table th{text-align:left!important}
+.drill-table td{white-space:nowrap}
+.drill-table td .drill-comment{display:block;white-space:normal;min-width:240px;max-width:420px;color:var(--text-2)}
+.score-pill{display:inline-block;min-width:26px;text-align:center;font-weight:700;border-radius:999px;padding:2px 8px;font-size:13px}
+.score-pill.good{background:rgba(12,163,90,.14);color:#0b8a4d}
+.score-pill.mid{background:rgba(255,144,17,.16);color:#b86400}
+.score-pill.bad{background:rgba(214,69,69,.14);color:#c03636}
 .section-panel{margin-top:14px}
 .split-panel[hidden]{display:none}
 .split+.split{margin-top:16px}

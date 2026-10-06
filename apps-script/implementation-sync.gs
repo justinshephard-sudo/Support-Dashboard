@@ -23,6 +23,9 @@
                          snapshot rule above; closed/median/CSAT are recomputed using
                          each firm's CURRENT account manager.
      "Impl - Open Firms" today's open onboardings, one row per firm
+     "Impl - Firm Events" firm-level detail behind the history tiles (drill-down):
+          Type "closed"  one row per completed onboarding (Days = NewTimeInOnboarding)
+          Type "csat"    one row per Onboarding CSAT response (Score, Comment)
 
    Which firms count (applies to every number): active accounts (IsActive eq true)
    that started on or after IMPL_MIN_START (StartDate, or Cf.CurrentTermStart when
@@ -47,6 +50,8 @@ var IMPL_MIN_START = new Date('2025-01-01T00:00:00-08:00');   // only firms that
 var IMPL_HISTORY_MONTHS = 24;         // months of completion/CSAT history kept in the tab
 var IMPL_MONTHLY_COLUMNS = ['Month', 'OpenOnboardings', 'PreKickoff', 'OpenStatus', 'NeedsScheduling', 'Over70',
   'ClosedOnboardings', 'MedianDays', 'CsatPct', 'CsatResponses', 'StageCounts', 'UpdatedAt', 'RepStats'];
+var IMPL_EVENTS_TAB = 'Impl - Firm Events';
+var IMPL_EVENT_COLUMNS = ['Type', 'Month', 'Date', 'Name', 'FirmId', 'AccountManager', 'Specialist', 'Days', 'Score', 'Comment'];
 var IMPL_OPEN_COLUMNS = ['Name', 'FirmId', 'Status', 'Stage', 'Specialist', 'AccountManager',
   'DaysInOnboarding', 'NextMeeting', 'ImplementationType'];
 
@@ -67,9 +72,10 @@ function syncImplementation() {
       return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true &&
         start && start >= IMPL_MIN_START;
     });
-  var activeIds = {}, repOf = {};   // activeIds: account id -> start date
+  var activeIds = {}, repOf = {}, byId = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {
     activeIds[String(a.Id)] = implStart_(a);
+    byId[String(a.Id)] = a;
     repOf[String(a.Id)] = (a.Cf || {}).AccountManager || IMPL_UNASSIGNED;
   });
   var repSnap = {};   // rep -> today's open-onboarding counts
@@ -108,6 +114,14 @@ function syncImplementation() {
   openRows.sort(function (x, y) { return (Number(y[6]) || 0) - (Number(x[6]) || 0); });
 
   // --- completions per month (active firms) ---
+  var events = [];        // drill-down rows for "Impl - Firm Events"
+  var since = new Date(now.getFullYear(), now.getMonth() - IMPL_HISTORY_MONTHS + 1, 1);
+  function eventRow_(type, date, a, days, score, comment) {
+    var cf = a.Cf || {};
+    return [type, Utilities.formatDate(date, tz, 'MMMM yyyy'), Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
+      a.Name || '', a.ExternalId || cf.FirmId || '', cf.AccountManager || IMPL_UNASSIGNED,
+      cf.ImplementationSpecialist || '', days, score, comment];
+  }
   var completed = {};      // 'yyyy-MM' -> [days]
   var repCompleted = {};   // 'yyyy-MM' -> rep -> [days]
   accounts.forEach(function (a) {
@@ -121,11 +135,15 @@ function syncImplementation() {
     var byRep = repCompleted[mk] = repCompleted[mk] || {};
     var rep = repOf[String(a.Id)];
     (byRep[rep] = byRep[rep] || []).push(cf.NewTimeInOnboarding);
+    var doneAt = new Date(String(cf.OnboardingCompletedDate).slice(0, 10) + 'T12:00:00');
+    if (doneAt >= since) {
+      events.push(eventRow_('closed', doneAt, a,
+        cf.NewTimeInOnboarding == null || cf.NewTimeInOnboarding === '' ? '' : Number(cf.NewTimeInOnboarding), '', ''));
+    }
   });
 
   // --- Onboarding CSAT per month (active firms) ---
-  var since = new Date(now.getFullYear(), now.getMonth() - IMPL_HISTORY_MONTHS + 1, 1);
-  var responses = fetchAllCZ_(base + '/SurveyResponse?$top=' + CZ_PAGE_SIZE + '&$select=AccountId,Score,ResponseDate,IsPending&$filter=' +
+  var responses = fetchAllCZ_(base + '/SurveyResponse?$top=' + CZ_PAGE_SIZE + '&$select=AccountId,Score,ResponseDate,IsPending,Comment&$filter=' +
     encodeURIComponent('SurveyId eq ' + IMPL_CSAT_SURVEY_ID + ' and ResponseDate ge ' + since.toISOString().replace(/\.\d+Z$/, 'Z')), headers);
   var csat = {};      // 'yyyy-MM' -> {pos, n}
   var repCsat = {};   // 'yyyy-MM' -> rep -> {pos, n}
@@ -140,6 +158,8 @@ function syncImplementation() {
       c.n++;
       if (Number(r.Score) >= 4) c.pos++;
     });
+    events.push(eventRow_('csat', new Date(r.ResponseDate), byId[String(r.AccountId)], '', Number(r.Score),
+      String(r.Comment || '').replace(/\s+/g, ' ').trim()));
   });
 
   // --- merge into the monthly tab ---
@@ -185,7 +205,12 @@ function syncImplementation() {
   openSheet.clearContents();
   var openOut = [IMPL_OPEN_COLUMNS].concat(openRows);
   openSheet.getRange(1, 1, openOut.length, IMPL_OPEN_COLUMNS.length).setNumberFormat('@').setValues(openOut);
-  return { open: open.length, needsScheduling: needsSched, over70: over };
+  var eventsSheet = ss.getSheetByName(IMPL_EVENTS_TAB) || ss.insertSheet(IMPL_EVENTS_TAB);
+  eventsSheet.clearContents();
+  events.sort(function (x, y) { return x[2] < y[2] ? 1 : x[2] > y[2] ? -1 : 0; });   // newest first
+  var eventsOut = [IMPL_EVENT_COLUMNS].concat(events);
+  eventsSheet.getRange(1, 1, eventsOut.length, IMPL_EVENT_COLUMNS.length).setNumberFormat('@').setValues(eventsOut);
+  return { open: open.length, needsScheduling: needsSched, over70: over, events: events.length };
 }
 
 // When the firm started: the account StartDate, or its current term start if that's blank.
