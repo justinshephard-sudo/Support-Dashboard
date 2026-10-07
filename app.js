@@ -16,6 +16,7 @@ const MANAGER_EMAILS = [
   'justin.shephard@lawmatics.com',
   'erika@lawmatics.com',
   'johnny@lawmatics.com',
+  'clare@lawmatics.com',
 ];
 
 // Google sign-in gate (restricted to lawmatics.com) + Sheets API read config.
