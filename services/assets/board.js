@@ -8,6 +8,12 @@
 
   // ───────────── data ─────────────
   B.markStale = () => { B.stale = true; };
+  // Board rows handed over by the startup call (no extra round trip).
+  B.setData = function (requests) {
+    B.data = requests || [];
+    B.loadedAt = new Date(); B.stale = false;
+    fillFilters(); render();
+  };
   B.load = async function (fresh) {
     $("refresh").disabled = true;
     if (!B.data.length) $("board").innerHTML = '<div class="state">Loading builds…</div>';

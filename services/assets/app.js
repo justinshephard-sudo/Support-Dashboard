@@ -188,6 +188,8 @@
       case "getConfig": return wait({ config: { catalog: MOCK_CATALOG, minOrder: 50, quoteValidDays: 30, sections: SECTIONS, csms: PEOPLE, people: PEOPLE,
         paymentStatuses: ["Not invoiced", "Invoiced", "Paid", "Refunded", "Waived"], closeReasons: ["Signed off", "Auto-accepted", "Inactive", "Cancelled", "Refunded"], projectUrl: "#" } });
       case "listRequests": return wait({ requests: mockDb.map((r) => Object.assign({}, r)) });
+      case "bootstrap": return Promise.all([IS.mockApi("getConfig"), IS.mockApi("listRequests")])
+        .then(([c, l]) => ({ ok: true, config: c.config, requests: l.requests }));
       case "listFirms": return wait({ firms: [
         ["Sample Harper Law", "5531", "Personal Injury", "Elliott Jones"], ["Sample Harper & Vale LLP", "5532", "Business", "Kennedy Wickham"],
         ["Sample Ortiz & Co", "5540", "Immigration", "Elliott Jones"], ["Sample Reyes Family Law", "5502", "Family Law", "Kennedy Wickham"],

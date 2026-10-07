@@ -25,15 +25,18 @@
     $("whoName").textContent = IS.user.name;
     $("avatar").textContent = IS.initials(IS.user.name);
     $("board").innerHTML = '<div class="state">Loading builds…</div>';
+    // One call for settings + the board; Apps Script round trips are slow, so don't chain two.
+    let boot;
     try {
-      IS.config = (await IS.api("getConfig")).config;
+      boot = await IS.api("bootstrap");
     } catch (e) {
-      $("board").innerHTML = `<div class="state"><span class="err">Couldn't load settings: ${IS.esc(e.message)}</span></div>`;
+      $("board").innerHTML = `<div class="state"><span class="err">Couldn't load builds: ${IS.esc(e.message)}</span></div>`;
       return;
     }
+    IS.config = boot.config;
     IS.quote.init();
+    IS.board.setData(boot.requests);
     IS.showTab(location.hash === "#quote" ? "quote" : "builds");
-    if (location.hash === "#quote") IS.board.load(false);
   };
 
   TABS.forEach((t) => $("tab-" + t).addEventListener("click", () => IS.showTab(t)));

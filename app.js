@@ -1916,6 +1916,10 @@ async function main() {
     await loadGidTitleMap();
     initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
     initImplementation().catch((err) => console.error('Implementation load failed', err));
+    // Warm up Additional Services in the background (its backend is slow to start), so the
+    // tab is usually ready by the time someone clicks it.
+    const warmServices = () => mountServices();
+    setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(warmServices, { timeout: 4000 }) : warmServices()), 1500);
 
     await loadReportTables();
     await fetchSheet(OVERRIDES_GID)
@@ -2394,7 +2398,7 @@ function mountServices() {
   const root = document.getElementById('services-root');
   if (!root || root.querySelector('iframe')) return;
   const frame = document.createElement('iframe');
-  frame.src = 'services/index.html?v=7';
+  frame.src = 'services/index.html?v=8';
   frame.title = 'Additional Services';
   frame.className = 'services-frame';
   root.appendChild(frame);
