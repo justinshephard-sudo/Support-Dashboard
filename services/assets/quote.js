@@ -202,7 +202,9 @@
             <label class="f full">What it does (shown on the quote)<input type="text" id="s_${c.key}" placeholder="One line for the quote email"></label>
             ${c.details.map((d) => d.type === "check"
               ? `<label class="check full"><input type="checkbox" id="d_${c.key}_${d.id}"> ${esc(d.label)}</label>`
-              : `<label class="f">${esc(d.label)}<input type="text" id="d_${c.key}_${d.id}"></label>`).join("")}
+              : d.type === "long"
+                ? `<label class="f full">${esc(d.label)}<textarea id="d_${c.key}_${d.id}" rows="7" placeholder="Step-by-step: which records, which fields, what changes to what"></textarea></label>`
+                : `<label class="f">${esc(d.label)}<input type="text" id="d_${c.key}_${d.id}"></label>`).join("")}
           </div>
           ${c.key === "train" ? `<div class="note warn" id="trainWarn" hidden>Training calls are a last resort. Offer one only after the customer has watched the walkthrough video.</div>` : ""}
         </div>`;
