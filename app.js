@@ -815,12 +815,16 @@ function scheduleOverridePost(timerKey, fn) {
   }, 800));
 }
 
-// The card's legacy definition applies to months that saved overrides under its old key.
+// The card's legacy definition applies to months that saved a custom award under its old key —
+// unless that saved award is this same incentive (managers set "Lowest Closing Time" by hand
+// in October 2026 before it was computed).
 function incentiveDefFor(def, monthKey) {
   if (!def.legacy) return def;
   const prefix = `${monthKey}:${def.legacy.key}:`;
-  for (const k of incentiveMetaMap.keys()) if (k.startsWith(prefix)) return def.legacy;
-  return def;
+  const saved = [...incentiveMetaMap.keys()].filter((k) => k.startsWith(prefix));
+  if (!saved.length) return def;
+  const title = String(incentiveMetaMap.get(`${prefix}title`) || '').trim().toLowerCase();
+  return title === def.title.toLowerCase() ? def : def.legacy;
 }
 
 function renderIncentives(members, monthKey) {
