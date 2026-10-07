@@ -133,6 +133,9 @@
       { id: "email_one", name: "Email template", price: 5, unit: "per template" },
       { id: "email_pack", name: "Email template pack (5)", price: 15, unit: "per pack" }],
       details: [{ id: "copy", label: "Copy provided by firm", type: "check" }, { id: "attached", label: "Attached to an automation", type: "check" }] },
+    { cat: "Data updates", key: "data", items: [
+      { id: "data_update", name: "Data update", price: 25, unit: "per hour" }],
+      details: [{ id: "what", label: "What data is being updated", type: "text" }, { id: "source", label: "Source (file, spreadsheet, other system)", type: "text" }, { id: "records", label: "Roughly how many records", type: "text" }] },
     { cat: "Training", key: "train", items: [
       { id: "training", name: "Additional training call", price: 25, unit: "per hour" }],
       details: [{ id: "topic", label: "Topic / which build", type: "text" }, { id: "watched", label: "Customer has watched the Zight video", type: "check" }] },
