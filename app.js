@@ -741,7 +741,7 @@ const INCENTIVE_DEFS = [
   {
     key: 'closing',
     title: 'Lowest Closing Time',
-    amount: '$35',
+    amount: '$135',
     emoji: '⏱️',
     displayStat: (m) => `${fmtDur(parseTimeToSeconds(m.closingTime)) || m.closingTime} avg closing time`,
     compute: (members) => computeIncentiveWinner(members, {
