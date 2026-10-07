@@ -739,16 +739,27 @@ const INCENTIVE_DEFS = [
     }),
   },
   {
-    key: 'facetime',
-    // No reliable "FaceTime calls" column exists in the sheet, so this
-    // incentive is set entirely in manager mode — winners, a free-text stat
-    // note, and (uniquely) an editable title + dollar amount.
-    manualOnly: true,
-    editableMeta: true,
-    defaultTitle: 'Most FaceTime Calls',
-    defaultAmount: '$35',
-    statPlaceholder: 'e.g. 12 FaceTime calls',
-    compute: () => null,
+    key: 'closing',
+    title: 'Lowest Closing Time',
+    amount: '$35',
+    emoji: '⏱️',
+    displayStat: (m) => `${fmtDur(parseTimeToSeconds(m.closingTime)) || m.closingTime} avg closing time`,
+    compute: (members) => computeIncentiveWinner(members, {
+      metric: (m) => parseTimeToSeconds(m.closingTime),
+      better: 'lower',
+    }),
+    // Until October 2026 this card was a manager-set custom award ("facetime" key, with its own
+    // title + amount). Months that saved one keep showing it instead of Lowest Closing Time.
+    legacy: {
+      key: 'facetime',
+      manualOnly: true,
+      editableMeta: true,
+      defaultTitle: 'Most FaceTime Calls',
+      defaultAmount: '$35',
+      emoji: '🏅',
+      statPlaceholder: 'e.g. 12 FaceTime calls',
+      compute: () => null,
+    },
   },
 ];
 
@@ -804,13 +815,28 @@ function scheduleOverridePost(timerKey, fn) {
   }, 800));
 }
 
+// The card's legacy definition applies to months that saved overrides under its old key.
+function incentiveDefFor(def, monthKey) {
+  if (!def.legacy) return def;
+  const prefix = `${monthKey}:${def.legacy.key}:`;
+  for (const k of incentiveMetaMap.keys()) if (k.startsWith(prefix)) return def.legacy;
+  return def;
+}
+
 function renderIncentives(members, monthKey) {
   currentIncentiveMembers = members;
   currentIncentiveMonthKey = monthKey;
 
-  INCENTIVE_DEFS.forEach((def) => {
-    const card = document.querySelector(`[data-incentive="${def.key}"]`);
+  INCENTIVE_DEFS.forEach((baseDef) => {
+    const card = document.querySelector(`[data-incentive="${baseDef.key}"]`);
     if (!card) return;
+    const def = incentiveDefFor(baseDef, monthKey);
+    if (!def.editableMeta && def.title) {
+      // Fixed card text (the legacy custom award may have changed it for another month).
+      card.querySelector('.incentive-title').textContent = def.title;
+      card.querySelector('.incentive-amount').textContent = def.amount;
+    }
+    if (def.emoji) card.querySelector('.incentive-emoji').textContent = def.emoji;
     const nameEl = card.querySelector('.incentive-winner');
     const statEl = card.querySelector('.incentive-stat');
     const tiedEl = card.querySelector('.incentive-tied');
