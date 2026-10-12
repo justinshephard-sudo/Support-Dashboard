@@ -81,6 +81,33 @@
     return data;
   };
 
+  // ───────────── Send-as-me permission (quote approvals) ─────────────
+  // Quote emails go out from the signed-in person's own Gmail. Google asks them once to allow it; after that
+  // the token comes back without a prompt. Must be called straight from the click (popup blockers).
+  const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.email";
+  let gmailTok = null;
+  IS.gmailToken = function () {
+    if (MOCK) return Promise.resolve("mock");
+    if (gmailTok && gmailTok.exp > Date.now() + 120000) return Promise.resolve(gmailTok.token);
+    let g = window.google;
+    try { if (EMBED) g = window.parent.google; } catch (e) { /* use this page's */ }
+    if (!g || !g.accounts || !g.accounts.oauth2) return Promise.reject(new Error("Google sign-in is still loading. Try again in a moment."));
+    return new Promise((ok, fail) => {
+      const client = g.accounts.oauth2.initTokenClient({
+        client_id: CFG.CLIENT_ID, scope: GMAIL_SCOPE, hint: (IS.user && IS.user.email) || "",
+        callback: (r) => {
+          if (r.error || !r.access_token) { fail(new Error("Google didn't allow sending email (" + (r.error || "no token") + ").")); return; }
+          gmailTok = { token: r.access_token, exp: Date.now() + Number(r.expires_in || 3600) * 1000 };
+          ok(r.access_token);
+        },
+        error_callback: (e) => fail(new Error(e && e.type === "popup_closed"
+          ? "The Google window was closed before you allowed sending. Try again and click Allow."
+          : "Couldn't get permission to send email (" + ((e && e.type) || "unknown") + "). Allow pop-ups for this site and try again.")),
+      });
+      client.requestAccessToken({ prompt: "" });
+    });
+  };
+
   // ───────────── Sign-in ─────────────
   function decodeJwt(t) {
     try { return JSON.parse(decodeURIComponent(escape(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))))); } catch (e) { return null; }

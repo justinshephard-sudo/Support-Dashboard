@@ -398,6 +398,7 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
     $("approveHint").innerHTML = a.live
       ? "Emails the decision-maker the quote with a <strong>Review and approve</strong> link (CSM cc'd) and creates the card. Their approval is recorded on the card."
       : "<strong>Test mode:</strong> the email goes to <strong>you</strong>, not the customer, and the card is named [TEST]. Use the link in the email to try approving.";
+    $("approveHint").innerHTML += " Sent from your own Gmail; Google asks you to allow this the first time.";
   };
 
   // action: "createRequest" (quote already sent by hand) or "sendQuote" (email it with an approval link)
@@ -409,9 +410,13 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
     if (action === "sendQuote" && s.allWaived) { toastErr("This quote is fully waived, so there's nothing to approve. Use \"Quote sent – create card\" instead."); return; }
     if (pending.some((f) => f.size > IS.MAX_FILE_BYTES)) { toastErr("Remove the files over 25 MB (attach those in Asana directly)."); return; }
     busy = true; $("createBtn").disabled = true; $("sendBtn").disabled = true;
-    toast(action === "sendQuote" ? "Creating the card and emailing the quote…" : "Creating the Asana card…");
+    // ask for send-as-me permission first, while the click still counts as a user gesture
+    const gmail = action === "sendQuote" ? IS.gmailToken() : null;
+    toast(action === "sendQuote" ? "Checking permission to send from your Gmail…" : "Creating the Asana card…");
     try {
-      const res = await IS.api(action, { request: payload(s) });
+      const extra = {};
+      if (gmail) { extra.gmailToken = await gmail; toast("Creating the card and emailing the quote from your Gmail…"); }
+      const res = await IS.api(action, Object.assign({ request: payload(s) }, extra));
       toast("");
       $("success").hidden = false;
       const sent = action === "sendQuote"
