@@ -297,3 +297,8 @@ input[readonly] { background: var(--line-soft); color: var(--slate); cursor: def
 .embedded .appbar .brand,.embedded .appbar .who{display:none}
 .embedded .appbar{box-shadow:none}
 .embedded body{background:#fff}
+
+/* Quote approvals: "Email quote for approval" sits above the manual buttons */
+.approve-box { display: grid; gap: 6px; margin-bottom: 10px; }
+.approve-box .btn { width: 100%; }
+.approve-box .hint { margin: 0; font-size: 12.5px; }

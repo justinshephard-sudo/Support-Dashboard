@@ -52,7 +52,10 @@
   function flagsFor(r) {
     const f = [];
     const t = today();
-    if (r.section === sections()[0] && r.validUntil && r.validUntil < t) f.push(["danger", "Quote expired"]);
+    const ap = r.approval;
+    if (ap && ap.status === "Approved") f.push(["ok", "Approved" + (ap.test ? " (test)" : "")]);
+    else if (ap && ap.status === "Awaiting approval" && r.section === sections()[0]) f.push(["muted", (ap.openedAt ? "Opened, not approved" : "Awaiting approval") + (ap.test ? " (test)" : "")]);
+    if (r.section === sections()[0] && r.validUntil && r.validUntil < t && !(ap && ap.status === "Approved")) f.push(["danger", "Quote expired"]);
     if (r.section !== sections()[0] && r.section !== lastSection() && r.dueOn && r.dueOn < t) f.push(["danger", "Overdue"]);
     if (r.section === "Review Video Sent" && r.delivered && addBusinessDays(r.delivered, BUSINESS_DAYS_TO_ACCEPT) <= t) f.push(["warn", "Auto-accept due"]);
     const waivedAmt = (Number(r.list) || 0) - (Number(r.total) || 0);
@@ -146,7 +149,10 @@
       ["Payment Status", "paymentStatus"], ["Paid Date", "paidDate"], ["Chargebee Invoice ID", "chargebeeId"], ["Services", (r) => r.services.join("; ")],
       ["Quote ID", "quoteId"], ["Quote Sent", "quoteSent"], ["Valid Until", "validUntil"], ["Account Manager", "am"], ["CSM", "csm"],
       ["Assignee", (r) => (r.assignee ? r.assignee.name : "")], ["Target Delivery", "dueOn"], ["Delivered", "delivered"],
-      ["Revision Count", "revisions"], ["Offshore Hours", "offshoreHours"], ["Close Reason", "closeReason"], ["Asana link", "url"]];
+      ["Revision Count", "revisions"], ["Offshore Hours", "offshoreHours"], ["Close Reason", "closeReason"],
+      ["Approval", (r) => (r.approval ? r.approval.status + (r.approval.test ? " (test)" : "") : "")],
+      ["Approved By", (r) => (r.approval ? r.approval.approverName : "")], ["Approved At", (r) => (r.approval ? r.approval.approvedAt : "")],
+      ["Asana link", "url"]];
     const cell = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const lines = [cols.map((c) => c[0]).join(",")].concat(filtered().map((r) =>
       cols.map(([, k]) => cell(typeof k === "function" ? k(r) : r[k])).join(",")));
@@ -229,6 +235,7 @@
           ${kv("Decision-maker", r.dmEmail)}
           ${kv("Practice area", r.practiceArea)}
           ${kv("Quote valid until", r.validUntil && shortDate(r.validUntil))}
+          ${r.approval ? kv("Approval", approvalText(r.approval)) : ""}
         </dl>
         ${r.notes ? `<pre class="notes">${esc(r.notes)}</pre>` : ""}
       </section>
@@ -311,6 +318,13 @@
         $("cToast").textContent = "Posted.";
       } catch (err) { $("cToast").innerHTML = `<span class="err">Not posted: ${esc(err.message)}</span>`; $("cPost").disabled = false; }
     });
+  }
+  function approvalText(a) {
+    const when = (iso) => iso ? new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+    const test = a.test ? " · test mode" : "";
+    if (a.status === "Approved") return `Approved by ${a.approverName} on ${when(a.approvedAt)} (link sent to ${a.emailedTo})${test}. Certificate attached under Files.`;
+    if (a.status === "Expired") return `Link sent to ${a.emailedTo} on ${when(a.sentAt)} expired without approval${test}.`;
+    return `Emailed to ${a.emailedTo} on ${when(a.sentAt)}; ${a.openedAt ? "opened " + when(a.openedAt) + ", not approved yet" : "not opened yet"}${test}.`;
   }
   function commentHtml(c) {
     return `<div class="comment"><div class="by">${esc(new Date(c.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</div><div class="text">${esc(c.text)}</div></div>`;

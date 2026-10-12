@@ -6,4 +6,7 @@ window.APP_CONFIG = {
   ALLOWED_DOMAIN: "lawmatics.com",
   // Apps Script web app URL (Deploy → Manage deployments → Web app URL, ends in /exec)
   API_URL: "https://script.google.com/macros/s/AKfycbx7qHTH_EViT0eMG-GjDLbljaEq1GFM-O7pK0G4-O6_ult-jet7BXGcaW3KXWbfjZaNwg/exec",
+  // Quote-approval test build (separate Apps Script deployment). Used only when the page URL has ?approvals=test
+  // (or the CS Dashboard's URL does); everyone else stays on API_URL.
+  API_URL_TEST: "https://script.google.com/macros/s/AKfycbwGUP3zjrYXosKll0Q8GQDqSn36ocXmy967A6qPeaOYc7tDgLGLNyDSD1jp75aUeUrBCQ/exec",
 };

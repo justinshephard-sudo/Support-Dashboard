@@ -4,12 +4,16 @@
   "use strict";
   const CFG = window.APP_CONFIG || {};
   const MOCK = new URLSearchParams(location.search).get("mock") === "1";
+  // ?approvals=test (here or on the CS Dashboard page that embeds this app) → the quote-approval test backend
+  let APPROVALS_TEST = new URLSearchParams(location.search).get("approvals") === "test";
+  try { APPROVALS_TEST = APPROVALS_TEST || new URLSearchParams(window.parent.location.search).get("approvals") === "test"; } catch (e) { /* cross-origin parent */ }
+  if (APPROVALS_TEST && CFG.API_URL_TEST) CFG.API_URL = CFG.API_URL_TEST;
   // Embedded as the CS Dashboard's "Additional Services" tab (same origin): reuse its Google sign-in.
   let EMBED = false;
   try { EMBED = window.parent !== window && !!window.parent.AUTH; } catch (e) { EMBED = false; }
 
   const IS = (window.IS = {
-    CFG, MOCK, EMBED,
+    CFG, MOCK, EMBED, APPROVALS_TEST,
     user: null, idToken: null, accessToken: null, config: null,
     $: (id) => document.getElementById(id),
     esc: (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])),
@@ -158,7 +162,8 @@
     }, extra || {});
   }
   const mockDb = [
-    mockReq(1, SECTIONS[0], "Sample Harper Law", "5531", ["Form – conditional logic", "Email template"], 35),
+    mockReq(1, SECTIONS[0], "Sample Harper Law", "5531", ["Form – conditional logic", "Email template"], 35,
+      { approval: { status: "Approved", sentAt: new Date(Date.now() - 3 * 864e5).toISOString(), emailedTo: "owner@sample.example", approvedAt: new Date(Date.now() - 864e5).toISOString(), approverName: "Jordan Harper", openedAt: "", test: true } }),
     mockReq(2, SECTIONS[0], "Sample Ortiz & Co", "5540", ["Automation – complex", "Email template"], 40, { list: 45, validUntil: daysFromNow(-2) }),
     mockReq(3, SECTIONS[1], "Sample Reyes Family Law", "5502", ["Document – standard", "Document – conditional logic"], 30,
       { paymentStatus: "Paid", paidDate: daysFromNow(-1), chargebeeId: "inv_sample_1" }),
@@ -189,7 +194,8 @@
     const find = (gid) => mockDb.find((r) => r.gid === gid);
     switch (action) {
       case "getConfig": return wait({ config: { catalog: MOCK_CATALOG, quoteValidDays: 30, sections: SECTIONS, csms: PEOPLE, people: PEOPLE,
-        paymentStatuses: ["Not invoiced", "Invoiced", "Paid", "Refunded", "Waived"], closeReasons: ["Signed off", "Auto-accepted", "Inactive", "Cancelled", "Refunded"], projectUrl: "#" } });
+        paymentStatuses: ["Not invoiced", "Invoiced", "Paid", "Refunded", "Waived"], closeReasons: ["Signed off", "Auto-accepted", "Inactive", "Cancelled", "Refunded"], projectUrl: "#",
+        approvals: { live: false } } });
       case "listRequests": return wait({ requests: mockDb.map((r) => Object.assign({}, r)) });
       case "bootstrap": return Promise.all([IS.mockApi("getConfig"), IS.mockApi("listRequests")])
         .then(([c, l]) => ({ ok: true, config: c.config, requests: l.requests }));
@@ -216,6 +222,13 @@
       case "fileUrl": return wait({ url: "about:blank" });
       case "deleteFile": { Object.values(mockExtras).forEach((ex) => { ex.files = ex.files.filter((f) => f.gid !== p.fileGid); }); return wait({ deleted: true }); }
       case "addComment": { const ex = mockExtras[p.gid]; const cm = { gid: "c" + Date.now(), text: IS.user.name + ": " + p.text, at: new Date().toISOString(), by: "Justin Shephard" }; if (ex) ex.comments.push(cm); return wait({ comment: cm }); }
+      case "sendQuote": {
+        return IS.mockApi("createRequest", p).then((res) => {
+          const card = find(res.task.gid);
+          card.approval = { status: "Awaiting approval", sentAt: new Date().toISOString(), emailedTo: IS.user.email, approvedAt: "", approverName: "", openedAt: "", test: true };
+          return Object.assign(res, { emailedTo: IS.user.email, test: true, approvalUrl: "#", validUntil: daysFromNow(30) });
+        });
+      }
       case "createRequest": {
         const r = p.request;
         const items = MOCK_CATALOG.flatMap((c) => c.items);

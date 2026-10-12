@@ -8,7 +8,7 @@
   const Q = (IS.quote = {});
 
   Q.init = function () {
-    buildCsms(); buildCatalog(); render();
+    buildCsms(); buildCatalog(); render(); Q.showApprovals();
     loadFirms();
   };
 
@@ -385,44 +385,64 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
       catch (e) { fallback(); }
     });
 
-    $("qform").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (busy) return;
-      const s = readState();
-      const problems = validate(s);
-      if (problems.length) { toastErr("Add " + problems.join(", ") + " before creating the card."); return; }
-      if (pending.some((f) => f.size > IS.MAX_FILE_BYTES)) { toastErr("Remove the files over 25 MB (attach those in Asana directly)."); return; }
-      busy = true; $("createBtn").disabled = true; toast("Creating the Asana card…");
-      try {
-        const res = await IS.api("createRequest", { request: payload(s) });
-        toast("");
-        $("success").hidden = false;
-        $("success").innerHTML = `<strong>Card created in Quote Sent.</strong>
-          <span>${esc(res.task.name)} · ${esc(res.quoteId)}</span>
-          ${res.task.url && res.task.url !== "#" ? `<a href="${esc(res.task.url)}" target="_blank" rel="noopener">Open in Asana ↗</a>` : "<span>(Test mode: nothing was written to Asana.)</span>"}
-          <span><button class="linkbtn" type="button" id="viewOnBoard">See it on the Builds board</button> · <button class="linkbtn" type="button" id="newQuote">Start a new quote</button></span>`;
-        $("newQuote").addEventListener("click", resetForm);
-        $("viewOnBoard").addEventListener("click", () => { resetForm(); IS.showTab("builds"); IS.board.load(true); });
-        if (pending.length) {
-          const files = pending.slice();
-          const line = document.createElement("span");
-          $("success").insertBefore(line, $("success").lastElementChild);
-          let done = 0; const failed = [];
-          line.textContent = `Attaching ${files.length} file${files.length === 1 ? "" : "s"}…`;
-          await IS.uploadFiles(res.task.gid, files, (f, ok, err) => {
-            if (ok) done++; else failed.push(f.name + " (" + err.message + ")");
-            line.textContent = `Attached ${done} of ${files.length} file${files.length === 1 ? "" : "s"}…`;
-          });
-          line.innerHTML = `${done} file${done === 1 ? "" : "s"} attached.` +
-            (failed.length ? ` <span class="err">Not attached: ${esc(failed.join(", "))}. Add them from the card on the Builds board.</span>` : "");
-          pending = []; renderPending();
-        }
-        IS.board.markStale();
-      } catch (err) {
-        toastErr("The card wasn't created: " + err.message);
-      } finally {
-        busy = false; $("createBtn").disabled = false;
-      }
-    });
+    $("qform").addEventListener("submit", (e) => { e.preventDefault(); submitQuote("createRequest"); });
+    $("sendBtn").addEventListener("click", () => submitQuote("sendQuote"));
   };
+
+  // Approvals: shown when the backend supports them (getConfig returns `approvals`).
+  Q.showApprovals = function () {
+    const a = IS.config && IS.config.approvals;
+    $("approveBox").hidden = !a;
+    if (!a) return;
+    $("sendBtn").textContent = a.live ? "Email quote for approval" : "Email quote for approval (test)";
+    $("approveHint").innerHTML = a.live
+      ? "Emails the decision-maker the quote with a <strong>Review and approve</strong> link (CSM cc'd) and creates the card. Their approval is recorded on the card."
+      : "<strong>Test mode:</strong> the email goes to <strong>you</strong>, not the customer, and the card is named [TEST]. Use the link in the email to try approving.";
+  };
+
+  // action: "createRequest" (quote already sent by hand) or "sendQuote" (email it with an approval link)
+  async function submitQuote(action) {
+    if (busy) return;
+    const s = readState();
+    const problems = validate(s);
+    if (problems.length) { toastErr("Add " + problems.join(", ") + " before " + (action === "sendQuote" ? "sending the quote." : "creating the card.")); return; }
+    if (action === "sendQuote" && s.allWaived) { toastErr("This quote is fully waived, so there's nothing to approve. Use \"Quote sent – create card\" instead."); return; }
+    if (pending.some((f) => f.size > IS.MAX_FILE_BYTES)) { toastErr("Remove the files over 25 MB (attach those in Asana directly)."); return; }
+    busy = true; $("createBtn").disabled = true; $("sendBtn").disabled = true;
+    toast(action === "sendQuote" ? "Creating the card and emailing the quote…" : "Creating the Asana card…");
+    try {
+      const res = await IS.api(action, { request: payload(s) });
+      toast("");
+      $("success").hidden = false;
+      const sent = action === "sendQuote"
+        ? `<span>Quote emailed to <strong>${esc(res.emailedTo)}</strong>${res.test ? " (test mode: sent to you instead of the customer)" : ""}. The approval link is valid until ${esc(fmtDate(new Date(res.validUntil + "T12:00:00")))}.</span>
+           ${res.test && res.approvalUrl && res.approvalUrl !== "#" ? `<a href="${esc(res.approvalUrl)}" target="_blank" rel="noopener">Open the approval page ↗</a>` : ""}`
+        : "";
+      $("success").innerHTML = `<strong>Card created in Quote Sent.</strong>
+        <span>${esc(res.task.name)} · ${esc(res.quoteId)}</span>${sent}
+        ${res.task.url && res.task.url !== "#" ? `<a href="${esc(res.task.url)}" target="_blank" rel="noopener">Open in Asana ↗</a>` : "<span>(Test mode: nothing was written to Asana.)</span>"}
+        <span><button class="linkbtn" type="button" id="viewOnBoard">See it on the Builds board</button> · <button class="linkbtn" type="button" id="newQuote">Start a new quote</button></span>`;
+      $("newQuote").addEventListener("click", resetForm);
+      $("viewOnBoard").addEventListener("click", () => { resetForm(); IS.showTab("builds"); IS.board.load(true); });
+      if (pending.length) {
+        const files = pending.slice();
+        const line = document.createElement("span");
+        $("success").insertBefore(line, $("success").lastElementChild);
+        let done = 0; const failed = [];
+        line.textContent = `Attaching ${files.length} file${files.length === 1 ? "" : "s"}…`;
+        await IS.uploadFiles(res.task.gid, files, (f, ok, err) => {
+          if (ok) done++; else failed.push(f.name + " (" + err.message + ")");
+          line.textContent = `Attached ${done} of ${files.length} file${files.length === 1 ? "" : "s"}…`;
+        });
+        line.innerHTML = `${done} file${done === 1 ? "" : "s"} attached.` +
+          (failed.length ? ` <span class="err">Not attached: ${esc(failed.join(", "))}. Add them from the card on the Builds board.</span>` : "");
+        pending = []; renderPending();
+      }
+      IS.board.markStale();
+    } catch (err) {
+      toastErr((action === "sendQuote" ? "The quote wasn't sent: " : "The card wasn't created: ") + err.message);
+    } finally {
+      busy = false; $("createBtn").disabled = false; $("sendBtn").disabled = false;
+    }
+  }
 })();
