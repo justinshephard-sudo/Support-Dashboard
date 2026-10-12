@@ -133,9 +133,11 @@ textarea { resize: vertical; min-height: 72px; }
 .column { background: var(--line-soft); border-radius: var(--radius); padding: 10px; display: grid; align-content: start; gap: 10px; min-width: 262px; }
 .col-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 6px 2px; }
 .col-head h3 { font-size: 15px; }
-.col-head .meta { font-size: 13px; font-weight: 600; color: var(--slate); font-variant-numeric: tabular-nums; background: var(--white); border-radius: 999px; padding: 1px 9px; }
+.col-head .meta { white-space: nowrap; flex: none; font-size: 13px; font-weight: 600; color: var(--slate); font-variant-numeric: tabular-nums; background: var(--white); border-radius: 999px; padding: 1px 9px; }
 .column:first-child .col-head h3::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--orange); margin-right: 8px; transform: translateY(-1px); }
-.column:last-child .col-head h3::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 8px; transform: translateY(-1px); }
+.column[data-section="Signed Off / Closed"] .col-head h3::before,
+.column[data-section="Abandoned/Did not move forward"] .col-head h3::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 8px; transform: translateY(-1px); }
+.column[data-section="Abandoned/Did not move forward"] .col-head h3::before { background: var(--slate-2); }
 .col-empty { font-size: 13.5px; color: var(--slate-2); padding: 12px 6px; }
 .card { text-align: left; font: inherit; color: var(--slate); background: var(--white); border: 1px solid transparent; border-radius: 10px; padding: 12px 14px; display: grid; gap: 7px; cursor: pointer; width: 100%; box-shadow: var(--shadow-sm); transition: box-shadow .15s, border-color .15s, transform .15s; }
 .card:hover { border-color: var(--lm-blue); box-shadow: var(--shadow); }

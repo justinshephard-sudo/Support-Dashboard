@@ -391,7 +391,9 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
 
   // Approvals: shown when the backend supports them (getConfig returns `approvals`).
   Q.showApprovals = function () {
-    const a = IS.config && IS.config.approvals;
+    let a = IS.config && IS.config.approvals;
+    // Before launch the backend runs approvals in test mode; only testers (?approvals=test) see the button.
+    if (a && !a.live && !IS.APPROVALS_TEST && !IS.MOCK) a = null;
     $("approveBox").hidden = !a;
     if (!a) return;
     $("sendBtn").textContent = a.live ? "Email quote for approval" : "Email quote for approval (test)";

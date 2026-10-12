@@ -171,7 +171,8 @@
       { id: "training", name: "Additional training call", price: 25, unit: "per hour" }],
       details: [{ id: "topic", label: "Topic / which build", type: "text" }, { id: "watched", label: "Customer has watched the Zight video", type: "check" }] },
   ];
-  const SECTIONS = ["Quote Sent", "Paid / Ready to assign", "In Build", "Review Video Sent", "In Revisions", "Signed Off / Closed"];
+  const SECTIONS = ["Quote Sent", "Paid / Ready to assign", "In Build", "Review Video Sent", "In Revisions", "Signed Off / Closed", "Abandoned/Did not move forward"];
+  const CLOSED = [SECTIONS[5], SECTIONS[6]];
   const PEOPLE = [
     { name: "Elliott Jones", email: "elliott@example.com" }, { name: "Gideon Bermeo", email: "gideon@example.com" },
     { name: "Jevijoh Nulud", email: "jevi@example.com" }, { name: "Kennedy Wickham", email: "kennedy@example.com" },
@@ -180,7 +181,7 @@
   function daysFromNow(n) { const d = new Date(Date.now() + n * 864e5); return d.toISOString().slice(0, 10); }
   function mockReq(i, section, firm, firmId, services, total, extra) {
     return Object.assign({
-      gid: String(9000 + i), name: `${firm} (${firmId}) – Services request`, url: "#", section, completed: section === SECTIONS[5],
+      gid: String(9000 + i), name: `${firm} (${firmId}) – Services request`, url: "#", section, completed: CLOSED.includes(section),
       createdAt: new Date(Date.now() - (20 - i) * 864e5).toISOString(), dueOn: "", assignee: null, numSubtasks: services.length + 2,
       firmId, practiceArea: "Personal Injury", am: "Elliott Jones", csm: "Elliott Jones", services, total, list: total,
       quoteId: "Q-SAMPLE-" + firmId, quoteSent: daysFromNow(-(20 - i)), validUntil: daysFromNow(10 + i), paymentStatus: "Not invoiced",
@@ -202,6 +203,7 @@
       { paymentStatus: "Paid", paidDate: daysFromNow(-16), assignee: { name: "Marta Reyna", email: "marta@example.com" }, delivered: daysFromNow(-2), dueOn: daysFromNow(-2) }),
     mockReq(7, SECTIONS[4], "Sample Lane Bankruptcy", "5420", ["Automation – simple"], 0,
       { paymentStatus: "Waived", list: 30, assignee: { name: "Jevijoh Nulud", email: "jevi@example.com" }, revisions: 1 }),
+    mockReq(9, SECTIONS[6], "Sample Quinn Legal", "5390", ["Report – standard"], 10, { closeReason: "Inactive" }),
     mockReq(8, SECTIONS[5], "Sample Vale Defense", "5400", ["Training call"], 25,
       { paymentStatus: "Paid", paidDate: daysFromNow(-30), closeReason: "Signed off", assignee: { name: "Gideon Bermeo", email: "gideon@example.com" } }),
   ];
@@ -222,7 +224,7 @@
     switch (action) {
       case "getConfig": return wait({ config: { catalog: MOCK_CATALOG, quoteValidDays: 30, sections: SECTIONS, csms: PEOPLE, people: PEOPLE,
         paymentStatuses: ["Not invoiced", "Invoiced", "Paid", "Refunded", "Waived"], closeReasons: ["Signed off", "Auto-accepted", "Inactive", "Cancelled", "Refunded"], projectUrl: "#",
-        approvals: { live: false } } });
+        closedSections: CLOSED, approvals: { live: false } } });
       case "listRequests": return wait({ requests: mockDb.map((r) => Object.assign({}, r)) });
       case "bootstrap": return Promise.all([IS.mockApi("getConfig"), IS.mockApi("listRequests")])
         .then(([c, l]) => ({ ok: true, config: c.config, requests: l.requests }));
@@ -237,7 +239,7 @@
         if (c.paymentStatus === "Paid" && !r.paidDate && !c.paidDate) c.paidDate = IS.todayIso();
         Object.keys(c).forEach((k) => {
           if (k === "assignee") { const per = PEOPLE.find((x) => x.email === c.assignee); r.assignee = per ? Object.assign({}, per) : null; log.push("Assignee"); }
-          else if (k === "section") { r.section = c.section; r.completed = c.section === SECTIONS[5]; log.push("Stage"); }
+          else if (k === "section") { r.section = c.section; r.completed = CLOSED.includes(c.section); log.push("Stage"); }
           else { r[k] = ["total", "revisions", "offshoreHours"].includes(k) ? (c[k] === "" ? null : Number(c[k])) : c[k]; log.push(k); }
         });
         const ex = extrasFor(r);

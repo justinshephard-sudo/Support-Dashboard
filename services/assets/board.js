@@ -44,6 +44,9 @@
   const today = () => IS.todayIso();
   const sections = () => IS.config.sections;
   const lastSection = () => sections()[sections().length - 1];
+  // Stages that end a request (Signed Off, Abandoned). Older backends don't send the list: the last stage only.
+  const closedSections = () => IS.config.closedSections || [lastSection()];
+  const isClosed = (sec) => closedSections().indexOf(sec) >= 0;
   function addBusinessDays(iso, n) {
     const d = new Date(iso + "T12:00:00");
     while (n > 0) { d.setDate(d.getDate() + 1); const w = d.getDay(); if (w !== 0 && w !== 6) n--; }
@@ -56,13 +59,13 @@
     if (ap && ap.status === "Approved") f.push(["ok", "Approved" + (ap.test ? " (test)" : "")]);
     else if (ap && ap.status === "Awaiting approval" && r.section === sections()[0]) f.push(["muted", (ap.openedAt ? "Opened, not approved" : "Awaiting approval") + (ap.test ? " (test)" : "")]);
     if (r.section === sections()[0] && r.validUntil && r.validUntil < t && !(ap && ap.status === "Approved")) f.push(["danger", "Quote expired"]);
-    if (r.section !== sections()[0] && r.section !== lastSection() && r.dueOn && r.dueOn < t) f.push(["danger", "Overdue"]);
+    if (r.section !== sections()[0] && !isClosed(r.section) && r.dueOn && r.dueOn < t) f.push(["danger", "Overdue"]);
     if (r.section === "Review Video Sent" && r.delivered && addBusinessDays(r.delivered, BUSINESS_DAYS_TO_ACCEPT) <= t) f.push(["warn", "Auto-accept due"]);
     const waivedAmt = (Number(r.list) || 0) - (Number(r.total) || 0);
     if (r.paymentStatus === "Waived") f.push(["info", "Waived"]);
     else if (waivedAmt > 0) f.push(["info", money(waivedAmt) + " waived"]);
-    else if (r.section !== sections()[0] && r.paymentStatus && r.paymentStatus !== "Paid") f.push(["warn", r.paymentStatus]);
-    if (r.section !== sections()[0] && r.section !== lastSection() && !r.assignee) f.push(["muted", "Unassigned"]);
+    else if (r.section !== sections()[0] && !isClosed(r.section) && r.paymentStatus && r.paymentStatus !== "Paid") f.push(["warn", r.paymentStatus]);
+    if (r.section !== sections()[0] && !isClosed(r.section) && !r.assignee) f.push(["muted", "Unassigned"]);
     return f;
   }
   function periodRange(p) {
@@ -97,7 +100,7 @@
     const paid = rows.filter((r) => r.paymentStatus === "Paid" && inPeriod(r.paidDate));
     const quotes = rows.filter((r) => r.section === sections()[0]);
     const expired = quotes.filter((r) => r.validUntil && r.validUntil < today());
-    const active = rows.filter((r) => r.section !== sections()[0] && r.section !== lastSection());
+    const active = rows.filter((r) => r.section !== sections()[0] && !isClosed(r.section));
     const overdue = active.filter((r) => r.dueOn && r.dueOn < today());
     const waivedAmt = (r) => Math.max(0, (Number(r.list) || 0) - (Number(r.total) || 0));
     const waived = rows.filter((r) => waivedAmt(r) > 0 && inPeriod(r.quoteSent));
@@ -113,10 +116,10 @@
     $("board").innerHTML = sections().map((sec, i) => {
       let items = rows.filter((r) => r.section === sec);
       if (i === 0) items.sort((a, b) => (b.quoteSent || "").localeCompare(a.quoteSent || ""));
-      else if (sec === lastSection()) items.sort((a, b) => (b.modifiedAt || "").localeCompare(a.modifiedAt || ""));
+      else if (isClosed(sec)) items.sort((a, b) => (b.modifiedAt || "").localeCompare(a.modifiedAt || ""));
       else items.sort(byDue);
       const total = sum(items, "total");
-      const shown = sec === lastSection() ? items.slice(0, 15) : items;
+      const shown = isClosed(sec) ? items.slice(0, 15) : items;
       return `<div class="column" data-section="${esc(sec)}">
         <div class="col-head"><h3>${esc(sec)}</h3><span class="meta">${items.length} · ${money(total)}</span></div>
         ${shown.map(card).join("") || '<div class="col-empty">Nothing here.</div>'}
@@ -131,7 +134,7 @@
     const flags = flagsFor(r);
     const when = r.section === sections()[0]
       ? (r.validUntil ? "Valid until " + shortDate(r.validUntil) : "")
-      : r.section === lastSection() ? (r.closeReason || "Closed") : (r.dueOn ? "Due " + shortDate(r.dueOn) : "No target date");
+      : isClosed(r.section) ? (r.closeReason || (r.section === closedSections()[0] ? "Closed" : "Did not move forward")) : (r.dueOn ? "Due " + shortDate(r.dueOn) : "No target date");
     return `<button type="button" class="card" data-gid="${esc(r.gid)}">
       <div class="firm">${esc(firm)}</div>
       <div class="sub">${esc(r.services.join(", ") || "—")}</div>
@@ -281,7 +284,7 @@
       e.preventDefault();
       const ch = changes();
       if (!Object.keys(ch).length) return;
-      if (ch.section === lastSection() && !$("e_closeReason").value) {
+      if (ch.section === closedSections()[0] && !$("e_closeReason").value) {
         $("eToast").innerHTML = '<span class="err">Pick a close reason before closing the request.</span>'; return;
       }
       $("eSave").disabled = true; $("eToast").textContent = "Saving to Asana…";
