@@ -188,7 +188,7 @@
     const wait = (v) => new Promise((ok) => setTimeout(() => ok(Object.assign({ ok: true }, v)), 250));
     const find = (gid) => mockDb.find((r) => r.gid === gid);
     switch (action) {
-      case "getConfig": return wait({ config: { catalog: MOCK_CATALOG, minOrder: 50, quoteValidDays: 30, sections: SECTIONS, csms: PEOPLE, people: PEOPLE,
+      case "getConfig": return wait({ config: { catalog: MOCK_CATALOG, quoteValidDays: 30, sections: SECTIONS, csms: PEOPLE, people: PEOPLE,
         paymentStatuses: ["Not invoiced", "Invoiced", "Paid", "Refunded", "Waived"], closeReasons: ["Signed off", "Auto-accepted", "Inactive", "Cancelled", "Refunded"], projectUrl: "#" } });
       case "listRequests": return wait({ requests: mockDb.map((r) => Object.assign({}, r)) });
       case "bootstrap": return Promise.all([IS.mockApi("getConfig"), IS.mockApi("listRequests")])

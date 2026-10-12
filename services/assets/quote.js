@@ -260,12 +260,9 @@
     master.checked = s.allWaived;
     master.indeterminate = s.someWaived && !s.allWaived;
 
-    const min = IS.config.minOrder || 0;
     const flags = [];
     if (s.allWaived) flags.push(`<span class="pill info">Fully waived · ${money(s.list)} list value recorded</span>`);
     else if (s.someWaived) flags.push(`<span class="pill info">${money(s.waivedValue)} waived</span>`);
-    if (s.total > 0 && s.total < min) flags.push(`<span class="pill warn">Below the proposed ${money(min)} minimum order</span>`);
-    if (s.total >= min && s.total > 0) flags.push(`<span class="pill ok">Meets ${money(min)} minimum</span>`);
     if (s.lines.some((l) => l.key === "train") && watched && !watched.checked) flags.push(`<span class="pill warn">Training call before video watched</span>`);
     $("flags").innerHTML = flags.join("");
     $("validCap").textContent = "Valid until " + fmtDate(validUntil());
