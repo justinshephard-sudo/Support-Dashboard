@@ -236,6 +236,7 @@
           ${kv("Practice area", r.practiceArea)}
           ${kv("Quote valid until", r.validUntil && shortDate(r.validUntil))}
           ${r.approval ? kv("Approval", approvalText(r.approval)) : ""}
+          ${r.approval && r.approval.certificateUrl ? `<dt>Certificate</dt><dd><a href="${esc(r.approval.certificateUrl)}" target="_blank" rel="noopener">Open in Google Drive ↗</a></dd>` : ""}
         </dl>
         ${r.notes ? `<pre class="notes">${esc(r.notes)}</pre>` : ""}
       </section>
@@ -322,7 +323,7 @@
   function approvalText(a) {
     const when = (iso) => iso ? new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
     const test = a.test ? " · test mode" : "";
-    if (a.status === "Approved") return `Approved by ${a.approverName} on ${when(a.approvedAt)} (link sent to ${a.emailedTo})${test}. Certificate attached under Files.`;
+    if (a.status === "Approved") return `Approved by ${a.approverName} on ${when(a.approvedAt)} (link sent to ${a.emailedTo})${test}. Certificate attached under Files${a.certificateUrl ? " and saved to Drive" : ""}.`;
     if (a.status === "Expired") return `Link sent to ${a.emailedTo} on ${when(a.sentAt)} expired without approval${test}.`;
     return `Emailed to ${a.emailedTo} on ${when(a.sentAt)}; ${a.openedAt ? "opened " + when(a.openedAt) + ", not approved yet" : "not opened yet"}${test}.`;
   }
