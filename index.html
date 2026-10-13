@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=47">
+<link rel="stylesheet" href="style.css?v=51">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -305,6 +305,11 @@
         <h2>Resources</h2>
         <p>Guides, processes, and training from the CS Knowledge Base — always the latest version.</p>
       </div>
+      <div class="res-switch" role="tablist" aria-label="Resources sections">
+        <button type="button" role="tab" class="res-switch-btn" data-res-view="kb" aria-selected="true">Knowledge Base</button>
+        <button type="button" role="tab" class="res-switch-btn" data-res-view="roundup" aria-selected="false">Product Roundup</button>
+      </div>
+      <div id="resKB">
       <div class="search-wrap">
         <div class="search-box">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -320,6 +325,8 @@
       <div class="res-chips" id="resChips" role="tablist" aria-label="Categories"></div>
       <div class="res-manager-bar" id="resManagerBar" hidden></div>
       <div id="resBody"><div class="res-loading" id="resLoading" hidden>Loading the Knowledge Base…</div></div>
+      </div>
+      <div id="roundup" hidden></div>
     </div>
   </div>
 
@@ -350,6 +357,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=49"></script>
+<script src="app.js?v=51"></script>
 </body>
 </html>

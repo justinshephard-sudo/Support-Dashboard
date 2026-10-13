@@ -2880,6 +2880,205 @@ function updateScorecardsButton() {
 }
 
 /* ==========================================================================
+   Product Roundup (Resources tab) — the CS engineer's recurring product update:
+   latest session recording + notes, what's coming soon, what just launched,
+   customer field notes, and what's further out. Read from the Product Roundup
+   sheet with the viewer's own Google sign-in.
+   Until ROUNDUP_SHEET_ID is set, the section shows labeled sample content.
+   ========================================================================== */
+const ROUNDUP_SHEET_ID = '';   // TODO: the CS engineer's Product Roundup sheet
+// Tab name → section, and the column headers we accept for each field (case/punctuation-insensitive).
+const ROUNDUP_TABS = {
+  sessions: { tab: 'Sessions', cols: { session: ['session', 'session date', 'date'], title: ['title', 'session title'], recording: ['recording', 'recording link', 'recording url', 'video'], notes: ['notes', 'notes link', 'notes url'] } },
+  soon: { tab: 'Coming Soon', cols: { session: ['session', 'session date'], title: ['feature', 'title', 'name'], tag: ['eta', 'timing', 'status'], customers: ['what changes for customers', 'customers', 'customer impact'], us: ['what changes for us', 'us', 'team impact', 'cs impact'], training: ['certification or training', 'certification', 'training'], link: ['link', 'url', 'more info'] } },
+  launched: { tab: 'Just Launched', cols: { session: ['session', 'session date'], title: ['feature', 'title', 'name'], tag: ['shipped', 'status', 'launched'], questions: ['expected questions', 'questions'], issues: ['known issues / bug tickets', 'known issues', 'bug tickets', 'issues'], bugs: ['open bugs', 'open', 'bug count', '# open'], link: ['link', 'url', 'more info'] } },
+  field: { tab: 'Field Notes', cols: { session: ['session', 'session date'], title: ['topic', 'title', 'name'], tag: ['context', 'tag', 'trend'], going: ["what's actually going on", 'whats actually going on', 'what is going on', 'going on'], handle: ['how to handle it', 'how to handle', 'handle'], resource: ['resource update', 'resource', 'resources'], link: ['link', 'url'] } },
+  plans: { tab: 'Plans and Development', cols: { session: ['session', 'session date'], title: ['feature', 'title', 'name'], desc: ['description', 'summary', 'what it is'], tag: ['timing', 'status', 'target'], link: ['link', 'url'] } },
+};
+const ROUNDUP = { loaded: false, loading: false, sample: false, data: null, session: '' };
+
+const ROUNDUP_SAMPLE = {
+  sessions: [
+    { session: '2026-10-08', title: '', recording: '#', notes: '#' },
+    { session: '2026-09-24', title: '', recording: '#', notes: '#' },
+    { session: '2026-09-10', title: '', recording: '#', notes: '#' },
+  ],
+  soon: [{ session: '2026-10-08', title: 'Feature Z', tag: 'ETA 3 weeks', customers: 'New toggle in Settings; default is off.', us: 'Expect “where did X go” tickets the first week.', training: 'Yes — short cert the week before release.' }],
+  launched: [{ session: '2026-10-08', title: 'Feature W', tag: 'Shipped last week', questions: 'Customers asking why the old setting still appears for legacy accounts.', issues: 'One bug ticket open; workaround available.', bugs: '1' }],
+  field: [
+    { session: '2026-10-08', title: 'Repeat question about Feature V', tag: 'Several tickets in the last two weeks', going: 'The setting is in a different place than customers expect.', handle: 'Send the help article link and walk them to the setting.', resource: 'Help article screenshots updated to show the new location.' },
+    { session: '2026-10-08', title: 'Common mistake in Workflow Q', tag: 'Mostly new accounts during onboarding', going: 'User error, not a bug.', handle: 'Confirm the trigger step before escalating.', resource: '' },
+  ],
+  plans: [
+    { session: '', title: 'Feature X', desc: 'New reporting view for intake sources.', tag: 'Target: next quarter, date not set' },
+    { session: '', title: 'Feature Y', desc: 'Changes to how users are invited.', tag: 'Early planning, details still moving' },
+  ],
+};
+
+/* ---- sheet → data ---- */
+const roundupKey = (s) => String(s || '').toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9' /#]+/g, ' ').replace(/\s+/g, ' ').trim();
+// Session dates may arrive as "10/8/2026", "2026-10-08" or "October 8, 2026"; normalise to yyyy-mm-dd.
+function roundupDate(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  if (/^example$/i.test(s)) return 'EXAMPLE';
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  const d = iso ? new Date(+iso[1], iso[2] - 1, +iso[3]) : new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function roundupRows(rows, cols) {
+  if (!rows || rows.length < 2) return [];
+  const header = rows[0].map(roundupKey);
+  const idx = {};
+  Object.entries(cols).forEach(([field, names]) => { idx[field] = header.findIndex((h) => names.includes(h)); });
+  return rows.slice(1).map((r) => {
+    const o = {};
+    Object.keys(cols).forEach((f) => { o[f] = idx[f] >= 0 ? String(r[idx[f]] == null ? '' : r[idx[f]]).trim() : ''; });
+    o.session = roundupDate(o.session);
+    return o;
+  }).filter((o) => o.session !== 'EXAMPLE' && (o.title || (cols.recording && o.session)));   // skip blank + example rows
+}
+
+async function loadRoundup() {
+  if (ROUNDUP.loading || ROUNDUP.loaded) return;
+  ROUNDUP.loading = true;
+  const root = document.getElementById('roundup');
+  if (!ROUNDUP_SHEET_ID) {
+    ROUNDUP.data = ROUNDUP_SAMPLE; ROUNDUP.sample = true; ROUNDUP.loaded = true; ROUNDUP.loading = false;
+    renderRoundup();
+    return;
+  }
+  root.innerHTML = '<div class="res-loading">Loading the Product Roundup…</div>';
+  try {
+    const data = {};
+    await Promise.all(Object.entries(ROUNDUP_TABS).map(async ([key, def]) => {
+      const rows = await fetchTitleFrom(ROUNDUP_SHEET_ID, def.tab).catch(() => []);
+      data[key] = roundupRows(rows, def.cols);
+    }));
+    ROUNDUP.data = data; ROUNDUP.loaded = true;
+    renderRoundup();
+  } catch (e) {
+    root.innerHTML = `<div class="error-banner">Couldn’t load the Product Roundup: ${esc(e.message)}</div>`;
+  } finally {
+    ROUNDUP.loading = false;
+  }
+}
+
+/* ---- render ---- */
+function roundupLabel(date) {
+  if (!date) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  return m ? new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : date;
+}
+const roundupLink = (url, label, cls = '') => (url ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener">${label}</a>` : '');
+// An item belongs to the chosen session, or to every session when its Session cell is blank.
+const roundupIn = (list, session) => (list || []).filter((x) => !x.session || x.session === session);
+
+function roundupFacts(pairs) {
+  const items = pairs.filter(([, v]) => v);
+  if (!items.length) return '';
+  return `<dl class="ru-facts">${items.map(([k, v, extra]) => `<div><dt>${esc(k)}${extra || ''}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
+}
+function roundupSection(id, title, note, inner) {
+  if (!inner) return '';
+  return `<section class="res-section" id="${id}"><div class="section-head"><h2>${esc(title)}</h2><span class="rule"></span><span class="note">${esc(note)}</span></div>${inner}</section>`;
+}
+
+function renderRoundup() {
+  const root = document.getElementById('roundup');
+  const d = ROUNDUP.data || {};
+  // Sessions newest first; items may name a session that has no Sessions row yet.
+  const dates = [...new Set([...(d.sessions || []).map((s) => s.session),
+    ...['soon', 'launched', 'field', 'plans'].flatMap((k) => (d[k] || []).map((x) => x.session))].filter(Boolean))].sort().reverse();
+  if (!ROUNDUP.session || !dates.includes(ROUNDUP.session)) ROUNDUP.session = dates[0] || '';
+  const sess = ROUNDUP.session;
+  const meta = (d.sessions || []).find((s) => s.session === sess) || {};
+  const soon = roundupIn(d.soon, sess), launched = roundupIn(d.launched, sess), field = roundupIn(d.field, sess), plans = roundupIn(d.plans, sess);
+
+  if (!dates.length && !plans.length) {
+    root.innerHTML = '<div class="res-empty"><img src="assets/merlin-scientist.webp" alt="">No Product Roundup sessions yet.</div>';
+    return;
+  }
+  const counts = [[soon.length, 'coming soon', 'ru-soon'], [launched.length, 'just launched', 'ru-launched'], [field.length, 'field notes', 'ru-field'], [plans.length, 'on the roadmap', 'ru-plans']]
+    .filter(([n]) => n).map(([n, l, id]) => `<a href="#${id}" class="ru-count" data-jump="${id}"><b>${n}</b> ${l}</a>`).join('');
+
+  const hero = `<div class="ru-hero">
+      <div class="ru-hero-top">
+        <div><div class="ru-eyebrow">${sess === dates[0] ? 'Latest session' : 'Session'}</div>
+          <h3>${esc(meta.title || 'Product Roundup')} <span>· ${esc(roundupLabel(sess))}</span></h3></div>
+        ${dates.length > 1 ? `<label class="ru-pick">Session <select id="ruSession" class="fb-select">${dates.map((x) => `<option value="${x}"${x === sess ? ' selected' : ''}>${esc(roundupLabel(x))}</option>`).join('')}</select></label>` : ''}
+      </div>
+      <p>Missed it? Watch the recording, then skim the highlights below.</p>
+      <div class="ru-hero-acts">${roundupLink(meta.recording, '▶ Watch recording', 'ru-btn primary')}${roundupLink(meta.notes, 'Session notes', 'ru-btn')}</div>
+      ${counts ? `<div class="ru-counts">${counts}</div>` : ''}
+    </div>`;
+
+  const soonHtml = soon.map((x) => `<article class="ru-card ac-orange">
+      <header><h4>${esc(x.title)}</h4>${x.tag ? `<span class="ru-pill orange">${esc(x.tag)}</span>` : ''}${roundupLink(x.link, 'Details ↗', 'ru-more')}</header>
+      ${roundupFacts([['What changes for customers', x.customers], ['What changes for us', x.us], ['Certification or training', x.training]])}
+    </article>`).join('');
+
+  const launchedHtml = launched.map((x) => {
+    const bugs = parseInt(x.bugs, 10);
+    const bugPill = bugs > 0 ? ` <span class="ru-pill amber">${bugs} open</span>` : (x.bugs !== '' && bugs === 0 ? ' <span class="ru-pill green">none open</span>' : '');
+    return `<article class="ru-card ac-green">
+      <header><h4>${esc(x.title)}</h4>${x.tag ? `<span class="ru-pill green">${esc(x.tag)}</span>` : ''}${roundupLink(x.link, 'Details ↗', 'ru-more')}</header>
+      ${roundupFacts([['Expected questions', x.questions], ['Known issues / bug tickets', x.issues, bugPill]])}
+    </article>`;
+  }).join('');
+
+  const fieldHtml = field.length ? `<div class="ru-two">${field.map((x) => `<article class="ru-card ac-teal">
+      <header><h4>${esc(x.title)}</h4>${x.tag ? `<span class="ru-pill teal">${esc(x.tag)}</span>` : ''}${roundupLink(x.link, 'Details ↗', 'ru-more')}</header>
+      ${roundupFacts([['What’s actually going on', x.going], ['How to handle it', x.handle], ['Resource update', x.resource]])}
+    </article>`).join('')}</div>` : '';
+
+  const plansHtml = plans.length ? `<div class="ru-card ru-list">${plans.map((x) => `<div class="ru-plan">
+      <div><b>${esc(x.title)}</b>${x.desc ? `<span>${esc(x.desc)}</span>` : ''}</div>
+      ${x.tag ? `<span class="ru-pill blue">${esc(x.tag)}</span>` : ''}${roundupLink(x.link, 'Details ↗', 'ru-more')}
+    </div>`).join('')}</div>` : '';
+
+  const past = (d.sessions || []).filter((s) => s.session !== sess).sort((a, b) => (a.session < b.session ? 1 : -1));
+  const pastHtml = past.length ? `<details class="sc-rubric-wrap ru-past"><summary>Past sessions (${past.length})</summary>
+      ${past.map((s) => `<div class="ru-past-row"><button type="button" class="ru-past-open" data-session="${s.session}">${esc(s.title || 'Session')} — ${esc(roundupLabel(s.session))}</button>
+        <span>${roundupLink(s.recording, 'Recording')}${s.recording && s.notes ? ' · ' : ''}${roundupLink(s.notes, 'Notes')}</span></div>`).join('')}</details>` : '';
+
+  root.innerHTML = (ROUNDUP.sample ? '<div class="ru-sample">Sample content — the Product Roundup sheet isn’t connected yet.</div>' : '')
+    + hero
+    + roundupSection('ru-soon', 'Coming Soon', 'Shipping next cycle', soonHtml)
+    + roundupSection('ru-launched', 'Just Launched', 'Closing the loop on what went out', launchedHtml)
+    + roundupSection('ru-field', 'Customer Field Notes', 'Ticket trends · repeat questions · common mistakes', fieldHtml)
+    + roundupSection('ru-plans', 'On the Roadmap', 'Awareness only — no action needed', plansHtml)
+    + pastHtml;
+}
+
+function setResourcesView(view) {
+  const roundup = view === 'roundup';
+  document.querySelectorAll('.res-switch-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.resView === view)));
+  document.getElementById('resKB').hidden = roundup;
+  document.getElementById('roundup').hidden = !roundup;
+  try { localStorage.setItem('cs-res-view', view); } catch (e) { /* private mode */ }
+  if (roundup) loadRoundup();
+}
+
+function setupRoundup() {
+  document.querySelectorAll('.res-switch-btn').forEach((b) => b.addEventListener('click', () => setResourcesView(b.dataset.resView)));
+  const root = document.getElementById('roundup');
+  root.addEventListener('change', (e) => {
+    if (e.target.id === 'ruSession') { ROUNDUP.session = e.target.value; renderRoundup(); }
+  });
+  root.addEventListener('click', (e) => {
+    const jump = e.target.closest('[data-jump]');
+    if (jump) { e.preventDefault(); document.getElementById(jump.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const open = e.target.closest('.ru-past-open');
+    if (open) { ROUNDUP.session = open.dataset.session; renderRoundup(); root.scrollIntoView({ block: 'start' }); }
+  });
+  let saved = 'kb';
+  try { saved = localStorage.getItem('cs-res-view') || 'kb'; } catch (e) { /* private mode */ }
+  if (saved === 'roundup') setResourcesView('roundup');
+}
+
+/* ==========================================================================
    Resources — the "CS Knowledge Base!" shared drive, read live with the viewer's
    own Google access (read-only Drive scope, requested the first time the tab is
    opened). Nothing is copied or synced, so new and edited docs show up at once
@@ -3238,6 +3437,12 @@ function setupResources() {
 
 // First open of the tab (a click, so Google's permission popup is allowed).
 function openResources() {
+  // Until the Product Roundup sheet is connected, only managers see it (it's sample content).
+  const sw = document.querySelector('.res-switch');
+  if (sw) {
+    sw.hidden = !ROUNDUP_SHEET_ID && !isManager();
+    if (sw.hidden) setResourcesView('kb');
+  }
   if (RES.loaded || RES.loading) return;
   if (RES.token) { loadResources(); return; }
   document.getElementById('resLoading').hidden = false;
@@ -3579,6 +3784,7 @@ function setupTheme() {
 function bootstrap() {
   setupTabs();
   setupResources();
+  setupRoundup();
   setupScorecards();
   setupTheme();
   setupMerlin();
