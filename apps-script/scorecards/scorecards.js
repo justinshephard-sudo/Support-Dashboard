@@ -23,7 +23,7 @@ var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.g
 var MANAGERS = ['justin.shephard@lawmatics.com', 'erika@lawmatics.com', 'johnny@lawmatics.com', 'clare@lawmatics.com'];
 var OVERVIEW_TAB = '📊 Team Overview';
 var TEMPLATE_TAB = 'Template';
-var LAYOUT_VERSION = '1';
+var LAYOUT_VERSION = '2';
 var MONTH_FIRST_ROW = 3, MONTH_LAST_ROW = 14, Q1_LAST_ROW = 5;
 var OVERRIDE_HEADERS = ['CSAT score override', '1st Resp. score override', 'Avg. Resp. score override',
   'Answer Rate score override', 'Override note'];
@@ -52,6 +52,7 @@ function doPost(e) {
     if (!who.ok) return json_(who);
     if (b.action === 'load') return json_(load_());
     if (b.action === 'set') return json_(set_(b, who.email));
+    if (b.action === 'addRep') return json_(addRep_(b, who.email));
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String((err && err.message) || err) });
@@ -140,6 +141,41 @@ function set_(b, email) {
   return { ok: true, tab: readTab_(sh) };
 }
 
+/* ---------- new rep: copy the Template tab and add them to the overview ---------- */
+
+function addRep_(b, email) {
+  var name = String(b.name || '').trim();
+  var role = String(b.role || 'CS Support').trim().slice(0, 40);
+  if (!/^[A-Za-z][A-Za-z .'-]{0,30}$/.test(name)) return { ok: false, error: 'Use letters only for the name (e.g. "Jordan").' };
+  var ss = SpreadsheetApp.openById(SCORECARD_SHEET_ID);
+  ensureLayout_(ss);
+  if (ss.getSheetByName(name) || [OVERVIEW_TAB, TEMPLATE_TAB].indexOf(name) !== -1) return { ok: false, error: name + ' already has a scorecard.' };
+  var tpl = ss.getSheetByName(TEMPLATE_TAB);
+  if (!tpl) return { ok: false, error: 'The Template tab is missing.' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = tpl.copyTo(ss).setName(name);
+    sh.getRange('A1').setValue('CS Performance Score Card 2026  —  ' + name);
+    sh.getRange('B3:E14').clearContent();          // the Template's sample row
+    sh.getRange('N3:R14').clearContent();
+    sh.getRange('D18:E23').clearContent();
+    sh.getRange('A1').setNote('Created by ' + email + ' via CS Dashboard, ' +
+      Utilities.formatDate(new Date(), 'America/Los_Angeles', 'MMM d, yyyy'));
+    var ov = ss.getSheetByName(OVERVIEW_TAB);
+    var row = ov.getLastRow() + 1;
+    var q = "'" + name.replace(/'/g, "''") + "'";
+    ov.getRange(row, 1, 1, 6).setValues([[name, '=' + q + '!F15', '=' + q + '!D24', '=' + q + '!D26',
+      '=IFERROR(ifs(D' + row + '>=4.5,"5 - Excellent",D' + row + '>=3.5,"4 - Exceeds Exp.",D' + row + '>=2.5,"3 - Meets Exp.",D' + row + '>=1.5,"2 - Needs Impr.",TRUE,"1 - Poor"),"")',
+      role]]);
+    ov.getRange(row - 1, 1, 1, 6).copyFormatToRange(ov, 1, 6, row, row);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  return load_();
+}
+
 /* ---------- one-time layout upgrade ---------- */
 
 function ensureLayout_(ss) {
@@ -151,6 +187,13 @@ function ensureLayout_(ss) {
     if (props.getProperty('LAYOUT_VERSION') === LAYOUT_VERSION) return;
     ss.getSheets().forEach(function (sh) {
       if (String(sh.getRange('A2').getValue()).trim() !== 'Date') return;   // KPI tabs (and Template) only
+      // Percentages typed as whole numbers (98 instead of 98%) → fractions.
+      ['B', 'E'].forEach(function (c) {
+        var rng = sh.getRange(c + MONTH_FIRST_ROW + ':' + c + MONTH_LAST_ROW);
+        var vals = rng.getValues(), changed = false;
+        vals.forEach(function (row) { if (typeof row[0] === 'number' && row[0] > 1.5 && row[0] <= 100) { row[0] = row[0] / 100; changed = true; } });
+        if (changed) rng.setValues(vals);
+      });
       sh.getRange('N2:R2').setValues([OVERRIDE_HEADERS]).setFontWeight('bold').setWrap(true);
       var formulas = [];
       for (var r = MONTH_FIRST_ROW; r <= MONTH_LAST_ROW; r++) formulas.push([scoreFormula_(r, r <= Q1_LAST_ROW)]);

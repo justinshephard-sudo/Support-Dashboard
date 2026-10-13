@@ -473,3 +473,9 @@ body.drill-open{overflow:hidden}
 .sc-pop .acts button{font:600 13px var(--font);border:none;border-radius:999px;padding:7px 13px;cursor:pointer;background:var(--surface-2);color:var(--text-1)}
 .sc-pop .acts .primary{background:var(--lm-blue);color:#fff}
 .sc-saved{font-size:12.5px;color:var(--text-3);margin-left:10px}
+.sc-add{cursor:default;border-style:dashed;display:flex;flex-direction:column;gap:8px;box-shadow:none}
+.sc-add:hover{transform:none}
+.sc-add-in{width:100%;text-align:left}
+.sc-add-btn{align-self:flex-start;font-size:14px;padding:8px 16px}
+.sc-add-btn:disabled{opacity:.6}
+.sc-add-msg{font-size:13px;color:var(--text-3);min-height:1em}

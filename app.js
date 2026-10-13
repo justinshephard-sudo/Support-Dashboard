@@ -2643,7 +2643,11 @@ function renderScorecardList() {
   document.getElementById('scSub').textContent = 'Pick a rep to open their 2026 scorecard. Changes save straight to the CS Score Cards 2026 sheet.';
   const active = SC.reps.filter((r) => !SC_FORMER.includes(r.name.toLowerCase()));
   const former = SC.reps.filter((r) => SC_FORMER.includes(r.name.toLowerCase()));
-  document.getElementById('scBody').innerHTML = `<div class="sc-grid">${active.map(scRepCard).join('')}</div>`
+  const addCard = `<form class="sc-rep sc-add" id="scAddForm"><div class="sc-rep-name">+ Add a rep</div>
+      <input class="sc-in sc-add-in" name="name" placeholder="First name" aria-label="New rep's name" required maxlength="31">
+      <select class="sc-in sc-add-in" name="role" aria-label="Role"><option>CS Support</option><option>CS Ops</option></select>
+      <button type="submit" class="res-btn sc-add-btn">Create scorecard</button><div class="sc-add-msg" id="scAddMsg"></div></form>`;
+  document.getElementById('scBody').innerHTML = `<div class="sc-grid">${active.map(scRepCard).join('')}${addCard}</div>`
     + (former.length ? `<details class="sc-former"><summary>Former team members (${former.length})</summary><div class="sc-grid">${former.map(scRepCard).join('')}</div></details>` : '')
     + scRubricHtml();
 }
@@ -2766,10 +2770,29 @@ function scOverridePopover(btn) {
   pop.querySelector(current ? `[data-n="${current}"]` : '[data-n="3"]').focus();
 }
 
+async function scAddRep(form) {
+  const msg = document.getElementById('scAddMsg');
+  const name = form.name.value.trim();
+  const btn = form.querySelector('button');
+  btn.disabled = true;
+  msg.textContent = 'Creating…';
+  try {
+    const data = await scCall({ action: 'addRep', name, role: form.role.value });
+    SC.reps = data.reps || []; SC.tabs = data.tabs || {}; SC.rubric = data.rubric || SC.rubric;
+    renderScorecard(name);
+  } catch (e) {
+    msg.textContent = e.message;
+    btn.disabled = false;
+  }
+}
+
 function setupScorecards() {
   const body = document.getElementById('scBody');
+  body.addEventListener('submit', (e) => {
+    if (e.target.id === 'scAddForm') { e.preventDefault(); scAddRep(e.target); }
+  });
   body.addEventListener('click', (e) => {
-    const rep = e.target.closest('.sc-rep');
+    const rep = e.target.closest('.sc-rep:not(.sc-add)');
     if (rep) { renderScorecard(rep.dataset.rep); window.scrollTo({ top: document.getElementById('view-scorecards').offsetTop - 70 }); return; }
     const chip = e.target.closest('.sc-chip');
     if (chip) scOverridePopover(chip);
