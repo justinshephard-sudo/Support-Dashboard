@@ -391,15 +391,16 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
 
   // Approvals: shown when the backend supports them (getConfig returns `approvals`).
   Q.showApprovals = function () {
-    let a = IS.config && IS.config.approvals;
-    // Before launch the backend runs approvals in test mode; only testers (?approvals=test) see the button.
-    if (a && !a.live && !IS.APPROVALS_TEST && !IS.MOCK) a = null;
-    $("approveBox").hidden = !a;
+    const a = IS.config && IS.config.approvals;
+    // Practice mode (?approvals=test, or sample data): the email goes to you and the card is named [TEST].
+    const practice = !!a && (IS.APPROVALS_TEST || IS.MOCK || !a.live);
+    $("approveBox").hidden = !a || (!a.live && !practice);
     if (!a) return;
-    $("sendBtn").textContent = a.live ? "Email quote for approval" : "Email quote for approval (test)";
-    $("approveHint").innerHTML = a.live
+    Q.practice = practice;
+    $("sendBtn").textContent = practice ? "Email quote for approval (practice)" : "Email quote for approval";
+    $("approveHint").innerHTML = !practice
       ? "Emails the decision-maker the quote with a <strong>Review and approve</strong> link (CSM cc'd) and creates the card. Their approval is recorded on the card."
-      : "<strong>Test mode:</strong> the email goes to <strong>you</strong>, not the customer, and the card is named [TEST]. Use the link in the email to try approving.";
+      : "<strong>Practice mode:</strong> the email goes to <strong>you</strong>, not the customer, and the card is named [TEST]. Use the link in the email to try approving.";
     $("approveHint").innerHTML += " Sent from your own Gmail; Google asks you to allow this the first time.";
   };
 
@@ -418,11 +419,13 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
     try {
       const extra = {};
       if (gmail) { extra.gmailToken = await gmail; toast("Creating the card and emailing the quote from your Gmail…"); }
-      const res = await IS.api(action, Object.assign({ request: payload(s) }, extra));
+      const req = payload(s);
+      if (action === "sendQuote" && Q.practice) req.test = true; // practice quotes never reach the customer
+      const res = await IS.api(action, Object.assign({ request: req }, extra));
       toast("");
       $("success").hidden = false;
       const sent = action === "sendQuote"
-        ? `<span>Quote emailed to <strong>${esc(res.emailedTo)}</strong>${res.test ? " (test mode: sent to you instead of the customer)" : ""}. The approval link is valid until ${esc(fmtDate(new Date(res.validUntil + "T12:00:00")))}.</span>
+        ? `<span>Quote emailed to <strong>${esc(res.emailedTo)}</strong>${res.test ? " (practice mode: sent to you instead of the customer)" : ""}. The approval link is valid until ${esc(fmtDate(new Date(res.validUntil + "T12:00:00")))}.</span>
            ${res.test && res.approvalUrl && res.approvalUrl !== "#" ? `<a href="${esc(res.approvalUrl)}" target="_blank" rel="noopener">Open the approval page ↗</a>` : ""}`
         : "";
       $("success").innerHTML = `<strong>Card created in Quote Sent.</strong>
