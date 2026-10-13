@@ -3437,12 +3437,6 @@ function setupResources() {
 
 // First open of the tab (a click, so Google's permission popup is allowed).
 function openResources() {
-  // Until the Product Roundup sheet is connected, only managers see it (it's sample content).
-  const sw = document.querySelector('.res-switch');
-  if (sw) {
-    sw.hidden = !ROUNDUP_SHEET_ID && !isManager();
-    if (sw.hidden) setResourcesView('kb');
-  }
   if (RES.loaded || RES.loading) return;
   if (RES.token) { loadResources(); return; }
   document.getElementById('resLoading').hidden = false;
