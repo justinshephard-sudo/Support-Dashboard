@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=32">
+<link rel="stylesheet" href="style.css?v=41">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -71,6 +71,10 @@
         <button class="tab" data-tab="csm">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           CSM
+        </button>
+        <button class="tab" data-tab="resources">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          Resources
         </button>
         <button class="tab" data-tab="firm">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -274,6 +278,31 @@
     </div>
   </div>
 
+  <!-- ===================== RESOURCES VIEW ===================== -->
+  <div class="view" id="view-resources">
+    <div class="wrap">
+      <div class="lookup-head">
+        <h2>Resources</h2>
+        <p>Guides, processes, and training from the CS Knowledge Base — always the latest version.</p>
+      </div>
+      <div class="search-wrap">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input id="resQ" type="text" placeholder="Search titles and what’s inside the docs…" autocomplete="off" aria-label="Search resources">
+          <span class="search-kbd" id="resCount"></span>
+        </div>
+      </div>
+      <div class="res-connect" id="resConnect" hidden>
+        <p>Resources reads the CS Knowledge Base shared drive with your own Google access — you’ll only see files you can already open.</p>
+        <button type="button" class="res-btn" id="resConnectBtn">Connect Google Drive</button>
+      </div>
+      <div id="resError" class="error-banner" hidden></div>
+      <div class="res-chips" id="resChips" role="tablist" aria-label="Categories"></div>
+      <div class="res-manager-bar" id="resManagerBar" hidden></div>
+      <div id="resBody"><div class="res-loading" id="resLoading" hidden>Loading the Knowledge Base…</div></div>
+    </div>
+  </div>
+
   <!-- ===================== FIRM VIEW ===================== -->
   <div class="view" id="view-firm">
     <div class="wrap">
@@ -301,6 +330,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=40"></script>
+<script src="app.js?v=41"></script>
 </body>
 </html>
