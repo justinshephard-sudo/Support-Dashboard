@@ -2450,11 +2450,22 @@ const RES_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 const RES_FOLDER = 'application/vnd.google-apps.folder';
 const RES_GENERAL = 'General';
 const RES_GROUP_PREVIEW = 6;
+// "Start here" until managers change it: the docs a CS rep reaches for most. Matched by title, so
+// the newest copy wins. Managers can unpin these or pin others (pin state lives in Overrides).
+const RES_DEFAULT_START = [
+  'CS Troubleshooting Guide',
+  'Customer Support Phone Answering Guide +',
+  'CS Escalation Standard Operating Procedure',
+  'Intercom Best Practices',
+  'Cancellation Playbook',
+];
+// Folders whose contents are archived, wherever they sit.
+const RES_ARCHIVE_FOLDER = /^(outdated|archived?|old)\b/i;
 const RES = {
   token: null, client: null, loading: false, loaded: false,
   files: [], folders: new Map(), cats: [],
-  pins: new Set(), hides: new Set(),
-  cat: '', query: '', contentHits: null, contentFor: '', showHidden: false, expanded: new Set(),
+  pinState: new Map(), hides: new Set(),   // pinState: fileId -> '1' pinned | '0' unpinned default
+  cat: '', query: '', contentHits: null, contentFor: '', showHidden: false, browseAll: false, expanded: new Set(),
 };
 
 // Auto-filtered clutter: blank/untitled files, copies, archived "(OLD)" docs, raw exports.
@@ -2580,7 +2591,7 @@ function resIndex(all) {
       cat: chain[0] || RES_GENERAL, sub: chain.slice(1).join(' › '),
       parent: (f.parents || [])[0] || '', modified: f.modifiedTime,
       by: f.lastModifyingUser ? f.lastModifyingUser.displayName : '',
-      junk: RES_JUNK_NAME.test(f.name) || RES_JUNK_TYPE.has(mime),
+      junk: RES_JUNK_NAME.test(f.name) || RES_JUNK_TYPE.has(mime) || chain.some((n) => RES_ARCHIVE_FOLDER.test(n)),
     });
   });
   // Several versions of one guide in the same folder ("Guide", "Guide v2", "Guide_v4"): keep the newest.
@@ -2593,6 +2604,14 @@ function resIndex(all) {
   });
   files.forEach((f) => { f.superseded = newest.get(f.parent + '|' + base(f.name)) !== f; });
   RES.files = files;
+}
+
+function resIsDefault(f) {
+  return RES_DEFAULT_START.some((t) => t.toLowerCase() === f.name.trim().toLowerCase());
+}
+function resInStart(f) {
+  const st = RES.pinState.get(f.id);
+  return st === '1' || (st !== '0' && resIsDefault(f));
 }
 
 function resVisible(f) {
@@ -2628,7 +2647,7 @@ function resOnQuery(value) {
 
 /* ---- render ---- */
 function resCard(f, opts = {}) {
-  const pinned = RES.pins.has(f.id), hidden = RES.hides.has(f.id);
+  const pinned = resInStart(f), hidden = RES.hides.has(f.id);
   const where = f.sub ? `${f.cat} › ${f.sub}` : f.cat;
   const acts = overridesUnlocked
     ? `<div class="res-acts"><button type="button" class="res-act${pinned ? ' on' : ''}" data-act="pin" data-id="${esc(f.id)}">${pinned ? '★ Pinned' : '☆ Pin'}</button>`
@@ -2703,12 +2722,15 @@ function renderResources() {
     }
   } else {
     document.getElementById('resCount').textContent = `${fmtNum(visible.length)} docs`;
-    const pinned = inCat.filter((f) => RES.pins.has(f.id)).sort((a, b) => a.name.localeCompare(b.name));
-    if (pinned.length) html += resSection('Start here', null, `<div class="res-grid">${pinned.map((f) => resCard(f, { inPinned: true })).join('')}</div>`);
-    if (!RES.cat) {
-      const recent = [...inCat].sort((a, b) => (b.modified > a.modified ? 1 : -1)).slice(0, 8);
-      html += resSection('Recently updated', null, `<div class="res-grid">${recent.map((f) => resCard(f)).join('')}</div>`);
-      html += resSection('Browse by category', inCat.length,
+    if (!RES.cat && !RES.browseAll) {
+      // Landing: just the essentials. Search or a category opens up the rest.
+      const start = inCat.filter(resInStart).sort((a, b) => a.name.localeCompare(b.name));
+      html += resSection('Start here', null, start.length
+        ? `<div class="res-grid">${start.map((f) => resCard(f, { inPinned: true })).join('')}</div>`
+        : '<div class="res-empty">Nothing pinned yet.</div>');
+      html += `<p class="res-hint">Search above or pick a category to find anything else — <button type="button" class="res-more res-inline" data-browse="1">browse all ${fmtNum(visible.length)} docs</button></p>`;
+    } else if (!RES.cat) {
+      html += resSection('All resources', inCat.length,
         resGroups(inCat, (f) => f.cat, (a, b) => (a === RES_GENERAL) - (b === RES_GENERAL) || a.localeCompare(b)));
     } else {
       html += resSection(RES.cat, inCat.length, resGroups(inCat, (f) => f.sub || 'In this folder', (a, b) => (a === 'In this folder' ? -1 : b === 'In this folder' ? 1 : a.localeCompare(b))));
@@ -2720,24 +2742,34 @@ function renderResources() {
 
 /* ---- manager: pin / hide (Overrides tab, Table = Resource) ---- */
 function parseResourceFlags(overrideRows) {
-  RES.pins = new Set(); RES.hides = new Set();
+  RES.pinState = new Map(); RES.hides = new Set();
   (overrideRows || []).slice(1).forEach((row) => {
     const [, table, id, column, value] = row.concat(['', '', '', '', '']);
-    if (String(table).trim().toLowerCase() !== 'resource' || !id || String(value).trim() === '') return;
-    if (String(column).trim() === 'pin') RES.pins.add(String(id).trim());
+    const v = String(value).trim();
+    if (String(table).trim().toLowerCase() !== 'resource' || !id || v === '') return;
+    if (String(column).trim() === 'pin') RES.pinState.set(String(id).trim(), v === '0' ? '0' : '1');
     if (String(column).trim() === 'hide') RES.hides.add(String(id).trim());
   });
   if (RES.loaded) renderResources();
 }
 function resToggleFlag(id, kind) {
-  const set = kind === 'pin' ? RES.pins : RES.hides;
-  const on = !set.has(id);
-  if (on) set.add(id); else set.delete(id);
+  let value;
+  if (kind === 'pin') {
+    const f = RES.files.find((x) => x.id === id);
+    const isDefault = f && resIsDefault(f);
+    if (f && resInStart(f)) value = isDefault ? '0' : '';   // unpin (defaults need an explicit "0")
+    else value = isDefault ? '' : '1';                       // pin (defaults just drop the "0")
+    if (value === '') RES.pinState.delete(id); else RES.pinState.set(id, value);
+  } else {
+    const on = !RES.hides.has(id);
+    if (on) RES.hides.add(id); else RES.hides.delete(id);
+    value = on ? '1' : '';
+  }
   renderResources();
   scheduleOverridePost(`resource:${id}:${kind}`, () => fetch(DATA_OVERRIDES_WEBAPP_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: OVERRIDES_SECRET, month: 'all', table: 'Resource', rep: id, column: kind, value: on ? '1' : '', note: '' }),
+    body: JSON.stringify({ secret: OVERRIDES_SECRET, month: 'all', table: 'Resource', rep: id, column: kind, value, note: '' }),
   }));
 }
 
@@ -2750,12 +2782,14 @@ function setupResources() {
     const b = e.target.closest('.res-chip');
     if (!b) return;
     RES.cat = b.dataset.cat;
+    RES.browseAll = false;
     renderResources();
   });
   document.getElementById('resBody').addEventListener('click', (e) => {
     const act = e.target.closest('.res-act');
     if (act) { e.preventDefault(); e.stopPropagation(); resToggleFlag(act.dataset.id, act.dataset.act); return; }
     const more = e.target.closest('.res-more');
+    if (more && more.dataset.browse) { RES.browseAll = true; renderResources(); return; }
     if (more) { RES.expanded.add(more.dataset.expand); renderResources(); }
   });
 }
