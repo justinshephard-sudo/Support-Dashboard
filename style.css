@@ -403,3 +403,4 @@ body.drill-open{overflow:hidden}
 .res-empty{text-align:center;color:var(--text-3);padding:36px 0 10px}
 .res-empty img{display:block;width:140px;height:auto;margin:0 auto 12px;filter:drop-shadow(0 10px 14px rgba(31,52,76,.18))}
 @media(max-width:520px){.res-grid{grid-template-columns:1fr}.res-chips{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px}.res-chip{flex:none}}
+.res-merlin{display:block;width:120px;height:auto;margin:0 auto 6px;filter:drop-shadow(0 10px 14px rgba(31,52,76,.18))}
