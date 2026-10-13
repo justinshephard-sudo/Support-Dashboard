@@ -2232,11 +2232,27 @@ function implDrillSpec(col, label) {
       };
     }
     case 'CsatPct': {
-      const rows = evs('csat').sort((a, b) => toNumber(a.Score) - toNumber(b.Score) || a.Date.localeCompare(b.Date));
+      let rows = evs('csat').sort((a, b) => toNumber(a.Score) - toNumber(b.Score) || a.Date.localeCompare(b.Date));
+      const noData = 'Firm detail appears after the next ChurnZero sync.';
+      // The tile shows the team score; the list behind it is each rep's own (managers see everyone's).
+      if (!isManager()) {
+        const me = implMyRepName();
+        if (!me) {
+          return { title: 'Your Onboarding CSAT', empty: 'Your ratings show here once you’re the account manager on firms in ChurnZero.' };
+        }
+        rows = rows.filter((r) => r.AccountManager === me);
+        const pos = rows.filter((r) => toNumber(r.Score) >= 4).length;
+        return {
+          title: 'Your Onboarding CSAT',
+          note: `${me} · ${label}` + (rows.length ? ` · ${fmtPct((pos / rows.length) * 100)} satisfied (4–5)` : ''),
+          cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['Comment', 'Comment']],
+          rows, empty: IMPL.events.length ? 'No survey responses for your firms this month.' : noData,
+        };
+      }
       return {
         title: 'Onboarding CSAT', note: `Responses in ${label} · 4–5 counts as satisfied`,
         cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['AccountManager', 'Account Manager'], ['Comment', 'Comment']],
-        rows, empty: IMPL.events.length ? 'No survey responses this month.' : 'Firm detail appears after the next ChurnZero sync.',
+        rows, empty: IMPL.events.length ? 'No survey responses this month.' : noData,
       };
     }
     default: return null;
@@ -2248,6 +2264,22 @@ function implFmtDate(v) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
   if (!m) return v;
   return new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Signed-in email → their ChurnZero "Account Manager" name. Emails here are mostly first@ or
+// first.last@; add an entry to IMPL_REP_EMAILS for anyone who doesn't follow that pattern.
+const IMPL_REP_EMAILS = {};   // e.g. 'kwickham@lawmatics.com': 'Kennedy Wickham'
+function implMyRepName() {
+  const email = (AUTH.email || '').toLowerCase();
+  if (IMPL_REP_EMAILS[email]) return IMPL_REP_EMAILS[email];
+  const local = email.split('@')[0];
+  const reps = [...new Set(IMPL.events.map((e) => e.AccountManager).concat(IMPL.open.map((f) => f.AccountManager)))]
+    .filter((r) => r && r !== 'Unassigned');
+  return reps.find((rep) => {
+    const parts = rep.toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
+    const first = parts[0], last = parts[parts.length - 1];
+    return [first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local);
+  }) || null;
 }
 
 function implDrillCell(key, row, median) {
