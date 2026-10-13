@@ -2513,7 +2513,11 @@ async function resDrive(params) {
   }, params));
   const res = await fetch(url, { headers: { Authorization: 'Bearer ' + RES.token } });
   if (res.status === 401) { RES.token = null; resShowConnect('Your Drive connection expired. Reconnect to keep browsing.'); throw new Error('expired'); }
-  if (res.status === 403) throw new Error('Google refused the request (403). The Google Drive API may need to be enabled for the dashboard’s Google Cloud project.');
+  if (res.status === 403) {
+    let reason = '';
+    try { const e = (await res.json()).error || {}; reason = (e.errors && e.errors[0] && e.errors[0].reason) || e.status || ''; reason = reason ? ` [${reason}: ${e.message || ''}]` : ''; } catch (err) { /* keep generic */ }
+    throw new Error('Google refused the request (403). The Google Drive API may need to be enabled for the dashboard’s Google Cloud project.' + reason);
+  }
   if (!res.ok) throw new Error('Drive HTTP ' + res.status);
   return res.json();
 }
