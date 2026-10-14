@@ -2899,29 +2899,41 @@ const ROUNDUP_STYLE = {
 const ROUNDUP_DEFAULT = { note: '', accent: 'blue', layout: 'cards' };
 // Fields shown as a pill next to the title rather than as a labeled fact.
 const ROUNDUP_PILL_FIELD = /\b(eta|release|ship(ped)?|target|date)\b/i;
+const ROUNDUP_VIDEO_FIELD = /\b(video|demo|recording|walkthrough|zight|loom)\b/i;
 const ROUNDUP = { loaded: false, loading: false, sections: [] };
 
 // rows[0] is the header row. Returns [{ key, title, items: [{ title, pill, facts: [[label, value]] }] }].
 function roundupParse(rows) {
   if (!rows || rows.length < 2) return [];
   const groups = [];
+  let last = null;
   rows[0].forEach((h, col) => {
-    const m = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(String(h || '').trim());
-    if (!m) return;
+    const text = String(h || '').trim();
+    if (!text) return;
+    const m = /^(.*?)\s*\(([^)]+)\)\s*$/.exec(text);
+    // A header without "(Section)" (e.g. "Demo Video") belongs to the section it sits inside.
+    if (!m) { if (last) last.cols.push({ col, label: text }); return; }
     const key = m[2].trim().toLowerCase();
     let g = groups.find((x) => x.key === key);
     if (!g) groups.push(g = { key, name: m[2].trim(), cols: [] });
     g.cols.push({ col, label: m[1].trim() });
+    last = g;
   });
   return groups.map((g) => {
     const [nameCol, ...rest] = g.cols;
     const items = rows.slice(1).map((r) => {
       const title = String(r[nameCol.col] || '').trim();
       if (!title) return null;
-      const item = { title, pill: '', facts: [] };
+      const item = { title, pill: '', facts: [], video: '', links: [] };
       rest.forEach(({ col, label }) => {
         const v = String(r[col] || '').trim();
         if (!v) return;
+        // Links become buttons: a video/demo column → "Video Demo", any other URL → its column name.
+        if (/^https?:\/\/\S+$/i.test(v)) {
+          if (!item.video && ROUNDUP_VIDEO_FIELD.test(label)) item.video = v;
+          else item.links.push([label.replace(/\?$/, ''), v]);
+          return;
+        }
         if (!item.pill && ROUNDUP_PILL_FIELD.test(label)) item.pill = v;
         else item.facts.push([label.replace(/\?$/, ''), v]);
       });
@@ -2952,6 +2964,13 @@ async function loadRoundup() {
   }
 }
 
+// "▶ Video Demo" when the row has a video link, plus any other link columns. Nothing when there are none.
+function roundupButtons(x) {
+  const b = (x.video ? [`<a class="ru-video" href="${esc(x.video)}" target="_blank" rel="noopener">▶ Video Demo</a>`] : [])
+    .concat(x.links.map(([label, url]) => `<a class="ru-more" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`));
+  return b.length ? `<span class="ru-btns">${b.join('')}</span>` : '';
+}
+
 function roundupFacts(facts) {
   if (!facts.length) return '';
   return `<dl class="ru-facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
@@ -2978,9 +2997,9 @@ function renderRoundup() {
     const inner = s.style.layout === 'list'
       ? `<div class="ru-card ru-list">${s.items.map((x) => `<div class="ru-plan">
           <div><b>${esc(x.title)}</b>${x.facts.map(([, v]) => `<span class="ru-line">${esc(v)}</span>`).join('')}</div>
-          ${x.pill ? `<span class="ru-pill ${a}">${esc(x.pill)}</span>` : ''}</div>`).join('')}</div>`
+          ${x.pill ? `<span class="ru-pill ${a}">${esc(x.pill)}</span>` : ''}${roundupButtons(x)}</div>`).join('')}</div>`
       : s.items.map((x) => `<article class="ru-card ac-${a}">
-          <header><h4>${esc(x.title)}</h4>${x.pill ? `<span class="ru-pill ${a}">${esc(x.pill)}</span>` : ''}</header>
+          <header><h4>${esc(x.title)}</h4>${x.pill ? `<span class="ru-pill ${a}">${esc(x.pill)}</span>` : ''}${roundupButtons(x)}</header>
           ${roundupFacts(x.facts)}</article>`).join('');
     return `<section class="res-section" id="${id(s)}"><div class="section-head"><h2>${esc(s.title)}</h2><span class="rule"></span><span class="note">${esc(s.style.note || '')}</span></div>${inner}</section>`;
   }).join('');

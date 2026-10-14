@@ -561,3 +561,8 @@ body.drill-open{overflow:hidden}
 .ru-facts dd,.ru-line{white-space:pre-line}
 .ru-line{display:block;color:var(--text-2);font-size:14.5px;margin-top:3px}
 .ru-plan b{display:block}
+.ru-btns{display:inline-flex;gap:8px;align-items:center;margin-left:auto}
+.ru-btns .ru-more{margin-left:0}
+.ru-video{display:inline-flex;align-items:center;gap:4px;font:600 13px var(--font);color:#fff;background:var(--lm-blue);border-radius:999px;padding:6px 13px;text-decoration:none;white-space:nowrap}
+.ru-video:hover{filter:brightness(1.08)}
+.ru-video:focus-visible{outline:2px solid var(--lm-blue);outline-offset:2px}
