@@ -555,3 +555,9 @@ body.drill-open{overflow:hidden}
 .ru-past-open{font:600 14.5px var(--font);color:var(--text-1);background:none;border:none;padding:0;cursor:pointer;text-align:left}
 .ru-past-open:hover{color:var(--lm-blue)}
 .res-switch[hidden]{display:none}
+.ru-card.ac-blue{--ac:var(--slot-1)}.ru-card.ac-purple{--ac:var(--slot-6)}
+.ru-pill.purple{background:rgba(122,92,240,.14);color:#5b3fd0}
+.ru-hero p{max-width:640px}
+.ru-facts dd,.ru-line{white-space:pre-line}
+.ru-line{display:block;color:var(--text-2);font-size:14.5px;margin-top:3px}
+.ru-plan b{display:block}
