@@ -2933,7 +2933,7 @@ function roundupParse(rows) {
 }
 
 async function loadRoundup() {
-  if (ROUNDUP.loading || ROUNDUP.loaded) return;
+  if (ROUNDUP.loading || ROUNDUP.loaded || !AUTH.token) return;   // not signed in yet: openResources() calls again
   ROUNDUP.loading = true;
   const root = document.getElementById('roundup');
   root.innerHTML = '<div class="res-loading">Loading the Product Roundup…</div>';
@@ -2988,13 +2988,13 @@ function renderRoundup() {
   root.innerHTML = hero + body;
 }
 
-function setResourcesView(view) {
+function setResourcesView(view, load = true) {
   const roundup = view === 'roundup';
   document.querySelectorAll('.res-switch-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.resView === view)));
   document.getElementById('resKB').hidden = roundup;
   document.getElementById('roundup').hidden = !roundup;
   try { localStorage.setItem('cs-res-view', view); } catch (e) { /* private mode */ }
-  if (roundup) loadRoundup();
+  if (roundup && load) loadRoundup();
 }
 
 function setupRoundup() {
@@ -3005,7 +3005,8 @@ function setupRoundup() {
   });
   let saved = 'kb';
   try { saved = localStorage.getItem('cs-res-view') || 'kb'; } catch (e) { /* private mode */ }
-  if (saved === 'roundup') setResourcesView('roundup');
+  // Restore the last view, but don't load until the person has signed in and opened Resources.
+  if (saved === 'roundup') setResourcesView('roundup', false);
 }
 
 /* ==========================================================================
@@ -3367,6 +3368,7 @@ function setupResources() {
 
 // First open of the tab (a click, so Google's permission popup is allowed).
 function openResources() {
+  if (!document.getElementById('roundup').hidden) loadRoundup();
   if (RES.loaded || RES.loading) return;
   if (RES.token) { loadResources(); return; }
   document.getElementById('resLoading').hidden = false;
