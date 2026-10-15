@@ -8,6 +8,8 @@
         CZ_USER  = justin.shephard@lawmatics.com
         CZ_KEY   = <your ChurnZero REST API key>     (never commit this)
       (CZ_BASE is optional; defaults to the lawmatics US1 instance.)
+        CB_API_KEY = <read-only Chargebee API key>  → MRR comes straight from Chargebee
+      (without it, MRR falls back to ChurnZero's copy.)
    4. Run syncChurnZeroAccounts once (authorize when prompted) to test.
    5. Triggers (clock icon) › Add Trigger › syncChurnZeroAccounts ›
         Time-driven › Day timer (e.g. 4-5am). Daily keeps the CZ key alive
@@ -29,7 +31,7 @@ var CZ_COLUMNS = [
   'ChurnScore', 'UsageFrequency', 'DangerZone', 'CancellationRequested', 'CSAT60',
   'TenureDays', 'MattersPerMonth', 'LeadVolume', 'TotalSms', 'SmsPlanType', 'Activities30',
   'Employees', 'Contacts', 'OnboardingStatus', 'City', 'Website',
-  'ChargebeePlan', 'ChargebeeStart', 'AddOns', 'InvoiceBalance', 'LegacyContract',
+  'ChargebeePlan', 'ChargebeeStart', 'AddOns', 'InvoiceBalance', 'LegacyContract', 'MRRSource',
 ];
 
 function syncChurnZeroAccounts() {
@@ -43,6 +45,7 @@ function syncChurnZeroAccounts() {
 
   // Related custom tables, grouped by internal ChurnZero AccountId.
   var ctx = {
+    cbMrr: fetchChargebeeMrr_(props.getProperty('CB_API_KEY')),
     addOns: groupBy_(fetchAllCZ_(base + '/CustomListSubscriptionAddOn?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
     subs:   groupBy_(fetchAllCZ_(base + '/CustomListChargebeeSubscription?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
     legacy: groupBy_(fetchAllCZ_(base + '/CustomListLegacyContracts?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
@@ -79,12 +82,14 @@ function accountToRow_(a, ctx) {
   var leadAvg = cf.AvgMonthlyLeadVolumelifetime;
   if (lead && leadAvg != null && leadAvg !== '') lead = lead + ' (' + Math.round(leadAvg) + '/mo)';
 
+  var mrr = mrrFor_(a, cf, ctx.cbMrr);
   var map = {
     Name: a.Name || '',
     FirmId: a.ExternalId || cf.FirmId || '',
     PracticeArea: cf.PrimaryPracticeArea || firstOf_(cf.PracticeArea) || '',
     AccountManager: cf.AccountManager || '',
-    MRR: numOr_(cf.CurrentMrrStartingMrr, a.TotalContractAmount),
+    MRR: mrr.value,
+    MRRSource: mrr.source,
     TotalContract: numOr_(a.TotalContractAmount, ''),
     ChargebeeStatus: cf.ChargebeeAccountStatus || '',
     ContractStatus: cf.ContractStatus || (a.IsActive === false ? 'Inactive' : 'Active'),
@@ -114,6 +119,51 @@ function accountToRow_(a, ctx) {
     LegacyContract: legacySummary_(ctx.legacy[acctId]),
   };
   return CZ_COLUMNS.map(function (c) { return map[c]; });
+}
+
+/* ---- MRR: Chargebee first (live), ChurnZero's synced copy as a fallback ---- */
+
+// Firm ID → current MRR in dollars, summed across that firm's Chargebee customers.
+// Chargebee keeps customer.mrr current with the customer's active subscriptions.
+// Returns null when there's no key (or Chargebee is unreachable), so the sync still runs.
+var CB_SITE = 'lawmatics';
+function fetchChargebeeMrr_(key) {
+  if (!key) return null;
+  var headers = { Authorization: 'Basic ' + Utilities.base64Encode(key + ':') };
+  var byFirm = {}, offset = '', guard = 0;
+  try {
+    do {
+      var url = 'https://' + CB_SITE + '.chargebee.com/api/v2/customers?limit=100' + (offset ? '&offset=' + encodeURIComponent(offset) : '');
+      var resp = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
+      if (resp.getResponseCode() !== 200) throw new Error('Chargebee HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
+      var body = JSON.parse(resp.getContentText());
+      (body.list || []).forEach(function (row) {
+        var c = row.customer || {};
+        var id = firmKey_(c.cf_firm_id);
+        if (!id || c.deleted) return;
+        byFirm[id] = (byFirm[id] || 0) + (Number(c.mrr) || 0) / 100;
+      });
+      offset = body.next_offset || '';
+    } while (offset && ++guard < 400);
+  } catch (e) {
+    console.error('Chargebee MRR unavailable, using ChurnZero: ' + e);
+    return null;
+  }
+  return byFirm;
+}
+
+// ChurnZero ExternalId is sometimes "4492~|~001Pj…"; the Firm ID is the leading number.
+function firmKey_(v) {
+  var m = /^\s*(\d+)/.exec(String(v == null ? '' : v));
+  return m ? m[1] : '';
+}
+
+function mrrFor_(a, cf, cbMrr) {
+  var id = firmKey_(a.ExternalId || cf.FirmId);
+  if (cbMrr && id && cbMrr.hasOwnProperty(id)) return { value: Math.round(cbMrr[id] * 100) / 100, source: 'Chargebee' };
+  var cz = numOr_(cf.CurrentMrrStartingMrr, a.TotalContractAmount);
+  // Only flag "ChurnZero" when Chargebee was checked and had no match for this firm.
+  return { value: cz, source: cz !== '' && cbMrr ? 'ChurnZero' : '' };
 }
 
 /* ---- related-table summaries ---- */

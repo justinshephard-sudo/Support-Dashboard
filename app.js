@@ -3442,6 +3442,7 @@ function parseAccounts(rows) {
       area: get(r, 'PracticeArea'),
       am: get(r, 'AccountManager'),
       mrr: get(r, 'MRR'),
+      mrrSource: get(r, 'MRRSource'),
       contract: get(r, 'TotalContract'),
       cb: get(r, 'ChargebeeStatus'),
       cstatus: get(r, 'ContractStatus'),
@@ -3650,7 +3651,7 @@ function openFirm(firmId, name) {
         ${pfRow('Onboarding', orDash(f.onb), /complete/i.test(f.onb) ? 'good' : f.onb ? 'warn' : '')}
       </div>
       <div class="pf-card"><h4>💳 Billing</h4>
-        ${pfRow('MRR', fmtMoney(f.mrr), toNumber(f.mrr) ? '' : 'warn')}
+        ${pfRow('MRR', fmtMoney(f.mrr) + (f.mrrSource === 'ChurnZero' ? ' (ChurnZero — not found in Chargebee)' : ''), toNumber(f.mrr) && f.mrrSource !== 'ChurnZero' ? '' : 'warn')}
         ${f.plan ? pfRow('Plan', f.plan) : ''}
         ${pfRow('Chargebee', orDash(f.cb), /active/i.test(f.cb) ? 'good' : /past due|overdue/i.test(f.cb) ? 'bad' : '')}
         ${f.cbStart ? pfRow('Start date', f.cbStart) : ''}
