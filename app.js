@@ -3186,6 +3186,304 @@ function updateAssignButton() {
 }
 
 /* ==========================================================================
+   Loop Tracker (Resources tab) — the Notion "Team Loop Tracker", live, for the
+   close-the-loop meeting. Everyone can read; managers change status with one
+   click, open an item to edit it, or add one. Reads and writes go through
+   apps-script/loop-tracker, which holds the Notion connection. While the view
+   is open it re-checks every LOOP_POLL_MS so everyone in the meeting stays in sync.
+   ========================================================================== */
+const LOOP_URL = 'https://script.google.com/macros/s/AKfycbxQVzKZdB8ecIFscQUDX3uoL8CCzzH1qFiL3VtfJymAAwZPGulkn34MQi2sLt-b7NdN/exec';
+const LOOP_NOTION_URL = 'https://www.notion.so/e4a103fc90624ce1b0396a50fc9e76f8';
+const LOOP_POLL_MS = 20000;
+const LOOP_GROUPS = [
+  { status: 'Open', title: 'Open' },
+  { status: 'In Progress', title: 'In Progress' },
+  { status: 'Closed', title: 'Closed this week' },
+];
+const LOOP = { data: null, loading: false, timer: null, openId: null, saving: 0 };
+
+async function loopCall(body) {
+  const res = await fetch(LOOP_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ token: AUTH.token }, body)),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function loadLoop(quiet) {
+  if (LOOP.loading || !AUTH.token) return;
+  LOOP.loading = true;
+  const root = document.getElementById('loop');
+  if (!LOOP.data && !quiet) root.innerHTML = '<div class="res-loading">Loading the Loop Tracker…</div>';
+  try {
+    const data = await loopCall({ action: 'load' });
+    // Don't let a poll overwrite a change that's still saving, or close an open status menu.
+    if (!LOOP.saving && !(quiet && document.querySelector('.loop-menu'))) { LOOP.data = data; renderLoop(); }
+  } catch (e) {
+    if (!quiet || !LOOP.data) root.innerHTML = `<div class="error-banner">Couldn’t load the Loop Tracker: ${esc(e.message)}</div>`;
+  } finally {
+    LOOP.loading = false;
+  }
+}
+
+function loopStartPolling() {
+  loopStopPolling();
+  LOOP.timer = setInterval(() => {
+    if (document.hidden || document.getElementById('loop').hidden) return;
+    if (!document.getElementById('view-resources').classList.contains('active')) return;
+    loadLoop(true);
+  }, LOOP_POLL_MS);
+}
+function loopStopPolling() { if (LOOP.timer) clearInterval(LOOP.timer); LOOP.timer = null; }
+
+const loopAgo = (d) => {
+  if (!d) return '';
+  const n = Math.round((Date.now() - new Date(d.length === 10 ? d + 'T12:00:00' : d)) / 864e5);
+  return n <= 0 ? 'today' : n === 1 ? 'yesterday' : n + 'd ago';
+};
+const loopSlug = (s) => String(s || '').toLowerCase().replace(/[^a-z]+/g, '-');
+
+function loopRow(it, canEdit) {
+  const pill = `<span class="loop-pill s-${loopSlug(it.status)}">${esc(it.status || 'No status')}</span>`;
+  return `<li class="loop-row" data-id="${esc(it.id)}">
+      ${canEdit ? `<button type="button" class="loop-status" data-id="${esc(it.id)}" aria-label="Change status (now ${esc(it.status)})">${pill}</button>` : pill}
+      <button type="button" class="loop-open" data-id="${esc(it.id)}">
+        <span class="loop-item">${esc(it.item || 'Untitled')}</span>
+        <span class="loop-meta">
+          ${it.type ? `<span class="loop-tag">${esc(it.type)}</span>` : ''}
+          ${it.raisedBy ? `<span class="loop-tag">${esc(it.raisedBy)}</span>` : ''}
+          ${it.outcome && it.outcome !== 'Under Review' ? `<span class="loop-tag o-${loopSlug(it.outcome)}">${esc(it.outcome)}</span>` : ''}
+          <span class="loop-when">${it.status === 'Closed' ? 'closed ' + esc(loopAgo(it.closed || it.edited)) : 'raised ' + esc(loopAgo(it.raised))}</span>
+        </span>
+      </button>
+    </li>`;
+}
+
+function renderLoop() {
+  const d = LOOP.data;
+  const root = document.getElementById('loop');
+  const groups = LOOP_GROUPS.map((g) => ({ ...g, items: d.items.filter((x) => x.status === g.status) }));
+  root.innerHTML = `
+    <div class="loop-top">
+      <div>
+        <h2>Team Loop Tracker</h2>
+        <p class="loop-sub">Open, in progress, and closed in the last ${d.closedDays} days. Updates live from Notion.</p>
+      </div>
+      <div class="loop-actions">
+        ${d.canEdit ? '<button type="button" class="mgr-btn on" id="loopAdd">+ Add item</button>' : ''}
+        <a class="mgr-btn" href="${LOOP_NOTION_URL}" target="_blank" rel="noopener">Open in Notion ↗</a>
+      </div>
+    </div>
+    ${groups.map((g) => `<section class="loop-group">
+        <h3>${esc(g.title)} <span class="loop-count">${g.items.length}</span></h3>
+        ${g.items.length ? `<ul class="loop-list">${g.items.map((it) => loopRow(it, d.canEdit)).join('')}</ul>` : '<p class="loop-empty">Nothing here.</p>'}
+      </section>`).join('')}
+    <p class="loop-foot">${d.canEdit ? 'Click a status to change it, or an item to edit it.' : 'Click an item for details. Managers can edit.'} · checked ${new Date(d.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</p>`;
+}
+
+/* ---- saving ---- */
+async function loopSave(id, fields) {
+  const it = LOOP.data.items.find((x) => x.id === id);
+  const before = { ...it };
+  Object.assign(it, fields);
+  if (fields.status === 'Closed') it.closed = new Date().toISOString().slice(0, 10);
+  else if (fields.status) it.closed = '';
+  renderLoop();
+  LOOP.saving++;
+  try {
+    const res = await loopCall({ action: 'update', id, fields });
+    Object.assign(it, res.item);
+    return true;
+  } catch (e) {
+    Object.assign(it, before);
+    alert('Couldn’t save to Notion: ' + e.message);
+    return false;
+  } finally {
+    LOOP.saving--;
+    renderLoop();
+    // Refresh the panel unless someone is mid-typing in it.
+    if (LOOP.openId === id && !(document.activeElement && document.activeElement.matches('#loopPanel textarea'))) loopFillPanel(it);
+  }
+}
+
+function loopStatusMenu(btn) {
+  document.querySelectorAll('.loop-menu').forEach((m) => m.remove());
+  const id = btn.dataset.id;
+  const it = LOOP.data.items.find((x) => x.id === id);
+  const menu = document.createElement('div');
+  menu.className = 'loop-menu';
+  menu.innerHTML = LOOP.data.options.Status.map((s) => `<button type="button" data-status="${esc(s)}" class="${s === it.status ? 'cur' : ''}"><span class="loop-pill s-${loopSlug(s)}">${esc(s)}</span></button>`).join('');
+  btn.closest('.loop-row').appendChild(menu);
+  menu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-status]');
+    if (!b) return;
+    menu.remove();
+    if (b.dataset.status !== it.status) loopSave(id, { status: b.dataset.status });
+  });
+}
+
+/* ---- side panel ---- */
+function loopSelect(name, key, it, opts) {
+  return `<label class="loop-field"><span>${esc(name)}</span>
+      <select data-field="${key}">${['', ...opts].map((o) => `<option value="${esc(o)}"${o === (it[key] || '') ? ' selected' : ''}>${esc(o || '—')}</option>`).join('')}</select></label>`;
+}
+
+function loopFillPanel(it, keepText) {
+  const box = document.getElementById('loopPanel');
+  if (!box) return;
+  const d = LOOP.data, o = d.options;
+  const facts = `<span>Raised ${esc(it.raised || '')}</span>${it.closed ? `<span>Closed ${esc(it.closed)}</span>` : ''}`;
+  const pageHtml = box.querySelector('.loop-page') ? box.querySelector('.loop-page').outerHTML : '<div class="loop-page"><p class="loop-muted">Loading details…</p></div>';
+  if (d.canEdit) {
+    box.querySelector('.drill-body').innerHTML = `
+      <label class="loop-field wide"><span>Item</span><textarea data-field="item" rows="2">${esc(it.item)}</textarea></label>
+      <div class="loop-grid">
+        ${loopSelect('Status', 'status', it, o.Status)}
+        ${loopSelect('Outcome', 'outcome', it, o.Outcome)}
+        ${loopSelect('Type', 'type', it, o.Type)}
+        ${loopSelect('Raised by', 'raisedBy', it, o['Raised By'])}
+      </div>
+      ${it.status === 'Closed' && (!it.outcome || it.outcome === 'Under Review') ? '<p class="loop-nudge">Closed but still “Under Review” — pick an outcome?</p>' : ''}
+      <label class="loop-field wide"><span>Notes <em>why we did or didn’t act, and what changed</em></span><textarea data-field="notes" rows="4">${esc(it.notes)}</textarea></label>
+      <div class="loop-facts">${facts}<span class="loop-saved" aria-live="polite"></span></div>
+      ${pageHtml}`;
+  } else {
+    box.querySelector('.drill-body').innerHTML = `
+      <div class="loop-ro">
+        <p><span class="loop-pill s-${loopSlug(it.status)}">${esc(it.status)}</span>
+          ${it.outcome ? `<span class="loop-tag">${esc(it.outcome)}</span>` : ''}
+          ${it.type ? `<span class="loop-tag">${esc(it.type)}</span>` : ''}
+          ${it.raisedBy ? `<span class="loop-tag">${esc(it.raisedBy)}</span>` : ''}</p>
+        <div class="loop-facts">${facts}</div>
+      </div>`;
+  }
+}
+
+async function loopOpenPanel(id) {
+  const it = LOOP.data.items.find((x) => x.id === id);
+  if (!it) return;
+  LOOP.openId = id;
+  document.getElementById('loopPanelWrap')?.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'loopPanelWrap';
+  wrap.className = 'drill-backdrop';
+  wrap.innerHTML = `<div class="drill loop-drill" id="loopPanel" role="dialog" aria-modal="true" aria-label="Loop item">
+      <div class="drill-head">
+        <div><h3>${LOOP.data.canEdit ? 'Edit item' : esc(it.item)}</h3>
+          <a class="drill-note" href="${esc(it.url)}" target="_blank" rel="noopener">Open in Notion ↗</a></div>
+        <button type="button" class="drill-close" aria-label="Close">×</button>
+      </div>
+      <div class="drill-body"></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  loopFillPanel(it);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap || e.target.closest('.drill-close')) loopClosePanel(); });
+  wrap.addEventListener('change', async (e) => {
+    const f = e.target.closest('[data-field]');
+    if (!f || f.tagName !== 'SELECT') return;
+    const flag = wrap.querySelector('.loop-saved');
+    if (flag) flag.textContent = 'Saving…';
+    const ok = await loopSave(id, { [f.dataset.field]: f.value });
+    const flag2 = document.querySelector('#loopPanel .loop-saved');
+    if (flag2) flag2.textContent = ok ? 'Saved ✓' : '';
+  });
+  wrap.addEventListener('focusout', async (e) => {
+    const f = e.target.closest('textarea[data-field]');
+    if (!f) return;
+    const cur = LOOP.data.items.find((x) => x.id === id);
+    if (f.value === (cur[f.dataset.field] || '')) return;
+    const flag = wrap.querySelector('.loop-saved');
+    if (flag) flag.textContent = 'Saving…';
+    const ok = await loopSave(id, { [f.dataset.field]: f.value });
+    const flag2 = document.querySelector('#loopPanel .loop-saved');
+    if (flag2) flag2.textContent = ok ? 'Saved ✓' : '';
+  });
+  if (LOOP.data.canEdit) {
+    try {
+      const res = await loopCall({ action: 'page', id });
+      const page = document.querySelector('#loopPanel .loop-page');
+      if (page) page.innerHTML = res.lines.length
+        ? '<h4>From Notion</h4>' + res.lines.map((l) => l.href
+          ? `<p><a href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.text || l.href)}</a></p>`
+          : `<p class="${l.heading ? 'h' : ''}">${esc(l.text)}</p>`).join('')
+        : '';
+    } catch (e) {
+      const page = document.querySelector('#loopPanel .loop-page');
+      if (page) page.innerHTML = '';
+    }
+  }
+}
+
+function loopClosePanel() {
+  const active = document.activeElement;
+  if (active && active.matches && active.matches('#loopPanel textarea')) active.blur();
+  document.getElementById('loopPanelWrap')?.remove();
+  LOOP.openId = null;
+}
+
+function loopAddForm() {
+  document.getElementById('loopPanelWrap')?.remove();
+  const o = LOOP.data.options;
+  const wrap = document.createElement('div');
+  wrap.id = 'loopPanelWrap';
+  wrap.className = 'drill-backdrop';
+  wrap.innerHTML = `<form class="drill loop-drill" id="loopNew" role="dialog" aria-modal="true" aria-label="Add loop item">
+      <div class="drill-head"><div><h3>Add item</h3><p class="drill-note">Starts as Open, Under Review.</p></div>
+        <button type="button" class="drill-close" aria-label="Close">×</button></div>
+      <div class="drill-body">
+        <label class="loop-field wide"><span>Item</span><textarea name="item" rows="2" required></textarea></label>
+        <div class="loop-grid">
+          <label class="loop-field"><span>Type</span><select name="type">${['', ...o.Type].map((x) => `<option value="${esc(x)}">${esc(x || '—')}</option>`).join('')}</select></label>
+          <label class="loop-field"><span>Raised by</span><select name="raisedBy">${['', ...o['Raised By']].map((x) => `<option value="${esc(x)}">${esc(x || '—')}</option>`).join('')}</select></label>
+        </div>
+        <label class="loop-field wide"><span>Notes</span><textarea name="notes" rows="3"></textarea></label>
+        <div class="loop-form-actions"><button type="submit" class="mgr-btn on">Add to tracker</button><span class="loop-saved"></span></div>
+      </div>
+    </form>`;
+  document.body.appendChild(wrap);
+  wrap.querySelector('textarea').focus();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap || e.target.closest('.drill-close')) wrap.remove(); });
+  wrap.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const btn = f.querySelector('[type=submit]');
+    btn.disabled = true;
+    f.querySelector('.loop-saved').textContent = 'Adding…';
+    try {
+      const res = await loopCall({ action: 'create', fields: { item: f.item.value, type: f.type.value, raisedBy: f.raisedBy.value, notes: f.notes.value } });
+      LOOP.data.items.push(res.item);
+      renderLoop();
+      wrap.remove();
+    } catch (err) {
+      btn.disabled = false;
+      f.querySelector('.loop-saved').textContent = err.message;
+    }
+  });
+}
+
+function setupLoop() {
+  const root = document.getElementById('loop');
+  root.addEventListener('click', (e) => {
+    const st = e.target.closest('.loop-status');
+    if (st) { e.stopPropagation(); loopStatusMenu(st); return; }
+    const open = e.target.closest('.loop-open');
+    if (open) { loopOpenPanel(open.dataset.id); return; }
+    if (e.target.closest('#loopAdd')) loopAddForm();
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.loop-menu') && !e.target.closest('.loop-status')) document.querySelectorAll('.loop-menu').forEach((m) => m.remove());
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.loop-menu').forEach((m) => m.remove());
+    if (document.getElementById('loopPanelWrap')) loopClosePanel();
+  });
+}
+
+/* ==========================================================================
    Product Roundup (Resources tab) — what's new and what's coming, from the CS
    engineer's "CS Product Roundup Dash" sheet, read with the viewer's own sign-in.
    The sheet is one tab of column groups; each header reads "Field (Section)",
@@ -3314,12 +3612,14 @@ function renderRoundup() {
 }
 
 function setResourcesView(view, load = true) {
-  const roundup = view === 'roundup';
+  if (!['kb', 'roundup', 'loop'].includes(view)) view = 'kb';
   document.querySelectorAll('.res-switch-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.resView === view)));
-  document.getElementById('resKB').hidden = roundup;
-  document.getElementById('roundup').hidden = !roundup;
+  document.getElementById('resKB').hidden = view !== 'kb';
+  document.getElementById('roundup').hidden = view !== 'roundup';
+  document.getElementById('loop').hidden = view !== 'loop';
   try { localStorage.setItem('cs-res-view', view); } catch (e) { /* private mode */ }
-  if (roundup && load) loadRoundup();
+  if (view === 'loop') { if (load) loadLoop(); loopStartPolling(); } else loopStopPolling();
+  if (view === 'roundup' && load) loadRoundup();
 }
 
 function setupRoundup() {
@@ -3331,7 +3631,7 @@ function setupRoundup() {
   let saved = 'kb';
   try { saved = localStorage.getItem('cs-res-view') || 'kb'; } catch (e) { /* private mode */ }
   // Restore the last view, but don't load until the person has signed in and opened Resources.
-  if (saved === 'roundup') setResourcesView('roundup', false);
+  if (saved === 'roundup' || saved === 'loop') setResourcesView(saved, false);
 }
 
 /* ==========================================================================
@@ -3694,6 +3994,7 @@ function setupResources() {
 // First open of the tab (a click, so Google's permission popup is allowed).
 function openResources() {
   if (!document.getElementById('roundup').hidden) loadRoundup();
+  if (!document.getElementById('loop').hidden) loadLoop();
   if (RES.loaded || RES.loading) return;
   if (RES.token) { loadResources(); return; }
   document.getElementById('resLoading').hidden = false;
@@ -4037,6 +4338,7 @@ function bootstrap() {
   setupTabs();
   setupResources();
   setupRoundup();
+  setupLoop();
   setupScorecards();
   setupAssign();
   setupTheme();

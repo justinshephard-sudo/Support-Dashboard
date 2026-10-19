@@ -1,0 +1,256 @@
+/* ==========================================================================
+   Loop Tracker — backs the dashboard's Resources ▸ Loop Tracker view.
+   --------------------------------------------------------------------------
+   Reads and writes the Notion "Team Loop Tracker" database for the weekly
+   close-the-loop meeting. Everyone signed in to the dashboard (@lawmatics.com)
+   can read the items (Notes and page text are managers only); only MANAGERS can change status, edit fields or add items.
+
+   Notion access is a public integration authorized once with OAuth:
+     1. Script Properties: NOTION_CLIENT_ID, NOTION_CLIENT_SECRET.
+     2. Run startNotionAuth() in the editor, open the logged link, click Allow
+        and pick the Team Loop Tracker page. Notion redirects back to this web
+        app (doGet), which stores the token in NOTION_TOKEN.
+   The redirect URI registered in Notion must be this web app's /exec URL.
+
+   Actions (POST, each with the viewer's Google access token):
+     load    → items: Open, In Progress, and Closed in the last CLOSED_DAYS
+     page    → one item's page text (for the side panel)
+     update  → change fields (managers); closing stamps Date Closed, reopening clears it
+     create  → add an item (managers)
+
+   Deploy: Web app · Execute as: Me · Who has access: Anyone.
+   Redeploy with `clasp update-deployment <id>` to keep the URL.
+   ========================================================================== */
+
+var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com';
+var MANAGERS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com', 'erika@lawmatics.com'];
+var DATABASE_ID = 'e4a103fc90624ce1b0396a50fc9e76f8'; // Team Loop Tracker
+var NOTION_VERSION = '2022-06-28';
+var CLOSED_DAYS = 6;
+var CACHE_SECONDS = 10;
+var SELECTS = {
+  Status: ['Open', 'In Progress', 'Closed'],
+  Outcome: ['Under Review', 'Implementing', 'Partially Implementing', 'Not Implementing', 'N/A'],
+  Type: ['Question', 'Request', 'Suggestion'],
+  'Raised By': ['AM Team', 'Support Team', 'Justin', 'Clare', 'Erika', 'Elliott', 'Gideon'],
+};
+
+/* ---------- OAuth (one-time) ---------- */
+
+function startNotionAuth() {
+  var p = PropertiesService.getScriptProperties();
+  var id = p.getProperty('NOTION_CLIENT_ID');
+  if (!id) throw new Error('Set NOTION_CLIENT_ID and NOTION_CLIENT_SECRET in Script Properties first.');
+  var state = Utilities.getUuid();
+  p.setProperty('NOTION_STATE', state);
+  var url = 'https://api.notion.com/v1/oauth/authorize?owner=user&response_type=code' +
+    '&client_id=' + encodeURIComponent(id) +
+    '&redirect_uri=' + encodeURIComponent(redirectUri_()) +
+    '&state=' + encodeURIComponent(state);
+  Logger.log('Open this link, click Allow, and pick the Team Loop Tracker page:\n' + url);
+}
+
+var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxQVzKZdB8ecIFscQUDX3uoL8CCzzH1qFiL3VtfJymAAwZPGulkn34MQi2sLt-b7NdN/exec';
+function redirectUri_() {
+  return WEB_APP_URL;
+}
+
+function doGet(e) {
+  var q = (e && e.parameter) || {};
+  if (!q.code) return HtmlService.createHtmlOutput('Loop Tracker endpoint is live.');
+  var p = PropertiesService.getScriptProperties();
+  if (!q.state || q.state !== p.getProperty('NOTION_STATE')) {
+    return HtmlService.createHtmlOutput('This sign-in link has expired. Run startNotionAuth again.');
+  }
+  var res = tokenRequest_({ grant_type: 'authorization_code', code: q.code, redirect_uri: redirectUri_() });
+  p.deleteProperty('NOTION_STATE');
+  if (!res.ok) return HtmlService.createHtmlOutput('Notion said no: ' + res.error);
+  return HtmlService.createHtmlOutput('<p style="font:16px sans-serif">✅ Notion is connected (' +
+    (res.body.workspace_name || 'workspace') + '). You can close this tab.</p>');
+}
+
+function tokenRequest_(payload) {
+  var p = PropertiesService.getScriptProperties();
+  var auth = Utilities.base64Encode(p.getProperty('NOTION_CLIENT_ID') + ':' + p.getProperty('NOTION_CLIENT_SECRET'));
+  var r = UrlFetchApp.fetch('https://api.notion.com/v1/oauth/token', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Basic ' + auth, 'Notion-Version': NOTION_VERSION },
+    payload: JSON.stringify(payload),
+  });
+  var body = {};
+  try { body = JSON.parse(r.getContentText()); } catch (e) {}
+  if (r.getResponseCode() !== 200) return { ok: false, error: body.error_description || body.message || r.getContentText().slice(0, 200) };
+  p.setProperty('NOTION_TOKEN', body.access_token);
+  if (body.refresh_token) p.setProperty('NOTION_REFRESH', body.refresh_token);
+  return { ok: true, body: body };
+}
+
+/* ---------- Notion API ---------- */
+
+function notion_(method, path, payload, retried) {
+  var p = PropertiesService.getScriptProperties();
+  var token = p.getProperty('NOTION_TOKEN');
+  if (!token) throw new Error('Notion isn’t connected yet.');
+  var opts = {
+    method: method, muteHttpExceptions: true, contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + token, 'Notion-Version': NOTION_VERSION },
+  };
+  if (payload) opts.payload = JSON.stringify(payload);
+  var r = UrlFetchApp.fetch('https://api.notion.com/v1' + path, opts);
+  if (r.getResponseCode() === 401 && !retried && p.getProperty('NOTION_REFRESH')) {
+    var ref = tokenRequest_({ grant_type: 'refresh_token', refresh_token: p.getProperty('NOTION_REFRESH') });
+    if (ref.ok) return notion_(method, path, payload, true);
+  }
+  var body = JSON.parse(r.getContentText() || '{}');
+  if (r.getResponseCode() >= 300) throw new Error('Notion ' + r.getResponseCode() + ': ' + (body.message || ''));
+  return body;
+}
+
+function plain_(rich) {
+  return (rich || []).map(function (t) { return t.plain_text; }).join('');
+}
+
+function toItem_(pg) {
+  var pr = pg.properties || {};
+  var sel = function (n) { return pr[n] && pr[n].select ? pr[n].select.name : ''; };
+  var date = function (n) { return pr[n] && pr[n].date ? pr[n].date.start : ''; };
+  return {
+    id: pg.id, url: pg.url, edited: pg.last_edited_time, created: pg.created_time,
+    item: plain_(pr.Item && pr.Item.title), status: sel('Status'), outcome: sel('Outcome'),
+    type: sel('Type'), raisedBy: sel('Raised By'), notes: plain_(pr.Notes && pr.Notes.rich_text),
+    shortcut: plain_(pr.Shortcut && pr.Shortcut.rich_text),
+    raised: date('Date Raised') || pg.created_time.slice(0, 10), closed: date('Date Closed'),
+  };
+}
+
+/* ---------- actions ---------- */
+
+function load_() {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('items');
+  if (hit) return JSON.parse(hit);
+  var since = Utilities.formatDate(new Date(Date.now() - CLOSED_DAYS * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');
+  var closed = { property: 'Status', select: { equals: 'Closed' } };
+  var filter = { or: [
+    { property: 'Status', select: { equals: 'Open' } },
+    { property: 'Status', select: { equals: 'In Progress' } },
+    { and: [closed, { property: 'Date Closed', date: { on_or_after: since } }] },
+    // Older closed items never got a Date Closed; use when they were last edited.
+    { and: [closed, { property: 'Date Closed', date: { is_empty: true } }, { timestamp: 'last_edited_time', last_edited_time: { on_or_after: since } }] },
+  ] };
+  var items = [], cursor = null, guard = 0;
+  do {
+    var body = { filter: filter, page_size: 100, sorts: [{ property: 'Date Raised', direction: 'ascending' }] };
+    if (cursor) body.start_cursor = cursor;
+    var res = notion_('post', '/databases/' + DATABASE_ID + '/query', body);
+    items = items.concat((res.results || []).map(toItem_));
+    cursor = res.has_more ? res.next_cursor : null;
+  } while (cursor && ++guard < 10);
+  var out = { ok: true, items: items, options: SELECTS, closedDays: CLOSED_DAYS, at: new Date().toISOString() };
+  cache.put('items', JSON.stringify(out), CACHE_SECONDS);
+  return out;
+}
+
+function pageText_(id) {
+  var res = notion_('get', '/blocks/' + id + '/children?page_size=100');
+  var lines = (res.results || []).map(function (b) {
+    var v = b[b.type] || {};
+    var txt = plain_(v.rich_text);
+    var links = (v.rich_text || []).filter(function (t) { return t.href; }).map(function (t) { return t.href; });
+    if (b.type === 'bookmark' || b.type === 'embed' || b.type === 'link_preview') return { text: v.url || '', href: v.url || '' };
+    if (!txt) return null;
+    var prefix = /bulleted|numbered/.test(b.type) ? '• ' : b.type === 'to_do' ? (v.checked ? '☑ ' : '☐ ') : '';
+    return { text: prefix + txt, href: links[0] || '', heading: /^heading/.test(b.type) };
+  }).filter(Boolean);
+  return { ok: true, lines: lines };
+}
+
+function propsFrom_(f) {
+  var props = {};
+  if (f.item != null) props.Item = { title: [{ text: { content: String(f.item).slice(0, 2000) } }] };
+  if (f.notes != null) props.Notes = { rich_text: [{ text: { content: String(f.notes).slice(0, 2000) } }] };
+  Object.keys(SELECTS).forEach(function (name) {
+    var key = { Status: 'status', Outcome: 'outcome', Type: 'type', 'Raised By': 'raisedBy' }[name];
+    if (f[key] === undefined) return;
+    if (f[key] === '' || f[key] === null) { props[name] = { select: null }; return; }
+    if (SELECTS[name].indexOf(f[key]) === -1) throw new Error('Unknown ' + name + ': ' + f[key]);
+    props[name] = { select: { name: f[key] } };
+  });
+  return props;
+}
+
+function today_() {
+  return Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
+}
+
+function update_(b) {
+  if (!b.id) throw new Error('missing item');
+  var f = b.fields || {};
+  var props = propsFrom_(f);
+  if (f.status === 'Closed') props['Date Closed'] = { date: { start: today_() } };
+  else if (f.status) props['Date Closed'] = { date: null };
+  var pg = notion_('patch', '/pages/' + b.id, { properties: props });
+  CacheService.getScriptCache().remove('items');
+  return { ok: true, item: toItem_(pg) };
+}
+
+function create_(b) {
+  var f = b.fields || {};
+  if (!String(f.item || '').trim()) throw new Error('Give the item a title.');
+  var props = propsFrom_({ item: f.item, notes: f.notes || '', status: 'Open', outcome: 'Under Review',
+    type: f.type || undefined, raisedBy: f.raisedBy || undefined });
+  props['Date Raised'] = { date: { start: today_() } };
+  var pg = notion_('post', '/pages', { parent: { database_id: DATABASE_ID }, properties: props });
+  CacheService.getScriptCache().remove('items');
+  return { ok: true, item: toItem_(pg) };
+}
+
+/* ---------- entry ---------- */
+
+function doPost(e) {
+  var b;
+  try { b = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'bad request' }); }
+  try {
+    var who = verify_(b.token);
+    if (!who.ok) return json_(who);
+    if (b.action === 'load') {
+      var d = load_();
+      d.canEdit = who.manager;
+      // Notes and page text are for managers; everyone else sees the item, status and outcome.
+      if (!who.manager) d.items = d.items.map(function (it) { var c = JSON.parse(JSON.stringify(it)); c.notes = ''; return c; });
+      return json_(d);
+    }
+    if (b.action === 'page') {
+      if (!who.manager) return json_({ ok: true, lines: [] });
+      return json_(pageText_(b.id));
+    }
+    if (b.action === 'update' || b.action === 'create') {
+      if (!who.manager) return json_({ ok: false, error: 'Only managers can edit the Loop Tracker.' });
+      return json_(b.action === 'update' ? update_(b) : create_(b));
+    }
+    return json_({ ok: false, error: 'unknown action' });
+  } catch (err) {
+    return json_({ ok: false, error: String((err && err.message) || err) });
+  }
+}
+
+function verify_(token) {
+  if (!token) return { ok: false, error: 'not signed in' };
+  var cache = CacheService.getScriptCache();
+  var key = 'tok_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
+  var email = cache.get(key);
+  if (!email) {
+    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token), { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) return { ok: false, error: 'session expired — reload the dashboard' };
+    var info = JSON.parse(res.getContentText());
+    var audOk = info.aud === DASHBOARD_CLIENT_ID || info.azp === DASHBOARD_CLIENT_ID;
+    email = String(info.email || '').toLowerCase();
+    if (!audOk || String(info.email_verified) !== 'true' || !/@lawmatics\.com$/.test(email)) return { ok: false, error: 'not allowed' };
+    cache.put(key, email, 300);
+  }
+  return { ok: true, email: email, manager: MANAGERS.indexOf(email) > -1 };
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
