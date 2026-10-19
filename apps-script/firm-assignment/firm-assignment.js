@@ -175,11 +175,12 @@ function load_() {
         aiDemo: cf.AiDemoNotes || '',
       },
       links: { deck: cf.OnboardingDeckLink || '', docs: cf.OnboardingDocumentsFolder || '' },
-      leadSource: '', leadSourceDetail: '', partner: false,
+      leadSource: '', leadSourceDetail: '', partner: false, contacts: [], onboardingContacts: [],
     };
   }).sort(function (a, b) { return a.start < b.start ? -1 : 1; });
 
   addLeadSource_(queue);
+  addContacts_(queue);
   var pr = reps[PARTNER_REP_ID];
   var partnerRep = { id: PARTNER_REP_ID, name: (users[PARTNER_REP_ID] && users[PARTNER_REP_ID].name) || 'Kennedy Wickham',
     open: pr ? pr.open : 0, firms: pr ? pr.firms : 0, openMrr: pr ? Math.round(pr.openMrr) : 0, lastStart: pr ? pr.lastStart : '' };
@@ -268,6 +269,31 @@ function addLeadSource_(queue) {
   });
 }
 
+// A firm can't be assigned until at least one contact has "Include in Onboarding" on;
+// the kickoff play emails those contacts.
+function contactsFor_(accountIds) {
+  if (!accountIds.length) return {};
+  var by = {};
+  czGet_('/Contact', {
+    $filter: accountIds.map(function (id) { return 'AccountId eq ' + Number(id); }).join(' or '),
+    $select: 'Id,FirstName,LastName,Email,AccountId,Cf', $top: 100,
+  }).forEach(function (c) {
+    (by[c.AccountId] = by[c.AccountId] || []).push({
+      name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() || c.Email || 'Contact ' + c.Id,
+      email: c.Email || '', onboarding: !!(c.Cf || {}).IncludeInOnboarding,
+    });
+  });
+  return by;
+}
+
+function addContacts_(queue) {
+  var by = contactsFor_(queue.map(function (f) { return f.czId; }));
+  queue.forEach(function (f) {
+    f.contacts = by[f.czId] || [];
+    f.onboardingContacts = f.contacts.filter(function (c) { return c.onboarding; }).map(function (c) { return c.name; });
+  });
+}
+
 /* ---------- writes ---------- */
 
 function assign_(b, by) {
@@ -281,6 +307,10 @@ function assign_(b, by) {
   if (!acct) throw new Error('account not found in ChurnZero');
   if (acct.UserAccountId && acct.UserAccountId !== Number(b.userId)) {
     throw new Error(acct.Name + ' was already assigned in ChurnZero. Reload to refresh the queue.');
+  }
+  var cs = contactsFor_([acct.Id])[acct.Id] || [];
+  if (!cs.some(function (c) { return c.onboarding; })) {
+    throw new Error(acct.Name + ' has no contact with “Include in Onboarding” turned on. Turn it on for at least one contact in ChurnZero, then refresh.');
   }
   var users = users_(), rep = users[b.userId];
   if (!rep || !rep.active) throw new Error('unknown or inactive ChurnZero user');

@@ -2937,11 +2937,15 @@ const faDaysAgo = (d) => {
 const faCzLink = (id) => CZ_ACCOUNT_URL.replace('{id}', encodeURIComponent(id));
 
 function faReadiness(f) {
+  const ob = f.onboardingContacts || [];
+  const contactPill = ob.length
+    ? `<span class="fa-chk ok" title="${esc(ob.join(', '))}">✓ Onboarding contact: ${esc(ob.length === 1 ? ob[0] : ob.length + ' contacts')}</span>`
+    : `<span class="fa-chk miss fa-chk-block" title="${esc((f.contacts || []).map((c) => c.name).join(', ') || 'No contacts on this account')}">! No onboarding contact</span>`;
   const items = [
     ['Intake process', f.notes.intake], ['Key challenges', f.notes.challenges],
     ['Onboarding deck', f.links.deck], ['Docs folder', f.links.docs],
   ];
-  return items.map(([k, v]) => `<span class="fa-chk ${v ? 'ok' : 'miss'}">${v ? '✓' : '!'} ${esc(k)}</span>`).join('');
+  return contactPill + items.map(([k, v]) => `<span class="fa-chk ${v ? 'ok' : 'miss'}">${v ? '✓' : '!'} ${esc(k)}</span>`).join('');
 }
 
 function faNotes(f) {
@@ -2976,6 +2980,7 @@ function faFirmCard(f) {
   const done = FA.done[f.czId];
   const top = f.ranking && f.ranking[0];
   const write = FA.data.canWrite;
+  const noContact = !(f.onboardingContacts || []).length;
   let right;
   if (done) {
     right = `<div class="fa-done">
@@ -3000,10 +3005,10 @@ function faFirmCard(f) {
         </label>
         <div class="fa-why fa-why-alt" hidden></div>
         <div class="fa-actions">
-          <button type="button" class="mgr-btn on fa-assign" data-cz="${f.czId}"${write ? '' : ' disabled title="ChurnZero write access isn’t set up yet"'}>Approve &amp; assign</button>
+          <button type="button" class="mgr-btn on fa-assign" data-cz="${f.czId}"${!write ? ' disabled title="ChurnZero write access isn’t set up yet"' : noContact ? ' disabled title="Needs a contact with Include in Onboarding on"' : ''}>Approve &amp; assign</button>
           <a class="mgr-btn" href="${esc(faCzLink(f.czId))}" target="_blank" rel="noopener">Open in ChurnZero ↗</a>
         </div>
-        <div class="fa-msg" aria-live="polite"></div>
+        <div class="fa-msg${noContact ? ' err' : ''}" aria-live="polite">${noContact ? `Can’t assign yet: turn on <b>Include in Onboarding</b> for at least one contact${(f.contacts || []).length ? ` (${esc(f.contacts.map((c) => c.name).join(', '))})` : ''} in ChurnZero, then Refresh.` : ''}</div>
       </div>`;
   }
   return `<article class="fa-firm" data-cz="${f.czId}">
