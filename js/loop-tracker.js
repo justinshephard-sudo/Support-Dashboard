@@ -109,7 +109,7 @@ function renderLoop() {
       </div>
       <div class="loop-hero-art">
         <div class="loop-bubble">${groups[0].items.length ? `${groups[0].items.length} loop${groups[0].items.length === 1 ? '' : 's'} to close${oldest ? ` — oldest from ${esc(loopAgo(oldest))}` : ''}!` : 'Every loop is closed. Nice!'}</div>
-        <img src="assets/merlin-loopinator.webp" alt="Merlin and the Loop-in-ator" width="560" height="443">
+        <img src="assets/merlin-loopinator.webp?v=2" alt="Merlin and the Loop-in-ator" width="560" height="443">
       </div>
     </section>
     <div class="loop-board">
