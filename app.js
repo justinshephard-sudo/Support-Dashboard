@@ -2892,7 +2892,7 @@ const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbxkDLI7ldy0AtXq4iUjD
 const ASSIGN_EMAILS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com'];
 // ChurnZero account page; {id} = the ChurnZero account Id.
 const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/account/{id}/details';
-const ASSIGN_PLAY = 'Onboarding New Customer Kickoff (NEW)';
+const ASSIGN_PLAY = 'Onboarding New Customer Kickoff';
 const FA = { data: null, loading: false, done: {} };
 
 function canAssign() {
@@ -3024,8 +3024,7 @@ function renderAssign() {
     ? `${waiting} new firm${waiting === 1 ? '' : 's'} waiting for an owner. Suggestions balance open onboardings, time since each AM’s last new firm, book size and onboarding MRR.`
     : 'All caught up — every new firm has an owner.';
 
-  const took = (d.recent || []).filter((l) => l.took === 'true' || l.took === 'TRUE').length;
-  const judged = (d.recent || []).filter((l) => l.took).length;
+  const { took = 0, judged = 0 } = d.stats || {};
 
   body.innerHTML = `
     ${d.canWrite ? '' : `<div class="fa-banner">Suggestion mode: ChurnZero write access isn’t connected yet, so use <b>Open in ChurnZero</b> to assign. Approve &amp; assign turns on once it is.</div>`}
@@ -3047,7 +3046,7 @@ function renderAssign() {
     </section>
 
     <section class="fa-section">
-      <div class="fa-section-head"><h3>Recent assignments</h3><span>${judged ? `Suggestion taken ${took} of ${judged} times` : 'Assignments made here show up below'}</span></div>
+      <div class="fa-section-head"><h3>Last 10 assignments</h3><span>${judged ? `Suggestion taken ${took} of ${judged} times` : 'Assignments made here show up below'}</span></div>
       ${(d.recent || []).length ? `<div class="table-wrap"><table class="fa-table">
         <thead><tr><th>When</th><th>Firm</th><th>Assigned</th><th>Suggested</th><th>By</th><th>ChurnZero</th></tr></thead>
         <tbody>${d.recent.slice(0, 10).map((l) => `<tr><td>${esc(l.when)}</td><td>${esc(l.firm)}</td><td>${esc(l.assigned)}</td>

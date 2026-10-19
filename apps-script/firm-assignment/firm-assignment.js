@@ -156,7 +156,8 @@ function load_() {
     })
     .sort(function (a, b) { return a.name.localeCompare(b.name); });
 
-  var queue = queueRaw.map(function (a) {
+  // Agency and agency-client firms aren't assigned through this rotation.
+  var queue = queueRaw.filter(function (a) { var cf = a.Cf || {}; return !cf.AgencyFirm && !cf.AgencyClientFirm; }).map(function (a) {
     var cf = a.Cf || {};
     var ae = users[cf.OwnerId];
     return {
@@ -165,7 +166,7 @@ function load_() {
       licenses: a.LicenseCount || '', ae: ae ? ae.name : '',
       practice: [].concat(cf.PracticeArea || []).join(', '),
       type: cf.ImplementationType || '',
-      flags: [cf.AgencyFirm && 'Agency', cf.AgencyClientFirm && 'Agency client', cf.Consultant && 'Consultant',
+      flags: [cf.Consultant && 'Consultant',
         cf.PartnerType && String(cf.PartnerType)].filter(Boolean),
       notes: {
         sales: cf.SalesOnboardingNotes || '', intake: cf.IntakeProcess || '', challenges: cf.KeyChallenges || '',
@@ -178,7 +179,8 @@ function load_() {
   suggest_(queue, rotation, tier.min);
   var props = PropertiesService.getScriptProperties();
   return {
-    ok: true, queue: queue, reps: rotation, weights: WEIGHTS, highMin: tier.min, recent: log.slice(0, 25),
+    ok: true, queue: queue, reps: rotation, weights: WEIGHTS, highMin: tier.min, recent: log.slice(0, 10),
+    stats: { judged: log.filter(function (l) { return l.took; }).length, took: log.filter(function (l) { return /^true$/i.test(l.took); }).length },
     canWrite: !!props.getProperty('CZ_APP_KEY'), generated: new Date().toISOString(),
   };
 }
