@@ -739,3 +739,7 @@ body.drill-open{overflow:hidden}
 .sync-note.bad{color:#c03636;font-weight:600}
 #implSync{display:inline;margin-left:10px}
 #implSync[hidden],#firmSync[hidden]{display:none}
+/* Loop Tracker bubble sits to the left of Merlin's hat, tail pointing at him */
+.loop-hero-art .loop-bubble{left:-175px;top:30px;right:auto}
+.loop-hero-art .loop-bubble::after{right:-8px;left:auto;bottom:auto;top:50%;margin-top:-8px;border:8px solid transparent;border-left-color:#fff;border-right:none}
+@media (max-width:720px){.loop-hero-art .loop-bubble{left:0;top:-10px}.loop-hero-art .loop-bubble::after{right:26px;top:auto;bottom:-8px;margin-top:0;border:8px solid transparent;border-top-color:#fff;border-bottom:none}}
