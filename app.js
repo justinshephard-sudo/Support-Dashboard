@@ -2989,11 +2989,13 @@ function faFirmCard(f) {
   } else {
     right = `<div class="fa-pick">
         <div class="fa-sugg-lbl">Suggested</div>
-        <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span><span class="fa-score" tabindex="0" aria-describedby="fa-tip-${f.czId}">${top.score}<span class="fa-tip" role="tooltip" id="fa-tip-${f.czId}">${faScoreTip(top, f)}</span></span></div>
-        <div class="fa-why">${esc(faWhy(top))}</div>
+        <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span>${top.partnerRule
+          ? '<span class="fa-score fa-partner-rule">Partner rule</span>'
+          : `<span class="fa-score" tabindex="0" aria-describedby="fa-tip-${f.czId}">${top.score}<span class="fa-tip" role="tooltip" id="fa-tip-${f.czId}">${faScoreTip(top, f)}</span></span>`}</div>
+        <div class="fa-why">${top.partnerRule ? `Partner-sourced firm${f.leadSourceDetail ? ' (' + esc(f.leadSourceDetail) + ')' : ''}: partner firms always go to ${esc(top.name.split(' ')[0])}. ` : ''}${esc(faWhy(top))}</div>
         <label class="fa-change">Assign to
           <select class="fa-select" data-cz="${f.czId}">
-            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
+            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.partnerRule ? 'partner rule' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
           </select>
         </label>
         <div class="fa-why fa-why-alt" hidden></div>
@@ -3008,6 +3010,7 @@ function faFirmCard(f) {
       <div class="fa-left">
         <div class="fa-firm-head">
           <h3>${esc(f.name)}</h3>
+          ${f.partner ? `<span class="fa-flag fa-partner">Partner: ${esc(f.leadSourceDetail || 'not named in Salesforce')}</span>` : ''}
           ${f.high ? `<span class="fa-flag fa-high">High MRR${f.tierFallback ? ' · no high-MRR AM in rotation' : ''}</span>` : ''}
           ${f.flags.map((x) => `<span class="fa-flag">${esc(x)}</span>`).join('')}
         </div>
@@ -3016,6 +3019,7 @@ function faFirmCard(f) {
           <span>Firm ID <b>${esc(f.firmId || '—')}</b></span>
           <span>Came in <b>${esc(faDaysAgo(f.start))}</b></span>
           ${f.ae ? `<span>AE <b>${esc(f.ae)}</b></span>` : ''}
+          ${f.leadSource ? `<span>Lead source <b>${esc(f.leadSource)}${f.leadSourceDetail ? ' · ' + esc(f.leadSourceDetail) : ''}</b></span>` : ''}
           ${f.licenses ? `<span><b>${esc(f.licenses)}</b> licenses</span>` : ''}
           ${f.practice ? `<span>${esc(f.practice)}</span>` : ''}
           ${f.type ? `<span>Type <b>${esc(f.type)}</b></span>` : ''}

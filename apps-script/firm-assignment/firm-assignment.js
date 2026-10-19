@@ -46,6 +46,8 @@ var PREMIUM = 'Premium Onboarding';
 var WEIGHTS = { open: 40, since: 30, book: 15, value: 15 };
 // High-MRR tier: these AMs only get firms at or above the threshold, and those
 // firms go only to them. Both are editable on the page (stored in TIER).
+// Partner-sourced firms (closed-won opp Lead Source starts with "Partner") always go to Kennedy.
+var PARTNER_REP_ID = 11; // Kennedy Wickham's ChurnZero user (not the duplicate #120)
 var TIER_DEFAULT = { reps: { 7: true, 71: true }, min: 1000 }; // Elliott Jones, Julio Ortiz
 
 function authorize() {
@@ -173,10 +175,15 @@ function load_() {
         aiDemo: cf.AiDemoNotes || '',
       },
       links: { deck: cf.OnboardingDeckLink || '', docs: cf.OnboardingDocumentsFolder || '' },
+      leadSource: '', leadSourceDetail: '', partner: false,
     };
   }).sort(function (a, b) { return a.start < b.start ? -1 : 1; });
 
-  suggest_(queue, rotation, tier.min);
+  addLeadSource_(queue);
+  var pr = reps[PARTNER_REP_ID];
+  var partnerRep = { id: PARTNER_REP_ID, name: (users[PARTNER_REP_ID] && users[PARTNER_REP_ID].name) || 'Kennedy Wickham',
+    open: pr ? pr.open : 0, firms: pr ? pr.firms : 0, openMrr: pr ? Math.round(pr.openMrr) : 0, lastStart: pr ? pr.lastStart : '' };
+  suggest_(queue, rotation, tier.min, partnerRep);
   var props = PropertiesService.getScriptProperties();
   return {
     ok: true, queue: queue, reps: rotation, weights: WEIGHTS, highMin: tier.min, recent: log.slice(0, 10),
@@ -191,7 +198,7 @@ function load_() {
    higher. Firms are suggested oldest first, and each pick counts against that
    rep for the next firm, so a batch of three new firms spreads out. */
 
-function suggest_(queue, reps, highMin) {
+function suggest_(queue, reps, highMin, partnerRep) {
   var all = reps.filter(function (r) { return r.included; })
     .map(function (r) { return { r: r, open: r.open, openMrr: r.openMrr, firms: r.firms, lastStart: r.lastStart }; });
   var today = new Date();
@@ -201,7 +208,7 @@ function suggest_(queue, reps, highMin) {
     var sim = all.filter(function (s) { return !!s.r.high === f.high; });
     f.tierFallback = !sim.length;
     if (!sim.length) sim = all;
-    if (!sim.length) { f.ranking = []; return; }
+    if (!sim.length && !f.partner) { f.ranking = []; return; }
     var days = function (s) { return s.lastStart ? Math.max(0, Math.round((today - new Date(s.lastStart + 'T12:00:00')) / 864e5)) : 365; };
     var norm = function (vals, higherIsBetter) {
       var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
@@ -226,8 +233,38 @@ function suggest_(queue, reps, highMin) {
         open: s.open, daysSince: days(s), firms: s.firms, openMrr: Math.round(s.openMrr) });
     });
     f.ranking = ranked;
-    var top = sim.filter(function (s) { return s.r.id === ranked[0].userId; })[0];
+    if (f.partner) {
+      ranked = ranked.filter(function (x) { return x.userId !== partnerRep.id; });
+      ranked.unshift({ userId: partnerRep.id, name: partnerRep.name, score: null, partnerRule: true,
+        open: partnerRep.open, daysSince: partnerRep.lastStart ? Math.max(0, Math.round((today - new Date(partnerRep.lastStart + 'T12:00:00')) / 864e5)) : 365,
+        firms: partnerRep.firms, openMrr: partnerRep.openMrr });
+      f.ranking = ranked;
+      partnerRep.open++; partnerRep.firms++; partnerRep.openMrr += f.mrr;
+    }
+    var top = all.filter(function (s) { return s.r.id === ranked[0].userId; })[0];
+    if (!top) return;
     top.open++; top.firms++; top.openMrr += f.mrr; top.lastStart = Utilities.formatDate(today, 'America/Los_Angeles', 'yyyy-MM-dd');
+  });
+}
+
+// Lead source lives on the closed-won opportunity (ChurnZero's synced CustomListOpportunity),
+// not the account — the account-level field is blank on new firms.
+function addLeadSource_(queue) {
+  if (!queue.length) return;
+  var byAcct = {};
+  czGet_('/CustomListOpportunity', {
+    $filter: '(' + queue.map(function (f) { return 'AccountId eq ' + Number(f.czId); }).join(' or ') + ') and Won eq true',
+    $select: 'AccountId,LeadSource,LeadSourceDetail,CreatedDate', $top: 100,
+  }).forEach(function (o) {
+    var cur = byAcct[o.AccountId];
+    if (!cur || String(o.CreatedDate) > String(cur.CreatedDate)) byAcct[o.AccountId] = o;
+  });
+  queue.forEach(function (f) {
+    var o = byAcct[f.czId];
+    if (!o) return;
+    f.leadSource = o.LeadSource || '';
+    f.leadSourceDetail = o.LeadSourceDetail || '';
+    f.partner = /^partner/i.test(f.leadSource);
   });
 }
 
