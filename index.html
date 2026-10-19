@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=55">
+<link rel="stylesheet" href="style.css?v=56">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -285,6 +285,25 @@
     </div>
   </div>
 
+  <!-- ===================== NEW FIRM ASSIGNMENT (Clare, Johnny, Justin) ===================== -->
+  <div class="view" id="view-assign">
+    <div class="wrap">
+      <div class="sc-top">
+        <div>
+          <div class="eyebrow">Manager mode · Onboarding</div>
+          <h2>New Firm Assignment</h2>
+          <p class="sc-sub" id="faSub">Checking ChurnZero for new firms…</p>
+        </div>
+        <div class="sc-top-actions">
+          <button type="button" class="mgr-btn" id="faRefresh">↻ Refresh</button>
+          <a class="mgr-btn" href="https://docs.google.com/spreadsheets/d/1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc/edit" target="_blank" rel="noopener">Assignment log ↗</a>
+        </div>
+      </div>
+      <div id="faError" class="error-banner" hidden></div>
+      <div id="faBody"></div>
+    </div>
+  </div>
+
   <!-- ===================== CSM VIEW ===================== -->
   <div class="view" id="view-csm">
     <div class="wrap">
@@ -357,6 +376,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=56"></script>
+<script src="app.js?v=57"></script>
 </body>
 </html>

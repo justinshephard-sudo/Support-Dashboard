@@ -1005,6 +1005,7 @@ function setManagerMode(on) {
   try { if (currentMonthName) renderManualSection(currentMonthName); } catch (e) {}
   try { renderResources(); } catch (e) {}
   try { updateScorecardsButton(); } catch (e) {}
+  try { updateAssignButton(); } catch (e) {}
   const badge = document.getElementById('manager-mode-badge');
   if (on) showManagerBadge(); else if (badge) badge.remove();
 }
@@ -2880,6 +2881,273 @@ function updateScorecardsButton() {
 }
 
 /* ==========================================================================
+   New Firm Assignment (Clare, Johnny and Justin; shows with Manager mode on).
+   Live from ChurnZero through apps-script/firm-assignment: new firms nobody
+   owns yet, a suggested AM for each (with the reasons), and Approve / change.
+   Assign writes the owner + Onboarding Type = Premium in ChurnZero and logs
+   suggested vs chosen, so we can see how often the suggestion is trusted
+   before switching to auto-assign.
+   ========================================================================== */
+const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbxkDLI7ldy0AtXq4iUjDB0b4MAdzkzJ0QSditt1sxFReXnoo5JPg8HzrC4feE1-flXyvg/exec';
+const ASSIGN_EMAILS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com'];
+// ChurnZero account page; {id} = the ChurnZero account Id.
+const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/accounts/{id}';
+const ASSIGN_PLAY = 'Onboarding New Customer Kickoff (NEW)';
+const FA = { data: null, loading: false, done: {} };
+
+function canAssign() {
+  return !!AUTH.email && ASSIGN_EMAILS.includes(AUTH.email.toLowerCase());
+}
+
+async function faCall(body) {
+  const res = await fetch(ASSIGN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ token: AUTH.token }, body)),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function loadAssign() {
+  if (FA.loading) return;
+  FA.loading = true;
+  const err = document.getElementById('faError');
+  err.hidden = true;
+  document.getElementById('faRefresh').disabled = true;
+  if (!FA.data) document.getElementById('faBody').innerHTML = '<div class="res-loading">Checking ChurnZero for new firms…</div>';
+  try {
+    FA.data = await faCall({ action: 'load' });
+    renderAssign();
+  } catch (e) {
+    err.textContent = 'Couldn’t load from ChurnZero: ' + e.message;
+    err.hidden = false;
+    if (!FA.data) document.getElementById('faBody').innerHTML = '';
+  } finally {
+    FA.loading = false;
+    document.getElementById('faRefresh').disabled = false;
+  }
+}
+
+const faDaysAgo = (d) => {
+  const n = Math.round((Date.now() - new Date(d + 'T12:00:00')) / 864e5);
+  return n <= 0 ? 'today' : n === 1 ? 'yesterday' : n + ' days ago';
+};
+const faCzLink = (id) => CZ_ACCOUNT_URL.replace('{id}', encodeURIComponent(id));
+
+function faReadiness(f) {
+  const items = [
+    ['Sales notes', f.notes.sales], ['Intake process', f.notes.intake], ['Key challenges', f.notes.challenges],
+    ['Onboarding deck', f.links.deck], ['Docs folder', f.links.docs],
+  ];
+  return items.map(([k, v]) => `<span class="fa-chk ${v ? 'ok' : 'miss'}">${v ? '✓' : '!'} ${esc(k)}</span>`).join('');
+}
+
+function faNotes(f) {
+  const blocks = [['Sales onboarding notes', f.notes.sales], ['Intake process', f.notes.intake],
+    ['Key challenges', f.notes.challenges], ['AI demo notes', f.notes.aiDemo]].filter(([, v]) => v);
+  const links = [f.links.deck && `<a href="${esc(f.links.deck)}" target="_blank" rel="noopener">Onboarding deck ↗</a>`,
+    f.links.docs && `<a href="${esc(f.links.docs)}" target="_blank" rel="noopener">Docs folder ↗</a>`].filter(Boolean).join(' · ');
+  if (!blocks.length && !links) return '<p class="fa-nonotes">Nothing from sales on this account yet — check with the AE before assigning.</p>';
+  return `<details class="fa-notes"><summary>Notes from sales</summary>
+      ${blocks.map(([k, v]) => `<h4>${esc(k)}</h4><p>${esc(v)}</p>`).join('')}
+      ${links ? `<p class="fa-links">${links}</p>` : ''}
+    </details>`;
+}
+
+function faWhy(r) {
+  return `${r.open} open onboarding${r.open === 1 ? '' : 's'} · last new firm ${r.daysSince === 0 ? 'today' : r.daysSince + 'd ago'} · ${r.firms} firms · ${fmtMoney(r.openMrr)} onboarding MRR`;
+}
+
+function faFirmCard(f) {
+  const done = FA.done[f.czId];
+  const top = f.ranking && f.ranking[0];
+  const write = FA.data.canWrite;
+  let right;
+  if (done) {
+    right = `<div class="fa-done">
+        <div class="fa-done-head">${done.confirmed ? '✓ Assigned to' : '⏳ Sent to ChurnZero for'} <b>${esc(done.name)}</b></div>
+        <p>${done.confirmed ? 'Owner and Premium Onboarding are set.' : 'ChurnZero hasn’t shown the change yet — it can take a minute. Refresh to check.'}
+          Next: start <b>${esc(ASSIGN_PLAY)}</b>.</p>
+        <a class="mgr-btn fa-go" href="${esc(faCzLink(f.czId))}" target="_blank" rel="noopener">Start play in ChurnZero ↗</a>
+      </div>`;
+  } else if (!top) {
+    right = '<div class="fa-done"><p>No one is in the rotation. Add someone below.</p></div>';
+  } else {
+    right = `<div class="fa-pick">
+        <div class="fa-sugg-lbl">Suggested</div>
+        <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span><span class="fa-score" title="Suggestion score out of 100">${top.score}</span></div>
+        <div class="fa-why">${esc(faWhy(top))}</div>
+        <label class="fa-change">Assign to
+          <select class="fa-select" data-cz="${f.czId}">
+            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
+          </select>
+        </label>
+        <div class="fa-why fa-why-alt" hidden></div>
+        <div class="fa-actions">
+          <button type="button" class="mgr-btn on fa-assign" data-cz="${f.czId}"${write ? '' : ' disabled title="ChurnZero write access isn’t set up yet"'}>Approve &amp; assign</button>
+          <a class="mgr-btn" href="${esc(faCzLink(f.czId))}" target="_blank" rel="noopener">Open in ChurnZero ↗</a>
+        </div>
+        <div class="fa-msg" aria-live="polite"></div>
+      </div>`;
+  }
+  return `<article class="fa-firm" data-cz="${f.czId}">
+      <div class="fa-left">
+        <div class="fa-firm-head">
+          <h3>${esc(f.name)}</h3>
+          ${f.flags.map((x) => `<span class="fa-flag">${esc(x)}</span>`).join('')}
+        </div>
+        <div class="fa-facts">
+          <span><b>${fmtMoney(f.mrr)}</b>/mo</span>
+          <span>Firm ID <b>${esc(f.firmId || '—')}</b></span>
+          <span>Came in <b>${esc(faDaysAgo(f.start))}</b></span>
+          ${f.ae ? `<span>AE <b>${esc(f.ae)}</b></span>` : ''}
+          ${f.licenses ? `<span><b>${esc(f.licenses)}</b> licenses</span>` : ''}
+          ${f.practice ? `<span>${esc(f.practice)}</span>` : ''}
+          ${f.type ? `<span>Type <b>${esc(f.type)}</b></span>` : ''}
+        </div>
+        <div class="fa-ready">${faReadiness(f)}</div>
+        ${faNotes(f)}
+      </div>
+      ${right}
+    </article>`;
+}
+
+function renderAssign() {
+  const d = FA.data;
+  const body = document.getElementById('faBody');
+  const queue = d.queue || [];
+  const waiting = queue.filter((f) => !FA.done[f.czId]).length;
+  document.getElementById('faSub').textContent = waiting
+    ? `${waiting} new firm${waiting === 1 ? '' : 's'} waiting for an owner. Suggestions balance open onboardings, time since each AM’s last new firm, book size and onboarding MRR.`
+    : 'All caught up — every new firm has an owner.';
+
+  const took = (d.recent || []).filter((l) => l.took === 'true' || l.took === 'TRUE').length;
+  const judged = (d.recent || []).filter((l) => l.took).length;
+
+  body.innerHTML = `
+    ${d.canWrite ? '' : `<div class="fa-banner">Suggestion mode: ChurnZero write access isn’t connected yet, so use <b>Open in ChurnZero</b> to assign. Approve &amp; assign turns on once it is.</div>`}
+    <div class="fa-queue">${queue.length ? queue.map(faFirmCard).join('') : '<div class="fa-empty">No unassigned new firms in ChurnZero. 🎉</div>'}</div>
+
+    <section class="fa-section">
+      <div class="fa-section-head"><h3>Rotation</h3><span>Who suggestions pick from: AMs with at least one open onboarding. Untick someone who’s out.</span></div>
+      <div class="table-wrap"><table class="fa-table">
+        <thead><tr><th>In rotation</th><th>AM</th><th>Open OBs</th><th>Last new firm</th><th>Firms</th><th>Onboarding MRR</th><th>Total MRR</th></tr></thead>
+        <tbody>${(d.reps || []).map((r) => `<tr class="${r.included ? '' : 'off'}">
+            <td><input type="checkbox" class="fa-rot" data-user="${r.id}"${r.included ? ' checked' : ''} aria-label="Include ${esc(r.name)}"></td>
+            <td>${esc(r.name)}</td><td>${r.open}</td><td>${r.lastStart ? esc(faDaysAgo(r.lastStart)) : '—'}</td>
+            <td>${r.firms}</td><td>${fmtMoney(r.openMrr)}</td><td>${fmtMoney(r.mrr)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </section>
+
+    <section class="fa-section">
+      <div class="fa-section-head"><h3>Recent assignments</h3><span>${judged ? `Suggestion taken ${took} of ${judged} times` : 'Assignments made here show up below'}</span></div>
+      ${(d.recent || []).length ? `<div class="table-wrap"><table class="fa-table">
+        <thead><tr><th>When</th><th>Firm</th><th>Assigned</th><th>Suggested</th><th>By</th><th>ChurnZero</th></tr></thead>
+        <tbody>${d.recent.slice(0, 10).map((l) => `<tr><td>${esc(l.when)}</td><td>${esc(l.firm)}</td><td>${esc(l.assigned)}</td>
+            <td>${esc(l.suggested || '—')}${l.took === 'false' || l.took === 'FALSE' ? ' <span class="fa-flag">changed</span>' : ''}</td>
+            <td>${esc(String(l.by).split('@')[0])}</td><td>${esc(l.confirmed)}</td></tr>`).join('')}</tbody>
+      </table></div>` : ''}
+    </section>
+    <p class="fa-foot">Live from ChurnZero · checked ${new Date(d.generated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>`;
+}
+
+async function faAssign(btn) {
+  const czId = Number(btn.dataset.cz);
+  const f = FA.data.queue.find((x) => x.czId === czId);
+  const card = btn.closest('.fa-firm');
+  const sel = card.querySelector('.fa-select');
+  const userId = Number(sel.value);
+  const pick = f.ranking.find((r) => r.userId === userId);
+  const msg = card.querySelector('.fa-msg');
+  card.querySelectorAll('button,select').forEach((x) => { x.disabled = true; });
+  msg.className = 'fa-msg';
+  msg.textContent = `Assigning to ${pick.name}…`;
+  try {
+    const res = await faCall({
+      action: 'assign', czId, externalId: f.externalId, userId,
+      suggestedId: f.ranking[0].userId, suggestedName: f.ranking[0].name,
+    });
+    FA.done[czId] = { name: pick.name, confirmed: res.confirmed };
+    renderAssign();
+  } catch (e) {
+    msg.className = 'fa-msg err';
+    msg.textContent = e.message;
+    card.querySelectorAll('button,select').forEach((x) => { x.disabled = false; });
+  }
+}
+
+function showAssign() {
+  document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
+  document.querySelectorAll('.view').forEach((x) => x.classList.remove('active'));
+  const v = document.getElementById('view-assign');
+  v.classList.add('active');
+  v.scrollIntoView({ block: 'start' });
+  loadAssign();
+}
+function leaveAssign() {
+  const v = document.getElementById('view-assign');
+  if (!v || !v.classList.contains('active')) return;
+  v.classList.remove('active');
+  const first = document.querySelector('.tab[data-tab="team"]');
+  if (first) first.click();
+}
+
+function setupAssign() {
+  document.getElementById('faRefresh').addEventListener('click', () => { FA.done = {}; loadAssign(); });
+  const body = document.getElementById('faBody');
+  body.addEventListener('click', (e) => {
+    const btn = e.target.closest('.fa-assign');
+    if (btn) faAssign(btn);
+  });
+  body.addEventListener('change', async (e) => {
+    const sel = e.target.closest('.fa-select');
+    if (sel) {
+      const f = FA.data.queue.find((x) => x.czId === Number(sel.dataset.cz));
+      const r = f.ranking.find((x) => x.userId === Number(sel.value));
+      const card = sel.closest('.fa-firm');
+      const alt = card.querySelector('.fa-why-alt');
+      const changed = r.userId !== f.ranking[0].userId;
+      alt.hidden = !changed;
+      alt.textContent = changed ? r.name + ': ' + faWhy(r) : '';
+      card.querySelector('.fa-assign').textContent = changed ? `Assign to ${r.name.split(' ')[0]}` : 'Approve & assign';
+      return;
+    }
+    const rot = e.target.closest('.fa-rot');
+    if (rot) {
+      rot.disabled = true;
+      try {
+        FA.data = await faCall({ action: 'setRotation', userId: Number(rot.dataset.user), included: rot.checked });
+        renderAssign();
+      } catch (err) {
+        rot.checked = !rot.checked;
+        rot.disabled = false;
+        const box = document.getElementById('faError');
+        box.textContent = 'Couldn’t update the rotation: ' + err.message;
+        box.hidden = false;
+      }
+    }
+  });
+}
+
+// Sits next to CS Scorecards; only for Clare, Johnny and Justin, while Manager mode is on.
+function updateAssignButton() {
+  let btn = document.getElementById('assign-btn');
+  const anchor = document.getElementById('scorecards-btn') || document.getElementById('manager-toggle');
+  if (!btn && anchor && canAssign()) {
+    btn = document.createElement('button');
+    btn.id = 'assign-btn';
+    btn.className = 'mgr-btn';
+    btn.textContent = '🧭 New Firm Assignment';
+    btn.addEventListener('click', showAssign);
+    anchor.after(btn);
+  }
+  if (btn) btn.hidden = !(overridesUnlocked && canAssign());
+  if (!overridesUnlocked) leaveAssign();
+}
+
+/* ==========================================================================
    Product Roundup (Resources tab) — what's new and what's coming, from the CS
    engineer's "CS Product Roundup Dash" sheet, read with the viewer's own sign-in.
    The sheet is one tab of column groups; each header reads "Field (Section)",
@@ -3732,6 +4000,7 @@ function bootstrap() {
   setupResources();
   setupRoundup();
   setupScorecards();
+  setupAssign();
   setupTheme();
   setupMerlin();
   const start = () => initAuth(main);
