@@ -270,7 +270,7 @@ function renderMrr() {
     </div>
     <div class="fa-hero-art">
       <div class="loop-bubble">${esc(bubble)}</div>
-      <img src="assets/merlin-confetti.webp" alt="Merlin celebrating" loading="lazy">
+      <img src="assets/merlin-money.webp" width="520" height="511" alt="Merlin in a gold chain, throwing cash" loading="lazy">
     </div>`;
 
   const chips = MRR_CATS.map((c) => `<button type="button" class="mrr-chip c-${c.key}" data-drill="cat" data-cat="${c.key}" data-ym="${cur}">

@@ -827,3 +827,4 @@ button.mrr-stat span{color:var(--lm-blue)}
 @media (max-width:720px){.mrr-hero{padding:22px 18px}.mrr-kpis{grid-template-columns:1fr}.mrr-grid2,.mrr-insights{grid-template-columns:1fr}.mrr-insight.wide{grid-column:auto}.mrr-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.mrr-chips{grid-template-columns:1fr}}
 .mrr-table th,.mrr-table td{text-align:right}
 .mrr-table th:nth-child(-n+2),.mrr-table td:nth-child(-n+2),.mrr-table th:first-child,.mrr-table td:first-child{text-align:left}
+.mrr-hero .fa-hero-art img{max-width:290px;margin-bottom:6px}
