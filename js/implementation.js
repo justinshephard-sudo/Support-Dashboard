@@ -450,7 +450,7 @@ function mountServices() {
   const root = document.getElementById('services-root');
   if (!root || root.querySelector('iframe')) return;
   const frame = document.createElement('iframe');
-  frame.src = 'services/index.html?v=2610191442';
+  frame.src = 'services/index.html?v=2610191445';
   frame.title = 'Additional Services';
   frame.className = 'services-frame';
   root.appendChild(frame);

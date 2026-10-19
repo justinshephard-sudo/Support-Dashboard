@@ -88,31 +88,49 @@ const mrrReasonCat = (e) => {
 const mrrChurnDate = (e) => e.date || e.ym + '-01';
 const mrrAm = (e) => (e.am || '').trim() || MRR_UNASSIGNED;
 
+// The last copy lives in this browser tab (sessionStorage), so reopening the tab is instant
+// while a fresh copy loads behind it.
+const MRR_STORE = 'cs-mrr-cache';
+
 async function loadMrr(force) {
-  if (MRR.loading) return;
-  MRR.loading = true;
-  const err = document.getElementById('mrrError');
-  if (err) err.hidden = true;
-  document.getElementById('mrrRefresh')?.classList.add('spin');
-  if (!MRR.data) document.getElementById('mrrBody').innerHTML = '<div class="res-loading">Pulling MRR from Chargebee…</div>';
-  try {
-    MRR.data = await mrrCall({ action: 'load', force: !!force });
-    mrrPrepare(MRR.data);
-    renderMrr();
-  } catch (e) {
-    if (isSessionError(e)) showSessionBanner(true);
-    const box = document.getElementById('mrrError');
-    if (box) { box.textContent = 'Couldn’t load the MRR Report: ' + e.message; box.hidden = false; }
-    if (!MRR.data) document.getElementById('mrrBody').innerHTML = '';
-  } finally {
-    MRR.loading = false;
-    document.getElementById('mrrRefresh')?.classList.remove('spin');
-  }
+  if (MRR.loading) return MRR.loading;
+  const mounted = () => !!document.getElementById('mrrHero');
+  MRR.loading = (async () => {
+    document.getElementById('mrrRefresh')?.classList.add('spin');
+    if (mounted() && !MRR.data) document.getElementById('mrrBody').innerHTML = '<div class="res-loading">Pulling MRR from Chargebee…</div>';
+    try {
+      const data = await mrrCall({ action: 'load', force: !!force });
+      const changed = !MRR.data || data.built !== MRR.data.built;
+      MRR.data = data;
+      try { sessionStorage.setItem(MRR_STORE, JSON.stringify(data)); } catch (e) { /* full or private */ }
+      if (changed) { mrrPrepare(data); if (mounted()) renderMrr(); }
+      document.getElementById('mrrError')?.setAttribute('hidden', '');
+    } catch (e) {
+      if (isSessionError(e)) showSessionBanner(true);
+      const box = document.getElementById('mrrError');
+      if (box) { box.textContent = 'Couldn’t load the MRR Report: ' + e.message; box.hidden = false; }
+      if (mounted() && !MRR.data) document.getElementById('mrrBody').innerHTML = '';
+    } finally {
+      MRR.loading = null;
+      document.getElementById('mrrRefresh')?.classList.remove('spin');
+    }
+  })();
+  return MRR.loading;
+}
+
+// Called once Support has loaded: warms the MRR data so the tab opens ready.
+function prefetchMrr() {
+  if (MRR.data || MRR.loading) return;
+  try { MRR.data = JSON.parse(sessionStorage.getItem(MRR_STORE) || 'null'); } catch (e) { MRR.data = null; }
+  if (MRR.data) mrrPrepare(MRR.data);
+  loadMrr(false);
 }
 
 function openMrr() {
   if (!document.getElementById('mrrHero')) document.getElementById('mrr').innerHTML = mrrShell();
-  if (!MRR.data) loadMrr(false);
+  if (!MRR.data) prefetchMrr();
+  if (MRR.data) renderMrr();
+  else if (MRR.loading) document.getElementById('mrrBody').innerHTML = '<div class="res-loading">Pulling MRR from Chargebee…</div>';
 }
 
 function mrrShell() {

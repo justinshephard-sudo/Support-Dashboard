@@ -37,9 +37,11 @@ var GID = {
 };
 var SNAPSHOT_TAB = 'MRR Snapshot';
 var TZ = 'America/Los_Angeles';
-var MONTHS_BACK = 26;          // enough for YTD, 12-month trends and the trailing averages
+var MONTHS_BACK = 16;          // 13 months of charts + 3 trailing months for the forecasts (covers YTD too)
 var EXCLUDED_FIRMS = /cardinal law/i;
-var FRESH_MS = 10 * 60 * 1000; // the sync runs hourly, so 10 minutes is plenty fresh
+// warmMrr (a 30-minute trigger) rebuilds the copy, so viewers never wait on the sheets.
+// Without the trigger, the first viewer after REBUILD_MS rebuilds it.
+var REBUILD_MS = 70 * 60 * 1000;
 var STALE_SECONDS = 6 * 3600;
 var CHUNK = 90000;
 
@@ -68,12 +70,17 @@ function doPost(e) {
 function load_(force) {
   var cache = CacheService.getScriptCache();
   var cached = readCache_(cache);
-  if (!force && cached && Date.now() - cached.built < FRESH_MS) return cached;
+  if (!force && cached && Date.now() - (cached.checked || cached.built) < REBUILD_MS) return cached;
+  return rebuild_(cache, cached);
+}
+
+function rebuild_(cache, cached) {
   var lock = LockService.getScriptLock();
-  var locked = lock.tryLock(20000);
+  var locked = lock.tryLock(25000);
   try {
-    cached = readCache_(cache);
-    if (!force && cached && Date.now() - cached.built < FRESH_MS) return cached;
+    // Someone else may have rebuilt it while we waited for the lock.
+    var fresh = readCache_(cache);
+    if (fresh && cached && fresh.built > cached.built) return fresh;
     try {
       var data = build_();
       writeCache_(cache, data);
@@ -86,6 +93,31 @@ function load_(force) {
   } finally {
     if (locked) lock.releaseLock();
   }
+}
+
+// Trigger target: keeps a ready copy so opening the tab is just a cache read.
+// Only rebuilds when the Chargebee sync has written new data since the last build;
+// otherwise it just reads one cell and keeps the current copy alive.
+function warmMrr() {
+  var cache = CacheService.getScriptCache();
+  var cached = readCache_(cache);
+  var sync = readSyncStatus_(SpreadsheetApp.openById(MRR_SHEET_ID));
+  if (cached && sync && cached.sync && sync.lastRun && sync.lastRun === cached.sync.lastRun) {
+    cached.checked = Date.now();
+    writeCache_(cache, cached);
+    return;
+  }
+  rebuild_(cache, cached);
+}
+
+// Run once from the editor: refreshes the copy every 30 minutes (the Chargebee sync is hourly).
+function installMrrTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'warmMrr') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('warmMrr').timeBased().everyMinutes(30).create();
+  warmMrr();
+  Logger.log('warmMrr runs every 30 minutes.');
 }
 
 function writeCache_(cache, data) {
@@ -402,7 +434,10 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 
 // Run once from the editor: approves sheet + cache access and logs what the page will get.
 function checkMrr() {
+  var t = Date.now();
   var d = build_();
+  Logger.log('built in %s s', ((Date.now() - t) / 1000).toFixed(1));
+  writeCache_(CacheService.getScriptCache(), d);
   Logger.log('events %s · scheduled %s · sf %s · retention %s/%s/%s · snapshot months %s · synced %s · live from %s',
     d.events.rows.length, d.scheduled.rows.length, Object.keys(d.sf).length,
     d.retention.rate.length, d.retention.detail.length, d.retention.am.length,
