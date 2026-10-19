@@ -2940,7 +2940,7 @@ async function loadAssign(force) {
   FA.loading = true;
   const err = document.getElementById('faError');
   err.hidden = true;
-  document.getElementById('faRefresh').disabled = true;
+  document.getElementById('faRefresh')?.classList.add('spin');
   if (!FA.data) document.getElementById('faBody').innerHTML = '<div class="res-loading">Checking ChurnZero for new firms…</div>';
   try {
     FA.data = await faCall({ action: 'load', force: !!force });
@@ -2952,7 +2952,7 @@ async function loadAssign(force) {
     if (!FA.data) document.getElementById('faBody').innerHTML = '';
   } finally {
     FA.loading = false;
-    document.getElementById('faRefresh').disabled = false;
+    document.getElementById('faRefresh')?.classList.remove('spin');
   }
 }
 
@@ -3037,7 +3037,7 @@ function faFirmCard(f) {
         <div class="fa-msg${noContact ? ' err' : ''}" aria-live="polite">${noContact ? `Can’t assign yet: turn on <b>Include in Onboarding</b> for at least one contact${(f.contacts || []).length ? ` (${esc(f.contacts.map((c) => c.name).join(', '))})` : ''} in ChurnZero, then Refresh.` : ''}</div>
       </div>`;
   }
-  return `<article class="fa-firm" data-cz="${f.czId}">
+  return `<article class="fa-firm ${done ? 'is-done' : noContact ? 'is-blocked' : 'is-ready'}" data-cz="${f.czId}">
       <div class="fa-left">
         <div class="fa-firm-head">
           <h3>${esc(f.name)}</h3>
@@ -3066,41 +3066,64 @@ function renderAssign() {
   const d = FA.data;
   const body = document.getElementById('faBody');
   const queue = d.queue || [];
-  const waiting = queue.filter((f) => !FA.done[f.czId]).length;
-  document.getElementById('faSub').textContent = waiting
-    ? `${waiting} new firm${waiting === 1 ? '' : 's'} waiting for an owner. Suggestions balance open onboardings, time since each AM’s last new firm, book size and onboarding MRR.`
-    : 'All caught up — every new firm has an owner.';
-
+  const open = queue.filter((f) => !FA.done[f.czId]);
+  const ready = open.filter((f) => (f.onboardingContacts || []).length).length;
+  const blocked = open.length - ready;
   const { took = 0, judged = 0 } = d.stats || {};
+  const maxOpen = Math.max(1, ...(d.reps || []).map((r) => r.open));
+
+  document.getElementById('faHero').innerHTML = `
+    <div class="fa-hero-text">
+      <div class="loop-eyebrow">Manager mode · Onboarding</div>
+      <h2>New Firm <span>Assignment</span></h2>
+      <p>${open.length ? 'Suggestions balance open onboardings, time since each AM’s last new firm, book size and onboarding MRR.' : 'All caught up — every new firm has an owner.'}</p>
+      <div class="loop-stats">
+        <div class="loop-stat"><b>${open.length}</b><span>Waiting for an owner</span></div>
+        <div class="loop-stat s-closed"><b>${ready}</b><span>Ready to assign</span></div>
+        <div class="loop-stat s-open"><b>${blocked}</b><span>Need an onboarding contact</span></div>
+        <div class="loop-stat s-in-progress"><b>${judged ? Math.round((took / judged) * 100) + '%' : '—'}</b><span>Suggestions taken</span></div>
+      </div>
+      <div class="loop-actions"><button type="button" class="loop-btn" id="faRefresh">↻ Refresh</button></div>
+    </div>
+    <div class="fa-hero-art">
+      <div class="loop-bubble">${open.length ? `${open.length} new firm${open.length === 1 ? '' : 's'} to match up!` : 'Nothing to assign. Coffee time.'}</div>
+      <img src="assets/merlin-detective.webp" alt="Merlin the detective" loading="lazy">
+    </div>`;
 
   body.innerHTML = `
     ${d.canWrite ? '' : `<div class="fa-banner">Suggestion mode: ChurnZero write access isn’t connected yet, so use <b>Open in ChurnZero</b> to assign. Approve &amp; assign turns on once it is.</div>`}
-    <div class="fa-queue">${queue.length ? queue.map(faFirmCard).join('') : '<div class="fa-empty">No unassigned new firms in ChurnZero. 🎉</div>'}</div>
-
-    <section class="fa-section">
-      <div class="fa-section-head"><h3>Rotation</h3><span>Who suggestions pick from: AMs with at least one open onboarding. Untick someone who’s out.</span></div>
-      <form class="fa-tier" id="faTierForm">High-MRR tier: firms at
-        <label>$<input type="number" min="0" step="50" id="faTierMin" value="${esc(d.highMin)}">/mo</label> and up go only to the AMs marked High MRR, and those AMs get only those firms.
-        <button type="submit" class="mgr-btn">Save</button></form>
-      <div class="table-wrap"><table class="fa-table">
-        <thead><tr><th>In rotation</th><th>High MRR</th><th>AM</th><th>Open OBs</th><th>Last new firm</th><th>Firms</th><th>Onboarding MRR</th><th>Total MRR</th></tr></thead>
-        <tbody>${(d.reps || []).map((r) => `<tr class="${r.included ? '' : 'off'}">
-            <td><input type="checkbox" class="fa-rot" data-user="${r.id}"${r.included ? ' checked' : ''} aria-label="Include ${esc(r.name)}"></td>
-            <td><input type="checkbox" class="fa-tierrep" data-user="${r.id}"${r.high ? ' checked' : ''} aria-label="${esc(r.name)} takes high-MRR firms"></td>
-            <td>${esc(r.name)}</td><td>${r.open}</td><td>${r.lastStart ? esc(faDaysAgo(r.lastStart)) : '—'}</td>
-            <td>${r.firms}</td><td>${fmtMoney(r.openMrr)}</td><td>${fmtMoney(r.mrr)}</td></tr>`).join('')}</tbody>
-      </table></div>
+    <section class="fa-panel">
+      <div class="fa-panel-head"><h3>New firms</h3><span class="loop-count">${open.length}</span></div>
+      <div class="fa-queue">${queue.length ? queue.map(faFirmCard).join('') : '<div class="fa-empty">No unassigned new firms in ChurnZero. 🎉</div>'}</div>
     </section>
 
-    <section class="fa-section">
-      <div class="fa-section-head"><h3>Last 10 assignments</h3><span>${judged ? `Suggestion taken ${took} of ${judged} times` : 'Assignments made here show up below'}</span></div>
-      ${(d.recent || []).length ? `<div class="table-wrap"><table class="fa-table">
-        <thead><tr><th>When</th><th>Firm</th><th>Assigned</th><th>Suggested</th><th>By</th><th>ChurnZero</th></tr></thead>
-        <tbody>${d.recent.slice(0, 10).map((l) => `<tr><td>${esc(l.when)}</td><td>${esc(l.firm)}</td><td>${esc(l.assigned)}</td>
-            <td>${esc(l.suggested || '—')}${l.took === 'false' || l.took === 'FALSE' ? ' <span class="fa-flag">changed</span>' : ''}</td>
-            <td>${esc(String(l.by).split('@')[0])}</td><td>${esc(l.confirmed)}</td></tr>`).join('')}</tbody>
-      </table></div>` : ''}
-    </section>
+    <div class="fa-lower">
+      <section class="fa-panel">
+        <div class="fa-panel-head"><h3>Rotation</h3><span class="fa-panel-note">AMs with an open onboarding. Untick anyone who’s out.</span></div>
+        <form class="fa-tier" id="faTierForm">High-MRR tier: firms at
+          <label>$<input type="number" min="0" step="50" id="faTierMin" value="${esc(d.highMin)}">/mo</label>+ go only to High-MRR AMs.
+          <button type="submit" class="mgr-btn">Save</button></form>
+        <div class="fa-reps">${(d.reps || []).map((r) => `<div class="fa-rep${r.included ? '' : ' off'}">
+            <div class="fa-rep-head"><span class="fa-av">${esc(r.name.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span>
+              <span class="fa-rep-name">${esc(r.name)}${r.high ? '<span class="fa-flag fa-high">High MRR</span>' : ''}</span></div>
+            <div class="fa-rep-open"><b>${r.open}</b> open onboardings</div>
+            <div class="fa-bar"><span style="width:${Math.round((r.open / maxOpen) * 100)}%"></span></div>
+            <div class="fa-rep-facts"><span>Last new firm <b>${r.lastStart ? esc(faDaysAgo(r.lastStart)) : '—'}</b></span><span><b>${r.firms}</b> firms</span><span><b>${fmtMoney(r.openMrr)}</b> in onboarding</span></div>
+            <div class="fa-rep-toggles">
+              <label><input type="checkbox" class="fa-rot" data-user="${r.id}"${r.included ? ' checked' : ''}> In rotation</label>
+              <label><input type="checkbox" class="fa-tierrep" data-user="${r.id}"${r.high ? ' checked' : ''}> High MRR</label>
+            </div>
+          </div>`).join('')}</div>
+      </section>
+
+      <section class="fa-panel">
+        <div class="fa-panel-head"><h3>Last 10 assignments</h3>${judged ? `<span class="fa-panel-note">Suggestion taken ${took} of ${judged}</span>` : ''}</div>
+        ${(d.recent || []).length ? `<ul class="fa-recent">${d.recent.slice(0, 10).map((l) => `<li>
+            <div><b>${esc(l.firm)}</b> → ${esc(l.assigned)}${l.took === 'false' || l.took === 'FALSE' ? ` <span class="fa-flag">changed from ${esc(l.suggested || '—')}</span>` : l.took ? ' <span class="fa-chk ok">✓ suggested</span>' : ''}</div>
+            <span>${esc(l.when)} · ${esc(String(l.by).split('@')[0])}${l.confirmed && l.confirmed !== 'yes' ? ' · ' + esc(l.confirmed) : ''}</span>
+          </li>`).join('')}</ul>` : '<p class="fa-panel-note fa-pad">Assignments made here will show up here.</p>'}
+      </section>
+    </div>
     <p class="fa-foot">Live from ChurnZero · checked ${new Date(d.generated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>`;
 }
 
@@ -3147,7 +3170,7 @@ function leaveAssign() {
 }
 
 function setupAssign() {
-  document.getElementById('faRefresh').addEventListener('click', () => { FA.done = {}; loadAssign(true); });
+  document.getElementById('faHero').addEventListener('click', (e) => { if (e.target.closest('#faRefresh')) { FA.done = {}; loadAssign(true); } });
   const body = document.getElementById('faBody');
   body.addEventListener('click', (e) => {
     const btn = e.target.closest('.fa-assign');
