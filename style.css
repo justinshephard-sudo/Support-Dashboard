@@ -743,3 +743,6 @@ body.drill-open{overflow:hidden}
 .loop-hero-art .loop-bubble{left:-175px;top:30px;right:auto}
 .loop-hero-art .loop-bubble::after{right:-8px;left:auto;bottom:auto;top:50%;margin-top:-8px;border:8px solid transparent;border-left-color:#fff;border-right:none}
 @media (max-width:720px){.loop-hero-art .loop-bubble{left:0;top:-10px}.loop-hero-art .loop-bubble::after{right:26px;top:auto;bottom:-8px;margin-top:0;border:8px solid transparent;border-top-color:#fff;border-bottom:none}}
+/* New Firm Assignment bubble: to the left of teacher Merlin's hat, tail pointing at him */
+.fa-hero-art .loop-bubble{left:-170px;top:36px;right:auto}
+.fa-hero-art .loop-bubble::after{right:-8px;left:auto;bottom:auto;top:50%;margin-top:-8px;border:8px solid transparent;border-left-color:#fff;border-right:none}
