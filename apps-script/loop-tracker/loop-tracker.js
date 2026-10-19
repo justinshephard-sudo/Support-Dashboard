@@ -3,7 +3,7 @@
    --------------------------------------------------------------------------
    Reads and writes the Notion "Team Loop Tracker" database for the weekly
    close-the-loop meeting. Everyone signed in to the dashboard (@lawmatics.com)
-   can read the items (Notes and page text are managers only); only MANAGERS can change status, edit fields or add items.
+   can read the items and Notes (the item's page text is managers only); only MANAGERS can change status, edit fields or add items.
 
    Notion access is a public integration authorized once with OAuth:
      1. Script Properties: NOTION_CLIENT_ID, NOTION_CLIENT_SECRET.
@@ -216,8 +216,6 @@ function doPost(e) {
     if (b.action === 'load') {
       var d = load_();
       d.canEdit = who.manager;
-      // Notes and page text are for managers; everyone else sees the item, status and outcome.
-      if (!who.manager) d.items = d.items.map(function (it) { var c = JSON.parse(JSON.stringify(it)); c.notes = ''; return c; });
       return json_(d);
     }
     if (b.action === 'page') {

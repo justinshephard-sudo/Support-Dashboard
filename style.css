@@ -683,3 +683,4 @@ body.drill-open{overflow:hidden}
 .loop-ro p{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}
 .loop-form-actions{display:flex;align-items:center;gap:12px}
 @media (max-width:620px){.loop-grid{grid-template-columns:1fr}.loop-pill{min-width:0}.loop-row{flex-direction:column;gap:6px}}
+.loop-notes{display:block!important;font-size:14.5px;color:var(--text-1);white-space:pre-wrap;line-height:1.5}

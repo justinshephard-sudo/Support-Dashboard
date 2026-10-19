@@ -3357,6 +3357,7 @@ function loopFillPanel(it, keepText) {
           ${it.outcome ? `<span class="loop-tag">${esc(it.outcome)}</span>` : ''}
           ${it.type ? `<span class="loop-tag">${esc(it.type)}</span>` : ''}
           ${it.raisedBy ? `<span class="loop-tag">${esc(it.raisedBy)}</span>` : ''}</p>
+        ${it.notes ? `<p class="loop-notes">${esc(it.notes)}</p>` : '<p class="loop-muted">No notes yet.</p>'}
         <div class="loop-facts">${facts}</div>
       </div>`;
   }
