@@ -268,7 +268,11 @@ function renderMrr() {
   const when = synced ? synced.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   const syncTxt = (synced ? `Synced from Chargebee ${when}` : 'Sync time unknown') +
     (st.failed ? ' — the latest sync failed, so some numbers may be out of date.' : old ? ' — over 5 hours ago, so the sync may have stopped.' : '');
-  const bubble = t.net >= 0 ? `Up ${mrrMoney(t.net)} so far this month!` : `${mrrMoney(t.net)} so far — ${mrrPlural(t.schedN, 'firm')} already scheduled to leave.`;
+  // Merlin's mood follows the month: flush when net is up, sweating the receipts when it's down.
+  const art = t.net >= 0
+    ? { src: 'assets/merlin-money.webp', h: 511, alt: 'Merlin in a gold chain, throwing cash' }
+    : { src: 'assets/merlin-receipts.webp', h: 572, alt: 'Merlin sweating over a fistful of cash and a long receipt' };
+  const bubble = t.net >= 0 ? `Up ${mrrMoney(t.net)} so far this month!` : `Down ${mrrMoney(t.net)} so far — ${mrrPlural(t.schedN, 'firm')} already scheduled to leave.`;
 
   document.getElementById('mrrHero').innerHTML = `
     <div class="fa-hero-text">
@@ -288,7 +292,7 @@ function renderMrr() {
     </div>
     <div class="fa-hero-art">
       <div class="loop-bubble">${esc(bubble)}</div>
-      <img src="assets/merlin-receipts.webp" width="520" height="572" alt="Merlin sweating over a fistful of cash and a long receipt" loading="lazy">
+      <img src="${art.src}" width="520" height="${art.h}" alt="${art.alt}" loading="lazy">
     </div>`;
 
   const chips = MRR_CATS.map((c) => `<button type="button" class="mrr-chip c-${c.key}" data-drill="cat" data-cat="${c.key}" data-ym="${cur}">
