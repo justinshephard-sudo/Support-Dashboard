@@ -16,7 +16,9 @@
     CFG, MOCK, EMBED, APPROVALS_TEST,
     user: null, idToken: null, accessToken: null, config: null,
     $: (id) => document.getElementById(id),
-    esc: (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])),
+    esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
+    // Data-driven links must be http(s); anything else becomes a dead link. Returns an escaped value.
+    safeUrl: (u) => (/^https?:\/\//i.test(String(u || "").trim()) ? IS.esc(String(u).trim()) : "#"),
     money: (n) => "$" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 }),
     fmtDate: (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     // "2026-10-05" → "Oct 5" (or with year if not this year)

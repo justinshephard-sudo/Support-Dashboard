@@ -1,3 +1,6 @@
+// Don't let other sites embed the dashboard in a frame (clickjacking); GitHub Pages can't send frame-ancestors.
+if (window.top !== window.self) { try { window.top.location = window.self.location.href; } catch (e) { document.documentElement.innerHTML = ''; } }
+
 // Old "Support Team Report 2026" sheet — kept ONLY for the Accounts tab (firm lookup,
 // written by the ChurnZero Apps Script) and the incentive Overrides tab/webapp.
 const SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
@@ -6,8 +9,6 @@ const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
 const ANNUAL_GID = '1501069044';
 const QUARTERLY_GID = '1582468207';
 const OVERRIDES_GID = '1979946321';
-const OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g/exec';
-const OVERRIDES_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 // Web app that writes manager cell-corrections to the NEW sheet's Overrides tab.
 // Deploy apps-script/data-overrides.gs on CS Report Master and paste its /exec URL here.
 const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxcel6P0QYZm8m3FKYDFtOOBLpRL6_KvrmIcS5ShrAbuTUPFXSrLtQ3SLDhrDeg6-pSww/exec';
@@ -100,7 +101,10 @@ const MONTH_NAMES = MONTH_TABS.map((m) => m.name);
 const AUTH = { token: null, email: null, tokenClient: null, gidTitle: {}, expiresAt: 0 };
 window.AUTH = AUTH;   // the embedded Additional Services app (services/) reuses this sign-in
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Links that come from data (ChurnZero, Notion, sheets, Drive) must be http(s); anything
+// else (javascript:, data:, …) becomes a dead link. Returns an escaped attribute value.
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '').trim()) ? esc(String(u).trim()) : '#');
 
 function gateError(msg) {
   const el = document.getElementById('gateError');
@@ -177,6 +181,7 @@ async function sheetsApi(path, sheetId = SHEET_ID) {
   const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + path, {
     headers: { Authorization: 'Bearer ' + AUTH.token },
   });
+  if (res.status === 401) { showSessionBanner(true); throw new Error('session expired (Sheets API HTTP 401)'); }
   if (!res.ok) throw new Error('Sheets API HTTP ' + res.status);
   return res.json();
 }
@@ -685,8 +690,8 @@ function renderTiles(containerId, tiles, deltaLabel = 'vs last mo') {
       deltaHtml = `<div class="tile-delta" style="color:${color};font-size:.8em;font-weight:600;margin-top:2px;">`
         + `${arrow} ${Math.abs(delta.pct).toFixed(1)}% <span style="opacity:.6;font-weight:400;">${deltaLabel}</span></div>`;
     }
-    div.innerHTML = `<span class="icon">${icon}</span><div class="label">${label}</div>`
-      + `<div class="value">${value != null ? value : '–'}</div>${deltaHtml}`
+    div.innerHTML = `<span class="icon">${icon}</span><div class="label">${esc(label)}</div>`
+      + `<div class="value">${value != null ? esc(value) : '–'}</div>${deltaHtml}`
       + (sub ? `<div class="tile-sub">${esc(sub)}</div>` : '');
     if (onEdit) {
       div.classList.add('tile-editable');
@@ -800,20 +805,6 @@ function parseOverridesSheet(rows) {
   return map;
 }
 
-async function postOverride(monthKey, incentiveKey, winnerName, statText) {
-  await fetch(OVERRIDES_WEBAPP_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({
-      secret: OVERRIDES_SECRET,
-      monthKey,
-      incentiveKey,
-      winnerName: winnerName || '',
-      statText: statText || '',
-    }),
-  });
-}
-
 let overridesUnlocked = false;
 let currentIncentiveMembers = [];
 let currentIncentiveMonthKey = null;
@@ -824,12 +815,7 @@ let overridesMap = new Map();
 let incentiveMetaMap = new Map();
 
 async function postIncentiveMeta(monthKey, incentiveKey, field, value) {
-  await fetch(DATA_OVERRIDES_WEBAPP_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: OVERRIDES_SECRET, month: monthKey, table: 'Incentive', rep: incentiveKey, column: field, value: value || '', note: '' }),
-  });
-  return { ok: true };
+  return postDataOverride(monthKey, 'Incentive', incentiveKey, field, value || '', '');
 }
 const overridePostTimers = new Map();
 
@@ -1075,15 +1061,37 @@ function setupManagerToggle() {
 let currentMonthName = null;
 let PARSED_BY_MONTH = {};   // month name (lowercase) -> parsed, for month-over-month deltas
 
+// Manager corrections. The web app checks the viewer's Google sign-in and that
+// they're a manager; a failed save is shown instead of silently dropped.
 async function postDataOverride(month, table, rep, column, value, note) {
-  // Fire-and-forget, matching postOverride: Apps Script responses are cross-origin
-  // opaque, so we don't read the body — a resolved fetch means the request was sent.
-  await fetch(DATA_OVERRIDES_WEBAPP_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: OVERRIDES_SECRET, month, table, rep, column, value, note }),
-  });
-  return { ok: true };
+  try {
+    const res = await fetch(DATA_OVERRIDES_WEBAPP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ token: AUTH.token, month, table, rep, column, value, note }),
+    });
+    const out = await res.json();
+    if (!out.ok) throw new Error(out.error || 'Save failed');
+    return out;
+  } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
+    showSaveError(e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+function showSaveError(msg) {
+  let t = document.getElementById('saveToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'saveToast';
+    t.className = 'save-toast';
+    t.setAttribute('role', 'alert');
+    document.body.appendChild(t);
+  }
+  t.textContent = 'Couldn’t save: ' + msg;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.remove(), 6000);
 }
 
 function closeCellEditor() {
@@ -1102,7 +1110,7 @@ function openCellEditor(member, col, td) {
   const pop = document.createElement('div');
   pop.id = 'cell-override-editor';
   pop.innerHTML =
-    `<div class="coe-title">${member.name} · ${col.label} <span class="coe-sub">${month}</span></div>` +
+    `<div class="coe-title">${esc(member.name)} · ${esc(col.label)} <span class="coe-sub">${esc(month)}</span></div>` +
     `<div class="coe-row"><select id="coe-mode"><option value="adjust">Adjust by</option><option value="set">Set to</option></select>` +
     `<input id="coe-value" type="text" placeholder="-1" /></div>` +
     `<input id="coe-note" type="text" placeholder="Reason (e.g. 1 excused by manager)" />` +
@@ -1973,18 +1981,18 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
 async function main() {
   try {
     setupCelebrate();
-    await loadGidTitleMap();
-    initFirmLookup().catch((err) => console.error('Firm lookup load failed', err));
-    initImplementation().catch((err) => console.error('Implementation load failed', err));
     // Warm up Additional Services in the background (its backend is slow to start), so the
     // tab is usually ready by the time someone clicks it.
     const warmServices = () => mountServices();
     setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(warmServices, { timeout: 4000 }) : warmServices()), 1500);
 
-    await loadReportTables();
-    await fetchSheet(OVERRIDES_GID)
-      .then((rows) => { overridesMap = parseOverridesSheet(rows); })
-      .catch((err) => console.error('Failed to load incentive overrides', err));
+    // Everything the Support tab needs, in parallel.
+    await Promise.all([
+      loadReportTables(),
+      fetchTitleFrom(SHEET_ID, 'Overrides')
+        .then((rows) => { overridesMap = parseOverridesSheet(rows); })
+        .catch((err) => console.error('Failed to load incentive overrides', err)),
+    ]);
     const monthResults = MONTH_TABS.map((m) => ({ ...m, parsed: buildMonthParsed(m.name) }));
     PARSED_BY_MONTH = {};
     monthResults.forEach((m) => { PARSED_BY_MONTH[m.name.toLowerCase()] = m.parsed; });
@@ -2029,6 +2037,9 @@ async function main() {
     });
 
     document.getElementById('last-updated').textContent = `Data loaded ${new Date().toLocaleString()}`;
+    // Firm Lookup and Implementation load when first opened, or quietly once the Support tab is up.
+    const prefetch = () => { ensureTabData('impl'); ensureTabData('firm'); };
+    setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(prefetch, { timeout: 5000 }) : prefetch()), 2500);
     setupManagerToggle();   // shows the toggle for allowlisted managers; restores per-tab state
     launchConfetti();
   } catch (err) {
@@ -2056,6 +2067,7 @@ function sheetObjects(rows) {
 }
 
 async function initImplementation() {
+  showSyncNote('implSync', 'Implementation');
   try {
     const [monthly, open, events] = await Promise.all([
       fetchSheetByTitle('Impl - Monthly'),
@@ -2490,7 +2502,7 @@ function mountServices() {
   const root = document.getElementById('services-root');
   if (!root || root.querySelector('iframe')) return;
   const frame = document.createElement('iframe');
-  frame.src = 'services/index.html?v=16';
+  frame.src = 'services/index.html?v=17';
   frame.title = 'Additional Services';
   frame.className = 'services-frame';
   root.appendChild(frame);
@@ -2977,8 +2989,8 @@ function faReadiness(f) {
 function faNotes(f) {
   const blocks = [['Intake process', f.notes.intake],
     ['Key challenges', f.notes.challenges], ['AI demo notes', f.notes.aiDemo]].filter(([, v]) => v);
-  const links = [f.links.deck && `<a href="${esc(f.links.deck)}" target="_blank" rel="noopener">Onboarding deck ↗</a>`,
-    f.links.docs && `<a href="${esc(f.links.docs)}" target="_blank" rel="noopener">Docs folder ↗</a>`].filter(Boolean).join(' · ');
+  const links = [f.links.deck && `<a href="${safeUrl(f.links.deck)}" target="_blank" rel="noopener">Onboarding deck ↗</a>`,
+    f.links.docs && `<a href="${safeUrl(f.links.docs)}" target="_blank" rel="noopener">Docs folder ↗</a>`].filter(Boolean).join(' · ');
   if (!blocks.length && !links) return '<p class="fa-nonotes">Nothing from sales on this account yet — check with the AE before assigning.</p>';
   return `<details class="fa-notes"><summary>Notes from sales</summary>
       ${blocks.map(([k, v]) => `<h4>${esc(k)}</h4><p>${esc(v)}</p>`).join('')}
@@ -3247,11 +3259,13 @@ function updateAssignButton() {
    close-the-loop meeting. Everyone can read; managers change status with one
    click, open an item to edit it, or add one. Reads and writes go through
    apps-script/loop-tracker, which holds the Notion connection. The last list is
-   kept in this browser so the view opens instantly; ↻ Refresh pulls the latest.
+   kept for this browser tab so the view opens instantly; ↻ Refresh pulls the latest.
    ========================================================================== */
 const LOOP_URL = 'https://script.google.com/macros/s/AKfycbxQVzKZdB8ecIFscQUDX3uoL8CCzzH1qFiL3VtfJymAAwZPGulkn34MQi2sLt-b7NdN/exec';
 const LOOP_NOTION_URL = 'https://www.notion.so/e4a103fc90624ce1b0396a50fc9e76f8';
 const LOOP_STORE = 'cs-loop-cache';
+// The copy lives only for this browser tab (sessionStorage); clear any older long-lived copy.
+try { localStorage.removeItem(LOOP_STORE); } catch (e) { /* private mode */ }
 const LOOP_GROUPS = [
   { status: 'Open', title: 'Open' },
   { status: 'In Progress', title: 'In Progress' },
@@ -3274,7 +3288,7 @@ async function loadLoop(force) {
   if (LOOP.loading || !AUTH.token) return;
   const root = document.getElementById('loop');
   if (!LOOP.data) {
-    try { LOOP.data = JSON.parse(localStorage.getItem(LOOP_STORE) || 'null'); } catch (e) { /* private mode */ }
+    try { LOOP.data = JSON.parse(sessionStorage.getItem(LOOP_STORE) || 'null'); } catch (e) { /* private mode */ }
     if (LOOP.data) { LOOP.data.canEdit = false; LOOP.note = 'Showing your last copy — checking Notion…'; renderLoop(); }
     else root.innerHTML = '<div class="res-loading">Loading the Loop Tracker…</div>';
   }
@@ -3286,7 +3300,7 @@ async function loadLoop(force) {
       const data = await loopCall({ action: 'load', force: !!force });
       LOOP.data = data;
       LOOP.note = data.stale ? `Notion didn’t answer, so this is the list from ${new Date(data.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Try Refresh in a minute.` : '';
-      try { localStorage.setItem(LOOP_STORE, JSON.stringify(data)); } catch (e) { /* full or private */ }
+      try { sessionStorage.setItem(LOOP_STORE, JSON.stringify(data)); } catch (e) { /* full or private */ }
       lastErr = null;
       break;
     } catch (e) {
@@ -3455,7 +3469,7 @@ async function loopOpenPanel(id) {
   wrap.innerHTML = `<div class="drill loop-drill" id="loopPanel" role="dialog" aria-modal="true" aria-label="Loop item">
       <div class="drill-head">
         <div><h3>${LOOP.data.canEdit ? 'Edit item' : esc(it.item)}</h3>
-          <a class="drill-note" href="${esc(it.url)}" target="_blank" rel="noopener">Open in Notion ↗</a></div>
+          <a class="drill-note" href="${safeUrl(it.url)}" target="_blank" rel="noopener">Open in Notion ↗</a></div>
         <button type="button" class="drill-close" aria-label="Close">×</button>
       </div>
       <div class="drill-body"></div>
@@ -3489,7 +3503,7 @@ async function loopOpenPanel(id) {
       const page = document.querySelector('#loopPanel .loop-page');
       if (page) page.innerHTML = res.lines.length
         ? '<h4>From Notion</h4>' + res.lines.map((l) => l.href
-          ? `<p><a href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.text || l.href)}</a></p>`
+          ? `<p><a href="${safeUrl(l.href)}" target="_blank" rel="noopener">${esc(l.text || l.href)}</a></p>`
           : `<p class="${l.heading ? 'h' : ''}">${esc(l.text)}</p>`).join('')
         : '';
     } catch (e) {
@@ -3653,8 +3667,8 @@ async function loadRoundup() {
 
 // "▶ Video Demo" when the row has a video link, plus any other link columns. Nothing when there are none.
 function roundupButtons(x) {
-  const b = (x.video ? [`<a class="ru-video" href="${esc(x.video)}" target="_blank" rel="noopener">▶ Video Demo</a>`] : [])
-    .concat(x.links.map(([label, url]) => `<a class="ru-more" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`));
+  const b = (x.video ? [`<a class="ru-video" href="${safeUrl(x.video)}" target="_blank" rel="noopener">▶ Video Demo</a>`] : [])
+    .concat(x.links.map(([label, url]) => `<a class="ru-more" href="${safeUrl(url)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`));
   return b.length ? `<span class="ru-btns">${b.join('')}</span>` : '';
 }
 
@@ -3934,7 +3948,7 @@ function resCard(f, opts = {}) {
       + `<button type="button" class="res-act${hidden ? ' on' : ''}" data-act="hide" data-id="${esc(f.id)}">${hidden ? 'Hidden' : 'Hide'}</button></div>`
     : '';
   const flag = !overridesUnlocked && pinned && !opts.inPinned ? '<span class="res-pin-badge" title="Pinned">★</span>' : '';
-  return `<a class="res-card${hidden || f.junk || f.superseded ? ' is-hidden' : ''}" href="${esc(f.url)}" target="_blank" rel="noopener">
+  return `<a class="res-card${hidden || f.junk || f.superseded ? ' is-hidden' : ''}" href="${safeUrl(f.url)}" target="_blank" rel="noopener">
       ${flag}<span class="res-ico ${f.kind}" aria-hidden="true">${f.label}</span>
       <span class="res-main"><span class="res-title">${esc(f.name)}</span>
         <span class="res-path" style="display:block">${esc(where)}</span>
@@ -4046,11 +4060,7 @@ function resToggleFlag(id, kind) {
     value = on ? '1' : '';
   }
   renderResources();
-  scheduleOverridePost(`resource:${id}:${kind}`, () => fetch(DATA_OVERRIDES_WEBAPP_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: OVERRIDES_SECRET, month: 'all', table: 'Resource', rep: id, column: kind, value, note: '' }),
-  }));
+  scheduleOverridePost(`resource:${id}:${kind}`, () => postDataOverride('all', 'Resource', id, kind, value, ''));
 }
 
 function setupResources() {
@@ -4090,7 +4100,36 @@ function openResources() {
    ========================================================================== */
 const FIRMS = { list: [], loaded: false, contracts: new Map() };   // contracts: 'id:'/'name:' key -> newest-first list
 
+/* Sync Status tab (written by the daily Apps Script syncs): shows when each data
+   set was last refreshed, and warns if a sync failed or is more than a day old. */
+let SYNC_STATUS = null;
+function loadSyncStatus() {
+  if (!SYNC_STATUS) {
+    SYNC_STATUS = fetchSheetByTitle('Sync Status').then((rows) => {
+      const m = new Map();
+      rows.slice(1).forEach((r) => m.set(r[0], { lastOk: r[1], lastRun: r[2], result: r[3], error: r[6] || '' }));
+      return m;
+    }).catch(() => new Map());
+  }
+  return SYNC_STATUS;
+}
+async function showSyncNote(elId, name) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const st = (await loadSyncStatus()).get(name);
+  if (!st) return;
+  const fmt = (v) => { const d = new Date(String(v).replace(' ', 'T')); return isNaN(d) ? v : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+  const age = st.lastOk ? (Date.now() - new Date(String(st.lastOk).replace(' ', 'T'))) / 36e5 : Infinity;
+  const bad = st.result !== 'OK' || age > 36;
+  el.className = 'sync-note' + (bad ? ' bad' : '');
+  el.textContent = bad
+    ? `⚠ ChurnZero sync ${st.result !== 'OK' ? 'failed' : 'is late'}${st.error ? ` (${st.error})` : ''}. Data is from ${st.lastOk ? fmt(st.lastOk) : 'an earlier run'}.`
+    : `Synced from ChurnZero ${fmt(st.lastOk)}`;
+  el.hidden = false;
+}
+
 async function initFirmLookup() {
+  showSyncNote('firmSync', 'Accounts (Firm Lookup)');
   const input = document.getElementById('q');
   const emptyMsg = document.getElementById('firmEmptyMsg');
   const cnt = document.getElementById('firmCount');
@@ -4373,6 +4412,16 @@ function openFirm(firmId, name) {
 /* ==========================================================================
    Tabs, theme, and auth bootstrap
    ========================================================================== */
+// Tabs whose data loads on first use (each loader runs once).
+const TAB_LOADERS = { firm: () => initFirmLookup(), impl: () => initImplementation() };
+const TAB_LOADED = {};
+function ensureTabData(tab) {
+  if (!TAB_LOADED[tab] && TAB_LOADERS[tab]) {
+    TAB_LOADED[tab] = TAB_LOADERS[tab]().catch((err) => console.error(tab + ' load failed', err));
+  }
+  return TAB_LOADED[tab] || Promise.resolve();
+}
+
 function setupTabs() {
   document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
@@ -4381,7 +4430,8 @@ function setupTabs() {
     const v = document.getElementById('view-' + t.dataset.tab);
     if (v) v.classList.add('active');
     if (t.dataset.tab === 'firm') { const q = document.getElementById('q'); if (q) q.focus(); }
-    if (t.dataset.tab === 'impl') drawImplCharts();
+    if (t.dataset.tab === 'firm') ensureTabData('firm');
+    if (t.dataset.tab === 'impl') ensureTabData('impl').then(drawImplCharts);
     if (t.dataset.tab === 'services') mountServices();
     if (t.dataset.tab === 'resources') openResources();
   }));

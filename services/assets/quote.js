@@ -426,11 +426,11 @@ To approve, reply "Approved" to this email. This quote is valid for ${IS.config.
       $("success").hidden = false;
       const sent = action === "sendQuote"
         ? `<span>Quote emailed to <strong>${esc(res.emailedTo)}</strong>${res.test ? " (practice mode: sent to you instead of the customer)" : ""}. The approval link is valid until ${esc(fmtDate(new Date(res.validUntil + "T12:00:00")))}.</span>
-           ${res.test && res.approvalUrl && res.approvalUrl !== "#" ? `<a href="${esc(res.approvalUrl)}" target="_blank" rel="noopener">Open the approval page ↗</a>` : ""}`
+           ${res.test && res.approvalUrl && res.approvalUrl !== "#" ? `<a href="${IS.safeUrl(res.approvalUrl)}" target="_blank" rel="noopener">Open the approval page ↗</a>` : ""}`
         : "";
       $("success").innerHTML = `<strong>Card created in Quote Sent.</strong>
         <span>${esc(res.task.name)} · ${esc(res.quoteId)}</span>${sent}
-        ${res.task.url && res.task.url !== "#" ? `<a href="${esc(res.task.url)}" target="_blank" rel="noopener">Open in Asana ↗</a>` : "<span>(Test mode: nothing was written to Asana.)</span>"}
+        ${res.task.url && res.task.url !== "#" ? `<a href="${IS.safeUrl(res.task.url)}" target="_blank" rel="noopener">Open in Asana ↗</a>` : "<span>(Test mode: nothing was written to Asana.)</span>"}
         <span><button class="linkbtn" type="button" id="viewOnBoard">See it on the Builds board</button> · <button class="linkbtn" type="button" id="newQuote">Start a new quote</button></span>`;
       $("newQuote").addEventListener("click", resetForm);
       $("viewOnBoard").addEventListener("click", () => { resetForm(); IS.showTab("builds"); IS.board.load(true); });

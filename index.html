@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=64">
+<link rel="stylesheet" href="style.css?v=65">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -16,8 +16,8 @@
 <!-- ===================== SIGN-IN GATE ===================== -->
 <div class="gate" id="gate">
   <div class="gate-card">
-    <img class="gate-merlin" src="assets/merlin-confetti.webp" alt="Merlin, the Lawmatics wizard, celebrating">
-    <div class="gate-logo-chip"><img class="gate-logo" src="assets/logo-wordmark.png" alt="Lawmatics"></div>
+    <img width="480" height="482" class="gate-merlin" src="assets/merlin-confetti.webp" alt="Merlin, the Lawmatics wizard, celebrating">
+    <div class="gate-logo-chip"><img width="556" height="179" class="gate-logo" src="assets/logo-wordmark.png" alt="Lawmatics"></div>
     <h2>CS Dashboard</h2>
     <p>Sign in with your <b>@lawmatics.com</b> Google account to view the CS Dashboard.</p>
     <button class="gate-btn" id="gateBtn">
@@ -34,7 +34,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="./" aria-label="CS Dashboard home">
-        <img class="brand-logo" src="assets/logo-wordmark.png" alt="Lawmatics">
+        <img width="556" height="179" class="brand-logo" src="assets/logo-wordmark.png" alt="Lawmatics">
         <span class="brand-divider" aria-hidden="true"></span>
         <span class="brand-name">CS Dashboard</span>
       </a>
@@ -53,7 +53,7 @@
       <h1>Customer success, <span class="grad-text">at a glance</span></h1>
       <p class="hero-sub">Support, implementation, services, and firm context — all in one place.</p>
       <button class="hero-merlin" id="heroMerlin" type="button" title="Merlin wears different hats — click to swap">
-        <img src="assets/merlin-dog.webp" alt="Merlin, the Lawmatics wizard, playing with a boxer pup">
+        <img width="460" height="395" src="assets/merlin-dog.webp" alt="Merlin, the Lawmatics wizard, playing with a boxer pup">
       </button>
       <nav class="tabbar">
         <button class="tab active" data-tab="team">
@@ -106,7 +106,7 @@
 
       <section class="section">
         <div class="section-head"><h2>Monthly Incentives</h2><span class="rule"></span>
-          <div class="merlin-callout"><span class="merlin-bubble">Yeehaw! Roundin’ up this month’s winners.</span><img src="assets/merlin-lasso.webp" alt="Merlin in a cowboy hat, twirling a lasso"></div>
+          <div class="merlin-callout"><span class="merlin-bubble">Yeehaw! Roundin’ up this month’s winners.</span><img loading="lazy" decoding="async" width="440" height="474" src="assets/merlin-lasso.webp" alt="Merlin in a cowboy hat, twirling a lasso"></div>
         </div>
         <div class="incentives-grid">
           <div class="incentive-card" data-incentive="speed" style="--ac:var(--slot-5)">
@@ -173,7 +173,7 @@
 
       <section class="section">
         <div class="section-head"><h2>Phones</h2><span class="rule"></span>
-          <div class="merlin-callout"><span class="merlin-bubble">Headset on — who’s next in the queue?</span><img src="assets/merlin-headset.webp" alt="Merlin in a headset, typing on a laptop"></div>
+          <div class="merlin-callout"><span class="merlin-bubble">Headset on — who’s next in the queue?</span><img loading="lazy" decoding="async" width="260" height="351" src="assets/merlin-headset.webp" alt="Merlin in a headset, typing on a laptop"></div>
         </div>
         <div id="phone-tiles" class="tiles"></div>
         <div class="panel section-panel split-panel" id="phone-split"></div>
@@ -217,6 +217,7 @@
   <div class="view" id="view-impl">
     <div class="meta-line">
       <span id="impl-updated" class="muted">Loading…</span>
+      <span class="sync-note" id="implSync" hidden></span>
       <span class="meta-sel">
         <label for="impl-month">Month</label>
         <select id="impl-month" class="fb-select"></select>
@@ -228,14 +229,14 @@
 
       <section class="section">
         <div class="section-head"><h2>By Rep</h2><span class="rule"></span><span class="note">ChurnZero account manager · click a column to sort</span>
-          <div class="merlin-callout"><span class="merlin-bubble">Rock on — here’s the lineup!</span><img src="assets/merlin-guitar.webp" alt="Merlin in sunglasses, rocking out on an electric guitar"></div>
+          <div class="merlin-callout"><span class="merlin-bubble">Rock on — here’s the lineup!</span><img loading="lazy" decoding="async" width="260" height="261" src="assets/merlin-guitar.webp" alt="Merlin in sunglasses, rocking out on an electric guitar"></div>
         </div>
         <div class="panel"><div class="table-wrap"><table id="impl-reps"><thead></thead><tbody></tbody></table></div></div>
       </section>
 
       <section class="section">
         <div class="section-head"><h2>Onboarding Stages</h2><span class="rule"></span><span class="note">Open onboardings by current call</span>
-          <div class="merlin-callout"><span class="merlin-bubble">Helping every firm grow, one call at a time.</span><img src="assets/merlin-watering.webp" alt="Merlin watering a potted plant"></div>
+          <div class="merlin-callout"><span class="merlin-bubble">Helping every firm grow, one call at a time.</span><img loading="lazy" decoding="async" width="260" height="335" src="assets/merlin-watering.webp" alt="Merlin watering a potted plant"></div>
         </div>
         <div class="panel" id="impl-stages"></div>
       </section>
@@ -298,7 +299,7 @@
   <div class="view" id="view-csm">
     <div class="wrap">
       <div class="construction">
-        <img src="assets/merlin-construction.webp" alt="Merlin in a hard hat and safety vest, giving a thumbs up">
+        <img loading="lazy" decoding="async" width="420" height="427" src="assets/merlin-construction.webp" alt="Merlin in a hard hat and safety vest, giving a thumbs up">
         <div class="eyebrow">Coming soon</div>
         <h2>The CSM page is under construction</h2>
         <p>Merlin’s on the job. Check back soon for each CSM’s book of business.</p>
@@ -310,7 +311,7 @@
   <div class="view" id="view-resources">
     <div class="wrap">
       <div class="lookup-head res-head">
-        <img class="res-merlin" src="assets/merlin-scientist.webp" alt="Merlin in a lab coat, holding a flask and a clipboard">
+        <img loading="lazy" decoding="async" width="260" height="324" class="res-merlin" src="assets/merlin-scientist.webp" alt="Merlin in a lab coat, holding a flask and a clipboard">
         <h2>Resources</h2>
         <p>Guides, processes, and training from the CS Knowledge Base — always the latest version.</p>
       </div>
@@ -356,8 +357,9 @@
         </div>
         <div class="results" id="results"></div>
       </div>
+      <p class="sync-note" id="firmSync" hidden></p>
       <div class="empty" id="firmEmpty">
-        <img class="merlin-look" src="assets/merlin-detective.webp" alt="Merlin the detective, magnifying glass in hand">
+        <img loading="lazy" decoding="async" width="320" height="341" class="merlin-look" src="assets/merlin-detective.webp" alt="Merlin the detective, magnifying glass in hand">
         <div id="firmEmptyMsg">Start typing a firm name to pull up their profile.</div>
       </div>
       <div class="profile" id="profile"></div>
@@ -367,7 +369,7 @@
   <p class="foot">CS Dashboard · Lawmatics Customer Success</p>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=71"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt" crossorigin="anonymous" defer></script>
+<script src="app.js?v=73" defer></script>
 </body>
 </html>

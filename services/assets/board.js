@@ -222,7 +222,7 @@
           <label class="f">Close reason<select id="e_closeReason">${opt(cfg.closeReasons, r.closeReason, "—")}</select></label>
           <div class="savebar full">
             <button class="btn primary" type="submit" id="eSave" disabled>Save changes</button>
-            <a class="btn small" href="${esc(r.url)}" target="_blank" rel="noopener">Open in Asana ↗</a>
+            <a class="btn small" href="${IS.safeUrl(r.url)}" target="_blank" rel="noopener">Open in Asana ↗</a>
             <span class="toast" id="eToast" role="status"></span>
           </div>
         </form>
@@ -239,7 +239,7 @@
           ${kv("Practice area", r.practiceArea)}
           ${kv("Quote valid until", r.validUntil && shortDate(r.validUntil))}
           ${r.approval ? kv("Approval", approvalText(r.approval)) : ""}
-          ${r.approval && r.approval.certificateUrl ? `<dt>Certificate</dt><dd><a href="${esc(r.approval.certificateUrl)}" target="_blank" rel="noopener">Open in Google Drive ↗</a></dd>` : ""}
+          ${r.approval && r.approval.certificateUrl ? `<dt>Certificate</dt><dd><a href="${IS.safeUrl(r.approval.certificateUrl)}" target="_blank" rel="noopener">Open in Google Drive ↗</a></dd>` : ""}
         </dl>
         ${r.notes ? `<pre class="notes">${esc(r.notes)}</pre>` : ""}
       </section>

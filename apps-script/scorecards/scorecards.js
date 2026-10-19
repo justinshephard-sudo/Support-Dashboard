@@ -19,8 +19,6 @@
    ========================================================================== */
 
 var SCORECARD_SHEET_ID = '1j3Ry-8pZI_ccdl_AJoNTdTumXIcF8djRhlUFOaU4dq4';
-var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com';
-var MANAGERS = ['justin.shephard@lawmatics.com', 'erika@lawmatics.com', 'johnny@lawmatics.com', 'clare@lawmatics.com'];
 var OVERVIEW_TAB = '📊 Team Overview';
 var TEMPLATE_TAB = 'Template';
 var LAYOUT_VERSION = '2';
@@ -129,7 +127,7 @@ function set_(b, email) {
       if (col === 'B' || col === 'E') range.setNumberFormat('0%');
       if (col === 'C' || col === 'D' && isMonth) range.setNumberFormat('[h]:mm');
     } else {
-      range.setValue(String(v).slice(0, 5000));
+      range.setValue(dashSafe_(String(v).slice(0, 5000)));
     }
     // Who changed what, as a cell note, so the sheet documents itself.
     range.setNote((v === '' || v == null ? 'Cleared' : 'Set') + ' by ' + email + ' via CS Dashboard, ' +
@@ -165,9 +163,9 @@ function addRep_(b, email) {
     var ov = ss.getSheetByName(OVERVIEW_TAB);
     var row = ov.getLastRow() + 1;
     var q = "'" + name.replace(/'/g, "''") + "'";
-    ov.getRange(row, 1, 1, 6).setValues([[name, '=' + q + '!F15', '=' + q + '!D24', '=' + q + '!D26',
+    ov.getRange(row, 1, 1, 6).setValues([[dashSafe_(name), '=' + q + '!F15', '=' + q + '!D24', '=' + q + '!D26',
       '=IFERROR(ifs(D' + row + '>=4.5,"5 - Excellent",D' + row + '>=3.5,"4 - Exceeds Exp.",D' + row + '>=2.5,"3 - Meets Exp.",D' + row + '>=1.5,"2 - Needs Impr.",TRUE,"1 - Poor"),"")',
-      role]]);
+      dashSafe_(role)]]);
     ov.getRange(row - 1, 1, 1, 6).copyFormatToRange(ov, 1, 6, row, row);
     SpreadsheetApp.flush();
   } finally {
@@ -226,24 +224,11 @@ function scoreFormula_(r, q1) {
 /* ---------- auth ---------- */
 
 function verifyManager_(token) {
-  if (!token) return { ok: false, error: 'not signed in' };
-  var cache = CacheService.getScriptCache();
-  var key = 'tok_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
-  var email = cache.get(key);
-  if (!email) {
-    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token),
-      { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return { ok: false, error: 'session expired — reload the dashboard' };
-    var info = JSON.parse(res.getContentText());
-    var audOk = info.aud === DASHBOARD_CLIENT_ID || info.azp === DASHBOARD_CLIENT_ID;
-    email = String(info.email || '').toLowerCase();
-    if (!audOk || String(info.email_verified) !== 'true') return { ok: false, error: 'not allowed' };
-    cache.put(key, email, 300);
-  }
-  if (MANAGERS.indexOf(email) === -1) return { ok: false, error: 'Scorecards are for managers only.' };
-  return { ok: true, email: email };
+  // Shared check (shared/dash-auth.js): dashboard client, verified @lawmatics.com, manager list from Dashboard Config.
+  var who = dashAuth_(token);
+  if (!who.ok) return who;
+  if (!who.manager) return { ok: false, error: 'Scorecards are for managers only.' };
+  return who;
 }
 
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
+function json_(obj) { return dashJson_(obj); }

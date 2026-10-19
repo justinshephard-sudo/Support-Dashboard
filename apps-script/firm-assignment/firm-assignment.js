@@ -31,8 +31,6 @@
    Redeploy with `clasp update-deployment <id>` to keep the URL.
    ========================================================================== */
 
-var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com';
-var ALLOWED = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com', 'erika@lawmatics.com'];
 var CZ_BASE = 'https://lawmatics.us1app.churnzero.net/public/v1';
 var CZ_WRITE = 'https://lawmatics.us1app.churnzero.net/i';
 var LOG_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc'; // Support Team Report 2026
@@ -90,7 +88,7 @@ function czGet_(path, params) {
   var url = CZ_BASE + path + (qs ? '?' + qs : ''), out = [], guard = 0, headers = czHeaders_();
   while (url && guard++ < 200) {
     var res = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) throw new Error('ChurnZero HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+    if (res.getResponseCode() !== 200) { console.error('ChurnZero ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500)); throw new Error('ChurnZero didn’t respond (HTTP ' + res.getResponseCode() + '). Try Refresh in a minute.'); }
     var body = JSON.parse(res.getContentText());
     out = out.concat(body.value || []);
     url = body['@odata.nextLink'] || null;
@@ -109,7 +107,7 @@ function czGetMany_(reqs) {
   var fetch = function (urls) {
     return UrlFetchApp.fetchAll(urls.map(function (u) { return { url: u, headers: headers, muteHttpExceptions: true }; }))
       .map(function (res) {
-        if (res.getResponseCode() !== 200) throw new Error('ChurnZero HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+        if (res.getResponseCode() !== 200) { console.error('ChurnZero ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500)); throw new Error('ChurnZero didn’t respond (HTTP ' + res.getResponseCode() + '). Try Refresh in a minute.'); }
         return JSON.parse(res.getContentText());
       });
   };
@@ -374,8 +372,14 @@ function assign_(b, by) {
   if (!b.czId || !b.externalId || !b.userId) throw new Error('missing firm or rep');
 
   // Re-read the account so a firm someone already assigned in ChurnZero isn't overwritten.
-  var acct = czGet_('/Account', { $filter: 'Id eq ' + Number(b.czId), $select: 'Id,Name,ExternalId,UserAccountId,TotalContractAmount,Cf' })[0];
+  var acct = czGet_('/Account', { $filter: 'Id eq ' + Number(b.czId), $select: 'Id,Name,ExternalId,IsActive,StartDate,UserAccountId,TotalContractAmount,Cf' })[0];
   if (!acct) throw new Error('account not found in ChurnZero');
+  // Only firms that would show in the queue can be assigned from here.
+  var qcf = acct.Cf || {};
+  if (!acct.IsActive || qcf.OnboardingStatus !== 'Pre-Kickoff' || qcf.AgencyFirm || qcf.AgencyClientFirm ||
+      String(acct.StartDate || '') < sinceIso_(QUEUE_DAYS)) {
+    throw new Error(acct.Name + ' isn’t in the new-firm queue (it must be active, Pre-Kickoff, non-agency, and new). Reload to refresh.');
+  }
   if (acct.UserAccountId && acct.UserAccountId !== Number(b.userId)) {
     throw new Error(acct.Name + ' was already assigned in ChurnZero. Reload to refresh the queue.');
   }
@@ -413,14 +417,21 @@ function assign_(b, by) {
 function czSet_(appKey, externalId, name, value) {
   var payload = { appKey: appKey, accountExternalId: externalId, action: 'setAttribute', entity: 'account', name: name, value: value };
   var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', payload: payload, muteHttpExceptions: true });
-  if (res.getResponseCode() >= 300) throw new Error('ChurnZero write ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+  if (res.getResponseCode() >= 300) { console.error('ChurnZero write ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500)); throw new Error('ChurnZero rejected the change (HTTP ' + res.getResponseCode() + ').'); }
 }
 
 function rotationSkips_() {
   try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('ROTATION_SKIP') || '{}'); } catch (e) { return {}; }
 }
 
+// Rotation settings only take ChurnZero users who are active.
+function validRep_(id) {
+  var u = users_()[Number(id)];
+  return !!(u && u.active);
+}
+
 function setRotation_(b) {
+  if (b.userId != null && !validRep_(b.userId)) throw new Error('unknown rep');
   var skip = rotationSkips_();
   if (b.included) delete skip[b.userId]; else skip[b.userId] = true;
   PropertiesService.getScriptProperties().setProperty('ROTATION_SKIP', JSON.stringify(skip));
@@ -435,6 +446,7 @@ function tier_() {
 }
 
 function setTier_(b) {
+  if (b.userId != null && !validRep_(b.userId)) throw new Error('unknown rep');
   var t = tier_();
   if (b.userId != null) { if (b.high) t.reps[b.userId] = true; else delete t.reps[b.userId]; }
   if (b.min != null) {
@@ -520,7 +532,7 @@ function appendLog_(x) {
   sh.getRange(2, 1, 1, LOG_HEADERS.length).setValues([[
     Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd HH:mm'), x.by, x.firm, x.firmId, x.czId,
     x.mrr || '', x.suggested, x.assigned + ' #' + x.userId, x.took, x.confirmed ? 'yes' : 'pending', x.note,
-  ]]);
+  ].map(dashSafe_)]);
 }
 
 function readLog_(max) {
@@ -537,23 +549,11 @@ function readLog_(max) {
 /* ---------- auth ---------- */
 
 function verify_(token) {
-  if (!token) return { ok: false, error: 'not signed in' };
-  var cache = CacheService.getScriptCache();
-  var key = 'tok_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
-  var email = cache.get(key);
-  if (!email) {
-    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token), { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return { ok: false, error: 'session expired — reload the dashboard' };
-    var info = JSON.parse(res.getContentText());
-    var audOk = info.aud === DASHBOARD_CLIENT_ID || info.azp === DASHBOARD_CLIENT_ID;
-    email = String(info.email || '').toLowerCase();
-    if (!audOk || String(info.email_verified) !== 'true') return { ok: false, error: 'not allowed' };
-    cache.put(key, email, 300);
-  }
-  if (ALLOWED.indexOf(email) === -1) return { ok: false, error: 'New Firm Assignment is for managers only.' };
-  return { ok: true, email: email };
+  // Shared check (shared/dash-auth.js): dashboard client, verified @lawmatics.com, manager list from Dashboard Config.
+  var who = dashAuth_(token);
+  if (!who.ok) return who;
+  if (!who.manager) return { ok: false, error: 'New Firm Assignment is for managers only.' };
+  return who;
 }
 
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
+function json_(obj) { return dashJson_(obj); }

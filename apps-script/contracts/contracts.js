@@ -31,7 +31,6 @@ var DASHBOARD_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';   // ho
 var CONTRACTS_TAB = 'Contracts';
 var CONTRACTS_HEADER = ['FirmId', 'AccountId', 'AccountName', 'ContentDocumentId', 'Title',
   'OpportunityId', 'UploadedAt', 'DriveFileId', 'SavedAt'];
-var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com';
 var ALLOWED_DOMAIN = 'lawmatics.com';
 var FOLDER_NAME = 'CS Dashboard — Signed Contracts (private)';
 // Zapier hands files over as short-lived links on its own file host; refuse anything else.
@@ -111,7 +110,7 @@ function ingest_(b) {
       var file = folder.createFile(blob.setName(label).setContentType('application/pdf'));
       var m = name.match(CONTRACT_NAME);
       sheet.appendRow([String(b.firmId || ''), b.accountId, String(b.accountName || ''), f.Id, name,
-        (m && m[1]) || '', String(f.CreatedDate || ''), file.getId(), new Date().toISOString()]);
+        (m && m[1]) || '', String(f.CreatedDate || ''), file.getId(), new Date().toISOString()].map(dashSafe_));
       saved[f.Id] = true;
       out.saved++;
     });
@@ -140,26 +139,12 @@ function serve_(b) {
 // The access token must have been issued to the dashboard's OAuth client for a
 // verified @lawmatics.com account (and, if ALLOWED_EMAILS is set, a listed one).
 function verifyViewer_(token) {
-  if (!token) return { ok: false, error: 'not signed in' };
-  var cache = CacheService.getScriptCache();
-  var key = 'tok_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
-  var email = cache.get(key);
-  if (!email) {
-    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token),
-      { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return { ok: false, error: 'session expired — reload the dashboard' };
-    var info = JSON.parse(res.getContentText());
-    var audOk = info.aud === DASHBOARD_CLIENT_ID || info.azp === DASHBOARD_CLIENT_ID;
-    email = String(info.email || '').toLowerCase();
-    if (!audOk || String(info.email_verified) !== 'true' || !/@lawmatics\.com$/.test(email)) {
-      return { ok: false, error: 'not allowed' };
-    }
-    cache.put(key, email, 300);
-  }
+  var who = dashAuth_(token);
+  if (!who.ok) return who;
   var allow = (PropertiesService.getScriptProperties().getProperty('ALLOWED_EMAILS') || '')
     .split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(String);
-  if (allow.length && allow.indexOf(email) === -1) return { ok: false, error: 'not allowed' };
-  return { ok: true, email: email };
+  if (allow.length && allow.indexOf(who.email) === -1) return { ok: false, error: 'not allowed' };
+  return who;
 }
 
 /* ---------- helpers ---------- */
@@ -194,6 +179,4 @@ function folder_() {
   return folder;
 }
 
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
+function json_(obj) { return dashJson_(obj); }

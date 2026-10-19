@@ -1,79 +1,59 @@
-// Deployment: open the Google Sheet this dashboard reads from, then
-// Extensions > Apps Script, paste this whole file in (replacing the
-// boilerplate), then Deploy > New deployment > type "Web app" >
-// Execute as "Me" > Who has access "Anyone" > Deploy. Copy the resulting
-// URL (ends in /exec) and send it back so the dashboard can be wired up.
+// LEGACY INCENTIVE OVERRIDES web app — bound to "Support Team Report 2026".
+// Writes the "Overrides" tab there (Month | Incentive | Winner | Updated | Stat text).
 //
-// This creates/updates a plain "Overrides" tab in the same spreadsheet.
-// Since the spreadsheet is already shared "Anyone with the link can view",
-// that tab is automatically readable the same way every other tab is
-// (via the public CSV export the dashboard already uses) — no extra
-// sharing step needed.
+// Security: only dashboard MANAGERS can write. Each request carries the viewer's
+// Google access token, checked by dashAuth_ (shared/dash-auth.js, copied in by
+// tools/push-scripts.sh). The old shared secret is no longer accepted. Values are
+// written as plain text so nothing can become a formula.
 //
-// Security note: SHARED_SECRET only stops casual tampering, not someone
-// who reads the dashboard's public JS source (it has to be embedded
-// there too, to send matching requests). Given this only controls who's
-// shown as winning a monthly shoutout — not anything sensitive — that's
-// an intentional, proportionate tradeoff, not an oversight.
+// Deploy: this file is pushed to the bound project as Code.js; redeploy the
+// existing web app with `clasp update-deployment` to keep its URL.
 
-const SHARED_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 const OVERRIDES_SHEET_NAME = 'Overrides';
+const MAX_LEN = 300;
 
 function doPost(e) {
-  // Two overlapping requests (e.g. changing the winner select and the stat
-  // text input in quick succession) could otherwise both read the sheet
-  // before either had written, and both append a row instead of the second
-  // one updating the first. The lock serializes executions so that can't happen.
+  let body;
+  try { body = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
+  const who = dashAuth_(body.token);
+  if (!who.ok) return dashJson_(who);
+  if (!who.manager) return dashJson_({ ok: false, error: 'Only managers can change incentives.' });
+
+  const monthKey = String(body.monthKey || '').trim().slice(0, 40);
+  const incentiveKey = String(body.incentiveKey || '').trim().slice(0, 60);
+  const winnerName = String(body.winnerName || '').trim().slice(0, MAX_LEN);
+  const statText = String(body.statText || '').trim().slice(0, MAX_LEN);
+  if (!monthKey || !incentiveKey) return dashJson_({ ok: false, error: 'missing monthKey or incentiveKey' });
+
+  // Serialize writes so two quick edits update one row instead of appending two.
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const body = JSON.parse(e.postData.contents);
-    if (body.secret !== SHARED_SECRET) {
-      return jsonResponse({ ok: false, error: 'unauthorized' });
-    }
-
-    const monthKey = body.monthKey;
-    const incentiveKey = body.incentiveKey;
-    const winnerName = body.winnerName;
-    const statText = body.statText || '';
-    if (!monthKey || !incentiveKey) {
-      return jsonResponse({ ok: false, error: 'missing monthKey or incentiveKey' });
-    }
-
     const sheet = getOrCreateOverridesSheet_();
     const data = sheet.getDataRange().getValues();
-
     let rowIndex = -1;
     for (let i = 1; i < data.length; i++) {
-      if (String(data[i][0]) === String(monthKey) && String(data[i][1]) === String(incentiveKey)) {
-        rowIndex = i + 1; // 1-indexed range for Sheets API
-        break;
-      }
+      if (String(data[i][0]) === monthKey && String(data[i][1]) === incentiveKey) { rowIndex = i + 1; break; }
     }
-
     const now = new Date().toISOString();
     if (winnerName) {
-      if (rowIndex === -1) {
-        sheet.appendRow([monthKey, incentiveKey, winnerName, now, statText]);
-      } else {
-        sheet.getRange(rowIndex, 3).setValue(winnerName);
-        sheet.getRange(rowIndex, 4).setValue(now);
-        sheet.getRange(rowIndex, 5).setValue(statText);
-      }
+      const row = [monthKey, incentiveKey, winnerName, now, statText].map(dashSafe_);
+      if (rowIndex === -1) rowIndex = sheet.getLastRow() + 1;
+      sheet.getRange(rowIndex, 1, 1, 5).setNumberFormat('@').setValues([row]);
     } else if (rowIndex !== -1) {
       sheet.deleteRow(rowIndex);
     }
-
-    return jsonResponse({ ok: true });
+    return dashJson_({ ok: true });
   } catch (err) {
-    return jsonResponse({ ok: false, error: String(err) });
+    console.error(err);
+    return dashJson_({ ok: false, error: 'Couldn’t save the override.' });
   } finally {
     lock.releaseLock();
   }
 }
 
-function doGet(e) {
-  return jsonResponse({ ok: true, message: 'Overrides endpoint is live. Use POST to set an override.' });
+function doGet() {
+  return dashJson_({ ok: true, message: 'Overrides endpoint is live.' });
 }
 
 function getOrCreateOverridesSheet_() {
@@ -81,11 +61,7 @@ function getOrCreateOverridesSheet_() {
   let sheet = ss.getSheetByName(OVERRIDES_SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(OVERRIDES_SHEET_NAME);
-    sheet.appendRow(['MonthKey', 'IncentiveKey', 'WinnerName', 'UpdatedAt', 'StatText']);
+    sheet.appendRow(['monthKey', 'incentiveKey', 'winnerName', 'updatedAt', 'statText']);
   }
   return sheet;
-}
-
-function jsonResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }

@@ -1,2 +1,6 @@
 .DS_Store
 apps-script/contracts/secret.js
+
+# Copies of apps-script/shared/dash-auth.js made by tools/push-scripts.sh
+apps-script/*/dash-auth.js
+!apps-script/shared/dash-auth.js

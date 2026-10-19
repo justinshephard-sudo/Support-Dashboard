@@ -22,8 +22,6 @@
    Redeploy with `clasp update-deployment <id>` to keep the URL.
    ========================================================================== */
 
-var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com';
-var MANAGERS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com', 'erika@lawmatics.com'];
 var DATABASE_ID = 'e4a103fc90624ce1b0396a50fc9e76f8'; // Team Loop Tracker
 var NOTION_VERSION = '2022-06-28';
 var CLOSED_DAYS = 6;
@@ -65,9 +63,13 @@ function doGet(e) {
   }
   var res = tokenRequest_({ grant_type: 'authorization_code', code: q.code, redirect_uri: redirectUri_() });
   p.deleteProperty('NOTION_STATE');
-  if (!res.ok) return HtmlService.createHtmlOutput('Notion said no: ' + res.error);
+  if (!res.ok) return HtmlService.createHtmlOutput('Notion said no: ' + htmlEsc_(res.error));
   return HtmlService.createHtmlOutput('<p style="font:16px sans-serif">✅ Notion is connected (' +
-    (res.body.workspace_name || 'workspace') + '). You can close this tab.</p>');
+    htmlEsc_(res.body.workspace_name || 'workspace') + '). You can close this tab.</p>');
+}
+
+function htmlEsc_(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
 }
 
 function tokenRequest_(payload) {
@@ -121,7 +123,7 @@ function notion_(method, path, payload, retried) {
     if (ref.ok) return notion_(method, path, payload, true);
   }
   var body = JSON.parse(r.getContentText() || '{}');
-  if (r.getResponseCode() >= 300) throw new Error('Notion ' + r.getResponseCode() + ': ' + (body.message || ''));
+  if (r.getResponseCode() >= 300) { console.error('Notion ' + r.getResponseCode() + ': ' + (body.message || '')); throw new Error('Notion didn’t respond (HTTP ' + r.getResponseCode() + ').'); }
   return body;
 }
 
@@ -290,22 +292,8 @@ function doPost(e) {
 }
 
 function verify_(token) {
-  if (!token) return { ok: false, error: 'not signed in' };
-  var cache = CacheService.getScriptCache();
-  var key = 'tok_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
-  var email = cache.get(key);
-  if (!email) {
-    var res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token), { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return { ok: false, error: 'session expired — reload the dashboard' };
-    var info = JSON.parse(res.getContentText());
-    var audOk = info.aud === DASHBOARD_CLIENT_ID || info.azp === DASHBOARD_CLIENT_ID;
-    email = String(info.email || '').toLowerCase();
-    if (!audOk || String(info.email_verified) !== 'true' || !/@lawmatics\.com$/.test(email)) return { ok: false, error: 'not allowed' };
-    cache.put(key, email, 300);
-  }
-  return { ok: true, email: email, manager: MANAGERS.indexOf(email) > -1 };
+  // Shared check (shared/dash-auth.js): any verified @lawmatics.com viewer; .manager from Dashboard Config.
+  return dashAuth_(token);
 }
 
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
+function json_(obj) { return dashJson_(obj); }

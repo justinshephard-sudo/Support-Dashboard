@@ -1,36 +1,37 @@
-// DATA-CELL OVERRIDES web app — writes manager corrections to the "Overrides" tab
-// of the CS Report Master sheet (Month | Table | Rep | Column | Value | Note).
+// DATA-CELL OVERRIDES web app — bound to "CS Report Master". Writes manager
+// corrections to its "Overrides" tab (Month | Table | Rep | Column | Value | Note).
 //
-// Deployment (one time):
-//   1. Open the "CS Report Master" spreadsheet.
-//   2. Extensions > Apps Script.
-//   3. Paste THIS whole file into a new script file (replace the boilerplate).
-//   4. Deploy > New deployment > type "Web app" > Execute as "Me" >
-//      Who has access "Anyone" > Deploy. Authorize when prompted.
-//   5. Copy the resulting /exec URL and send it back so the dashboard can POST to it.
+// Security: only dashboard MANAGERS can write. Each request carries the viewer's
+// Google access token, checked by dashAuth_ (shared/dash-auth.js, copied in by
+// tools/push-scripts.sh). The old shared secret is no longer accepted. Values are
+// written as plain text so nothing can become a formula.
 //
-// Security: SHARED_SECRET only deters casual tampering (it's also embedded in the
-// dashboard's public JS so it can send matching requests). These overrides adjust
-// internal support metrics — not anything sensitive — so that's a proportionate tradeoff.
+// Deploy: pushed to the CS Report Master project (~/Projects/cs-report-master-bound)
+// as data-overrides.js; redeploy with `clasp update-deployment` to keep the URL.
 
-const SHARED_SECRET = 'cs-dash-9f2a7d3b1c8e4f6a';
 const OVERRIDES_SHEET_NAME = 'Overrides';
+const OVERRIDE_TABLES = ['monthly', 'teammates', 'incentive', 'resource'];
+const MAX_LEN = 500;
 
 function doPost(e) {
+  let b;
+  try { b = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
+  const who = dashAuth_(b.token);
+  if (!who.ok) return dashJson_(who);
+  if (!who.manager) return dashJson_({ ok: false, error: 'Only managers can make corrections.' });
+
+  const month = String(b.month || '').trim().slice(0, 40);
+  const table = String(b.table || '').trim();
+  const rep = String(b.rep || '').trim().slice(0, 120);
+  const column = String(b.column || '').trim().slice(0, 120);
+  const value = (b.value == null ? '' : String(b.value).trim()).slice(0, MAX_LEN);
+  const note = String(b.note || '').trim().slice(0, MAX_LEN);
+  if (!month || !table || !column) return dashJson_({ ok: false, error: 'missing month/table/column' });
+  if (OVERRIDE_TABLES.indexOf(table.toLowerCase()) === -1) return dashJson_({ ok: false, error: 'unknown table' });
+
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const b = JSON.parse(e.postData.contents);
-    if (b.secret !== SHARED_SECRET) return json_({ ok: false, error: 'unauthorized' });
-
-    const month = String(b.month || '').trim();
-    const table = String(b.table || '').trim();      // "Monthly" or "Teammates"
-    const rep = String(b.rep || '').trim();           // blank for Monthly
-    const column = String(b.column || '').trim();
-    const value = (b.value == null ? '' : String(b.value).trim());
-    const note = String(b.note || '').trim();
-    if (!month || !table || !column) return json_({ ok: false, error: 'missing month/table/column' });
-
     const sheet = getOrCreate_();
     const data = sheet.getDataRange().getValues();
     let row = -1;
@@ -40,25 +41,24 @@ function doPost(e) {
           String(data[i][2]).trim() === rep &&
           String(data[i][3]).trim() === column) { row = i + 1; break; }
     }
-
     if (value === '') {                 // empty value = delete the override
       if (row !== -1) sheet.deleteRow(row);
-    } else if (row === -1) {
-      sheet.appendRow([month, table, rep, column, value, note]);
     } else {
-      sheet.getRange(row, 5).setValue(value);
-      sheet.getRange(row, 6).setValue(note);
+      if (row === -1) row = sheet.getLastRow() + 1;
+      sheet.getRange(row, 1, 1, 6).setNumberFormat('@')
+        .setValues([[month, table, rep, column, value, note].map(dashSafe_)]);
     }
-    return json_({ ok: true });
+    return dashJson_({ ok: true });
   } catch (err) {
-    return json_({ ok: false, error: String(err) });
+    console.error(err);
+    return dashJson_({ ok: false, error: 'Couldn’t save the correction.' });
   } finally {
     lock.releaseLock();
   }
 }
 
 function doGet() {
-  return json_({ ok: true, message: 'Data-overrides endpoint is live. POST to set an override.' });
+  return dashJson_({ ok: true, message: 'Data-overrides endpoint is live.' });
 }
 
 function getOrCreate_() {
@@ -69,8 +69,4 @@ function getOrCreate_() {
     sheet.appendRow(['Month', 'Table', 'Rep', 'Column', 'Value', 'Note']);
   }
   return sheet;
-}
-
-function json_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
