@@ -1,6 +1,6 @@
 /* ==========================================================================
    New Firm Assignment — backs the dashboard's "New Firm Assignment" page
-   (Clare, Johnny and Justin only).
+   (managers only).
    --------------------------------------------------------------------------
    Replaces Clare's manual ChurnZero routine: spot the new firm, decide which
    AM is due for an onboarding, set the owner + Onboarding Type = Premium, and
@@ -32,7 +32,7 @@
    ========================================================================== */
 
 var DASHBOARD_CLIENT_ID = '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com';
-var ALLOWED = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com'];
+var ALLOWED = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com', 'erika@lawmatics.com'];
 var CZ_BASE = 'https://lawmatics.us1app.churnzero.net/public/v1';
 var CZ_WRITE = 'https://lawmatics.us1app.churnzero.net/i';
 var LOG_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc'; // Support Team Report 2026
@@ -354,7 +354,7 @@ function verify_(token) {
     if (!audOk || String(info.email_verified) !== 'true') return { ok: false, error: 'not allowed' };
     cache.put(key, email, 300);
   }
-  if (ALLOWED.indexOf(email) === -1) return { ok: false, error: 'New Firm Assignment is limited to Clare, Johnny and Justin.' };
+  if (ALLOWED.indexOf(email) === -1) return { ok: false, error: 'New Firm Assignment is for managers only.' };
   return { ok: true, email: email };
 }
 

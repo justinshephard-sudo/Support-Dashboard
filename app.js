@@ -2881,7 +2881,7 @@ function updateScorecardsButton() {
 }
 
 /* ==========================================================================
-   New Firm Assignment (Clare, Johnny and Justin; shows with Manager mode on).
+   New Firm Assignment (managers; shows with Manager mode on).
    Live from ChurnZero through apps-script/firm-assignment: new firms nobody
    owns yet, a suggested AM for each (with the reasons), and Approve / change.
    Assign writes the owner + Onboarding Type = Premium in ChurnZero and logs
@@ -2889,7 +2889,7 @@ function updateScorecardsButton() {
    before switching to auto-assign.
    ========================================================================== */
 const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbxkDLI7ldy0AtXq4iUjDB0b4MAdzkzJ0QSditt1sxFReXnoo5JPg8HzrC4feE1-flXyvg/exec';
-const ASSIGN_EMAILS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com'];
+const ASSIGN_EMAILS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com', 'erika@lawmatics.com'];
 // ChurnZero account page; {id} = the ChurnZero account Id.
 const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/account/{id}/details';
 const ASSIGN_PLAY = 'Onboarding New Customer Kickoff';
@@ -3153,7 +3153,7 @@ function setupAssign() {
   });
 }
 
-// Sits next to CS Scorecards; only for Clare, Johnny and Justin, while Manager mode is on.
+// Sits next to CS Scorecards; managers only, while Manager mode is on.
 function updateAssignButton() {
   let btn = document.getElementById('assign-btn');
   const anchor = document.getElementById('scorecards-btn') || document.getElementById('manager-toggle');
