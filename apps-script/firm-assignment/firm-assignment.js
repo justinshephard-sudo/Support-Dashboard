@@ -344,6 +344,61 @@ function setTier_(b) {
   return load_();
 }
 
+/* ---------- one-off write test (run from the editor) ----------
+   Uses VIP Law (OLD), Justin's test account: tries the likely attribute names
+   until ChurnZero shows the change, saves the ones that work as CZ_OWNER_ATTR /
+   CZ_TYPE_ATTR, then puts the account back the way it was. Check View ▸ Logs. */
+var TEST_ACCOUNT_ID = 4323;      // VIP Law (OLD)
+var TEST_OWNER_ID = 98;          // Andy Galindo (only one ChurnZero user with his email)
+var OWNER_ATTR_CANDIDATES = ['OwnerUserAccount', 'Owner', 'OwnerEmail', 'OwnerUserAccountEmail', 'AccountOwner'];
+var TYPE_ATTR_CANDIDATES = ['ImplementationType', 'Implementation Type', 'cf_ImplementationType'];
+
+function testAssignWrite() {
+  var props = PropertiesService.getScriptProperties();
+  var appKey = props.getProperty('CZ_APP_KEY');
+  if (!appKey) throw new Error('CZ_APP_KEY is not set.');
+  var read = function () {
+    return czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId,UserAccountId,Cf' })[0];
+  };
+  var waitFor = function (check) {
+    for (var i = 0; i < 6; i++) { Utilities.sleep(5000); var a = read(); if (check(a)) return a; }
+    return null;
+  };
+  var users = users_();
+  var before = read();
+  var origOwner = before.UserAccountId, origType = (before.Cf || {}).ImplementationType || '';
+  Logger.log('Before: ' + before.Name + ' owner #' + origOwner + ', type "' + origType + '"');
+
+  var ownerAttr = null;
+  for (var i = 0; i < OWNER_ATTR_CANDIDATES.length && !ownerAttr; i++) {
+    czSet_(appKey, before.ExternalId, OWNER_ATTR_CANDIDATES[i], users[TEST_OWNER_ID].email);
+    if (waitFor(function (a) { return a.UserAccountId === TEST_OWNER_ID; })) ownerAttr = OWNER_ATTR_CANDIDATES[i];
+    Logger.log('Owner attribute "' + OWNER_ATTR_CANDIDATES[i] + '": ' + (ownerAttr ? 'WORKS' : 'no change'));
+  }
+  var typeAttr = null;
+  for (var j = 0; j < TYPE_ATTR_CANDIDATES.length && !typeAttr; j++) {
+    czSet_(appKey, before.ExternalId, TYPE_ATTR_CANDIDATES[j], PREMIUM);
+    if (waitFor(function (a) { return (a.Cf || {}).ImplementationType === PREMIUM; })) typeAttr = TYPE_ATTR_CANDIDATES[j];
+    Logger.log('Type attribute "' + TYPE_ATTR_CANDIDATES[j] + '": ' + (typeAttr ? 'WORKS' : 'no change'));
+  }
+
+  // Put it back.
+  if (ownerAttr) {
+    czSet_(appKey, before.ExternalId, ownerAttr, users[origOwner] ? users[origOwner].email : '');
+    props.setProperty('CZ_OWNER_ATTR', ownerAttr);
+  }
+  if (typeAttr) {
+    czSet_(appKey, before.ExternalId, typeAttr, origType);
+    props.setProperty('CZ_TYPE_ATTR', typeAttr);
+  }
+  var after = waitFor(function (a) {
+    return a.UserAccountId === origOwner && ((a.Cf || {}).ImplementationType || '') === origType;
+  }) || read();
+  Logger.log('After restore: owner #' + after.UserAccountId + ', type "' + ((after.Cf || {}).ImplementationType || '') + '"' +
+    (after.UserAccountId === origOwner && ((after.Cf || {}).ImplementationType || '') === origType ? ' — restored ✓' : ' — NOT fully restored, fix by hand'));
+  Logger.log('RESULT owner=' + (ownerAttr || 'none worked') + ' type=' + (typeAttr || 'none worked'));
+}
+
 /* ---------- log ---------- */
 
 function logSheet_() {
