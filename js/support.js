@@ -924,8 +924,9 @@ function openCellEditor(member, col, td) {
       const out = await postDataOverride(month, 'Teammates', member.name, sheetCol, value, note);
       if (out && out.ok === false) throw new Error(out.error || 'save failed');
       pop.querySelector('#coe-save').textContent = 'Saved ✓';
-      await new Promise((r) => setTimeout(r, 1400));   // let the write commit before re-reading
-      location.reload();
+      await new Promise((r) => setTimeout(r, 1200));   // let the write commit before re-reading
+      await refreshSupport();
+      closeCellEditor();
     } catch (err) {
       alert('Could not save override: ' + err.message);
       pop.querySelector('#coe-save').textContent = 'Save';
@@ -1294,8 +1295,9 @@ function openManualEditor(def, anchor) {
     try {
       await postDataOverride(month, 'Monthly', '', def.col, value, pop.querySelector('#coe-note').value.trim());
       pop.querySelector('#coe-save').textContent = 'Saved ✓';
-      await new Promise((res) => setTimeout(res, 1400));   // let the write commit before re-reading
-      location.reload();
+      await new Promise((res) => setTimeout(res, 1200));   // let the write commit before re-reading
+      await refreshSupport();
+      closeCellEditor();
     } catch (err) {
       alert('Could not save: ' + err.message);
       pop.querySelector('#coe-save').textContent = 'Save';
@@ -1763,6 +1765,59 @@ function renderQuarter(quarterKey, quarters, annualSeries, monthlyTileValues) {
   renderQuarterlyLeaderboard(individualsOnly(q.members, qMonths[qMonths.length - 1]));
 }
 
+/* Support tab data. Loaded at sign-in, and re-read in place after a manager saves a
+   correction (a full page reload would drop the in-page Google sign-in). */
+const SUPPORT = { monthResults: [], quarters: {}, annualSeries: null, monthlyTileValues: [] };
+
+async function loadSupportData() {
+  // Start from clean maps: corrections are applied on top of the sheet values as they load.
+  REPORT.monthly.clear();
+  REPORT.teammates.clear();
+  REPORT.categories.clear();
+  await loadReportTables();
+  SUPPORT.monthResults = MONTH_TABS.map((m) => ({ ...m, parsed: buildMonthParsed(m.name) }));
+  PARSED_BY_MONTH = {};
+  SUPPORT.monthResults.forEach((m) => { PARSED_BY_MONTH[m.name.toLowerCase()] = m.parsed; });
+  SUPPORT.monthlyTileValues = SUPPORT.monthResults.map((m) => extractTiles(m.parsed));
+  SUPPORT.annualSeries = buildAnnualSeries();
+  SUPPORT.quarters = buildQuarters();
+}
+
+// Renders the Support tab; keeps the chosen month/quarter when given.
+function renderSupport(keepMonthGid, keepQuarter) {
+  const { monthResults, quarters, annualSeries, monthlyTileValues } = SUPPORT;
+  const monthsWithData = monthResults.filter((m) => m.parsed.hasData);
+  const optionList = monthsWithData.length ? monthsWithData : monthResults;
+  // Default to the current calendar month; if it has no data yet (e.g. the 1st),
+  // fall back to the latest month that does.
+  const currentMonth = MONTH_NAMES[new Date().getMonth()];
+  const monthEntry = optionList.find((m) => m.gid === keepMonthGid)
+    || optionList.find((m) => m.name === currentMonth) || optionList[optionList.length - 1];
+  populateSelect('month-select', optionList, monthEntry.gid, 'gid', 'name');
+  renderMonth(monthEntry);
+  renderTrends(annualSeries, monthlyTileValues);
+  renderQoQTrends(annualSeries, quarters);
+
+  const quarterOptions = QUARTER_NAMES.filter((q) => quarters[q] && quarters[q].hasData).map((q) => ({ key: q, label: q }));
+  const finalQuarterOptions = quarterOptions.length ? quarterOptions : [{ key: 'Q1', label: 'Q1' }];
+  // Same rule as the month selector: default to the current quarter, falling
+  // back to the latest quarter with data if it has none yet.
+  const currentQuarter = QUARTER_NAMES[Math.floor(new Date().getMonth() / 3)];
+  const quarter = (finalQuarterOptions.find((o) => o.key === keepQuarter)
+    || finalQuarterOptions.find((o) => o.key === currentQuarter)
+    || finalQuarterOptions[finalQuarterOptions.length - 1]).key;
+  populateSelect('quarter-select', finalQuarterOptions, quarter, 'key', 'label');
+  renderQuarter(quarter, quarters, annualSeries, monthlyTileValues);
+}
+
+async function refreshSupport() {
+  const monthGid = document.getElementById('month-select').value;
+  const quarter = document.getElementById('quarter-select').value;
+  await loadSupportData();
+  renderSupport(monthGid, quarter);
+  document.getElementById('last-updated').textContent = `Data loaded ${new Date().toLocaleString()}`;
+}
+
 async function main() {
   try {
     setupCelebrate();
@@ -1774,52 +1829,18 @@ async function main() {
     // Everything the Support tab needs, in parallel.
     await Promise.all([
       loadManagerList(),
-      loadReportTables(),
+      loadSupportData(),
       fetchTitleFrom(SHEET_ID, 'Overrides')
         .then((rows) => { overridesMap = parseOverridesSheet(rows); })
         .catch((err) => console.error('Failed to load incentive overrides', err)),
     ]);
-    const monthResults = MONTH_TABS.map((m) => ({ ...m, parsed: buildMonthParsed(m.name) }));
-    PARSED_BY_MONTH = {};
-    monthResults.forEach((m) => { PARSED_BY_MONTH[m.name.toLowerCase()] = m.parsed; });
-
-    const monthlyTileValues = monthResults.map((m) => extractTiles(m.parsed));
-
-    const monthsWithData = monthResults.filter((m) => m.parsed.hasData);
-    const optionList = monthsWithData.length ? monthsWithData : monthResults;
-    // Default to the current calendar month; if it has no data yet (e.g. the 1st),
-    // fall back to the latest month that does.
-    const currentMonth = MONTH_NAMES[new Date().getMonth()];
-    const defaultEntry = optionList.find((m) => m.name === currentMonth) || optionList[optionList.length - 1];
-
-    populateSelect('month-select', optionList, defaultEntry.gid, 'gid', 'name');
-    renderMonth(defaultEntry);
-
+    renderSupport();
     document.getElementById('month-select').addEventListener('change', (e) => {
-      const selected = monthResults.find((m) => m.gid === e.target.value);
+      const selected = SUPPORT.monthResults.find((m) => m.gid === e.target.value);
       if (selected) renderMonth(selected);
     });
-
-    const annualSeries = buildAnnualSeries();
-    renderTrends(annualSeries, monthlyTileValues);
-
-    const quarters = buildQuarters();
-    renderQoQTrends(annualSeries, quarters);
-    const quarterOptions = QUARTER_NAMES
-      .filter((q) => quarters[q] && quarters[q].hasData)
-      .map((q) => ({ key: q, label: q }));
-    const finalQuarterOptions = quarterOptions.length ? quarterOptions : [{ key: 'Q1', label: 'Q1' }];
-    // Same rule as the month selector: default to the current quarter, falling
-    // back to the latest quarter with data if it has none yet.
-    const currentQuarter = QUARTER_NAMES[Math.floor(new Date().getMonth() / 3)];
-    const defaultQuarter = (finalQuarterOptions.find((o) => o.key === currentQuarter)
-      || finalQuarterOptions[finalQuarterOptions.length - 1]).key;
-
-    populateSelect('quarter-select', finalQuarterOptions, defaultQuarter, 'key', 'label');
-    renderQuarter(defaultQuarter, quarters, annualSeries, monthlyTileValues);
-
     document.getElementById('quarter-select').addEventListener('change', (e) => {
-      renderQuarter(e.target.value, quarters, annualSeries, monthlyTileValues);
+      renderQuarter(e.target.value, SUPPORT.quarters, SUPPORT.annualSeries, SUPPORT.monthlyTileValues);
     });
 
     document.getElementById('last-updated').textContent = `Data loaded ${new Date().toLocaleString()}`;
