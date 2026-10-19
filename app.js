@@ -3087,7 +3087,7 @@ function renderAssign() {
     </div>
     <div class="fa-hero-art">
       <div class="loop-bubble">${open.length ? `${open.length} new firm${open.length === 1 ? '' : 's'} to match up!` : 'Nothing to assign. Coffee time.'}</div>
-      <img src="assets/merlin-detective.webp" alt="Merlin the detective" loading="lazy">
+      <img src="assets/merlin-teacher.webp" alt="Merlin the teacher" loading="lazy">
     </div>`;
 
   body.innerHTML = `
