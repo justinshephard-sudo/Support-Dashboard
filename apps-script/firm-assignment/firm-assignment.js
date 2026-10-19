@@ -215,6 +215,8 @@ function suggest_(queue, reps, highMin) {
       return {
         userId: s.r.id, name: s.r.name,
         score: Math.round(o[i] * WEIGHTS.open + d[i] * WEIGHTS.since + b[i] * WEIGHTS.book + v[i] * WEIGHTS.value),
+        parts: { open: Math.round(o[i] * WEIGHTS.open), since: Math.round(d[i] * WEIGHTS.since),
+          book: Math.round(b[i] * WEIGHTS.book), value: Math.round(v[i] * WEIGHTS.value) },
         open: s.open, daysSince: days(s), firms: s.firms, openMrr: Math.round(s.openMrr),
       };
     }).sort(function (x, y) { return y.score - x.score || x.open - y.open || y.daysSince - x.daysSince; });

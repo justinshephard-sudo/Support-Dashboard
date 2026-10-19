@@ -2960,6 +2960,18 @@ function faWhy(r) {
   return `${r.open} open onboarding${r.open === 1 ? '' : 's'} · last new firm ${r.daysSince === 0 ? 'today' : r.daysSince + 'd ago'} · ${r.firms} firms · ${fmtMoney(r.openMrr)} onboarding MRR`;
 }
 
+function faScoreTip(r, f) {
+  const p = r.parts;
+  const row = (label, pts, max) => `<span class="fa-tip-row"><span>${label}</span><b>${p ? pts : '—'} / ${max}</b></span>`;
+  return `<b class="fa-tip-head">Fit score: ${r.score} out of 100</b>
+    How strongly ${esc(r.name.split(' ')[0])} fits this firm compared with the other ${f.high ? 'high-MRR ' : ''}AMs in the rotation. Highest score is suggested.
+    ${row('Fewest open onboardings', p && p.open, 40)}
+    ${row('Longest since last new firm', p && p.since, 30)}
+    ${row('Smallest book of firms', p && p.book, 15)}
+    ${row('Least onboarding MRR in progress', p && p.value, 15)}
+    <span class="fa-tip-foot">On each factor the best AM gets full points and the worst gets 0.</span>`;
+}
+
 function faFirmCard(f) {
   const done = FA.done[f.czId];
   const top = f.ranking && f.ranking[0];
@@ -2977,7 +2989,7 @@ function faFirmCard(f) {
   } else {
     right = `<div class="fa-pick">
         <div class="fa-sugg-lbl">Suggested</div>
-        <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span><span class="fa-score" title="Suggestion score out of 100">${top.score}</span></div>
+        <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span><span class="fa-score" tabindex="0" aria-describedby="fa-tip-${f.czId}">${top.score}<span class="fa-tip" role="tooltip" id="fa-tip-${f.czId}">${faScoreTip(top, f)}</span></span></div>
         <div class="fa-why">${esc(faWhy(top))}</div>
         <label class="fa-change">Assign to
           <select class="fa-select" data-cz="${f.czId}">
