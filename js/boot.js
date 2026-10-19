@@ -24,8 +24,7 @@ function setupTabs() {
     t.classList.add('active');
     const v = document.getElementById('view-' + t.dataset.tab);
     if (v) v.classList.add('active');
-    if (t.dataset.tab === 'firm') { const q = document.getElementById('q'); if (q) q.focus(); }
-    if (t.dataset.tab === 'firm') ensureTabData('firm');
+    if (t.dataset.tab === 'mrr') openMrr();
     if (t.dataset.tab === 'impl') ensureTabData('impl').then(drawImplCharts);
     if (t.dataset.tab === 'services') mountServices();
     if (t.dataset.tab === 'resources') openResources();
@@ -68,6 +67,7 @@ function bootstrap() {
   setupResources();
   setupRoundup();
   setupLoop();
+  setupMrr();
   setupScorecards();
   setupAssign();
   setupTheme();

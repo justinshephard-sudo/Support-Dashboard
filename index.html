@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2610191351">
+<link rel="stylesheet" href="style.css?v=2610191424">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -76,9 +76,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           Resources
         </button>
-        <button class="tab" data-tab="firm">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
-          Firm Lookup
+        <button class="tab" data-tab="mrr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/></svg>
+          MRR Report
         </button>
       </nav>
     </div>
@@ -319,6 +319,7 @@
         <button type="button" role="tab" class="res-switch-btn" data-res-view="kb" aria-selected="true">Knowledge Base</button>
         <button type="button" role="tab" class="res-switch-btn" data-res-view="roundup" aria-selected="false">Product Roundup</button>
         <button type="button" role="tab" class="res-switch-btn" data-res-view="loop" aria-selected="false">Loop Tracker</button>
+        <button type="button" role="tab" class="res-switch-btn" data-res-view="firm" aria-selected="false">Firm Lookup</button>
       </div>
       <div id="resKB">
       <div class="search-wrap">
@@ -339,16 +340,8 @@
       </div>
       <div id="roundup" hidden></div>
       <div id="loop" hidden></div>
-    </div>
-  </div>
-
-  <!-- ===================== FIRM VIEW ===================== -->
-  <div class="view" id="view-firm">
-    <div class="wrap">
-      <div class="lookup-head">
-        <h2>Firm Lookup</h2>
-        <p>Search any customer to see their account manager, billing, health, and usage — all in one place.</p>
-      </div>
+      <div id="resFirm" hidden>
+      <p class="res-firm-lead">Search any customer to see their account manager, billing, health, and usage — all in one place.</p>
       <div class="search-wrap">
         <div class="search-box">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -363,22 +356,29 @@
         <div id="firmEmptyMsg">Start typing a firm name to pull up their profile.</div>
       </div>
       <div class="profile" id="profile"></div>
+      </div>
     </div>
+  </div>
+
+  <!-- ===================== MRR REPORT VIEW ===================== -->
+  <div class="view" id="view-mrr">
+    <div class="wrap"><div id="mrr"></div></div>
   </div>
 
   <p class="foot">CS Dashboard · Lawmatics Customer Success</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt" crossorigin="anonymous" defer></script>
-<script src="js/core.js?v=2610191351" defer></script>
-<script src="js/support.js?v=2610191351" defer></script>
-<script src="js/implementation.js?v=2610191351" defer></script>
-<script src="js/scorecards.js?v=2610191351" defer></script>
-<script src="js/firm-assignment.js?v=2610191351" defer></script>
-<script src="js/loop-tracker.js?v=2610191351" defer></script>
-<script src="js/roundup.js?v=2610191351" defer></script>
-<script src="js/resources.js?v=2610191351" defer></script>
-<script src="js/firm-lookup.js?v=2610191351" defer></script>
-<script src="js/boot.js?v=2610191351" defer></script>
+<script src="js/core.js?v=2610191424" defer></script>
+<script src="js/support.js?v=2610191424" defer></script>
+<script src="js/implementation.js?v=2610191424" defer></script>
+<script src="js/scorecards.js?v=2610191424" defer></script>
+<script src="js/firm-assignment.js?v=2610191424" defer></script>
+<script src="js/loop-tracker.js?v=2610191424" defer></script>
+<script src="js/roundup.js?v=2610191424" defer></script>
+<script src="js/resources.js?v=2610191424" defer></script>
+<script src="js/mrr.js?v=2610191424" defer></script>
+<script src="js/firm-lookup.js?v=2610191424" defer></script>
+<script src="js/boot.js?v=2610191424" defer></script>
 </body>
 </html>

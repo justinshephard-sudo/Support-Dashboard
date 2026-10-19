@@ -353,8 +353,12 @@ function setupResources() {
 
 // First open of the tab (a click, so Google's permission popup is allowed).
 function openResources() {
-  if (!document.getElementById('roundup').hidden) loadRoundup();
-  if (!document.getElementById('loop').hidden) loadLoop();
+  const view = document.querySelector('.res-switch-btn[aria-selected="true"]')?.dataset.resView || 'kb';
+  setResourcesView(view);
+}
+
+// The Knowledge Base needs its own Drive token, so it only connects when that view is opened.
+function openKnowledgeBase() {
   if (RES.loaded || RES.loading) return;
   if (RES.token) { loadResources(); return; }
   document.getElementById('resLoading').hidden = false;

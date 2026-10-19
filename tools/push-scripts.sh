@@ -2,7 +2,7 @@
 # Push every CS Dashboard Apps Script project, with the shared sign-in check
 # (apps-script/shared/dash-auth.js) copied in, and redeploy each web app in place.
 #   tools/push-scripts.sh            # push + redeploy all
-#   tools/push-scripts.sh loop       # just one (scorecards|firm|loop|contracts|bound|master)
+#   tools/push-scripts.sh loop       # just one (scorecards|firm|loop|contracts|mrr|bound|master)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AS="$ROOT/apps-script"
@@ -23,6 +23,7 @@ ONLY="${1:-}"
 want "$ONLY" scorecards && push scorecards "$AS/scorecards" AKfycbyRXeF59TIeltQ27HSAIyDq7XMXOFZP_hdT7oq1v-TxJA7pdeQnfOl-QrptTxcw530iXg
 want "$ONLY" firm && push firm-assignment "$AS/firm-assignment" AKfycbxkDLI7ldy0AtXq4iUjDB0b4MAdzkzJ0QSditt1sxFReXnoo5JPg8HzrC4feE1-flXyvg
 want "$ONLY" loop && push loop-tracker "$AS/loop-tracker" AKfycbxQVzKZdB8ecIFscQUDX3uoL8CCzzH1qFiL3VtfJymAAwZPGulkn34MQi2sLt-b7NdN
+want "$ONLY" mrr && push mrr-report "$AS/mrr-report" AKfycbxWBNVsOhP027_V8jpCJ52lja3iMtVehZlQUVG9T2g2k2PLt84bgU_JtENO24LNd0DD
 want "$ONLY" contracts && push contracts "$AS/contracts" AKfycbzRJh5DWQxxDmkUAtyjKgvAlr2H0y758VlizVq09SkZ68EAoGEM2M9_m6CZoeVJg-xr9g
 if want "$ONLY" bound; then
   cp "$AS/overrides.gs" "$BOUND/Code.js"

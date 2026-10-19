@@ -127,14 +127,17 @@ function renderRoundup() {
 }
 
 function setResourcesView(view, load = true) {
-  if (!['kb', 'roundup', 'loop'].includes(view)) view = 'kb';
+  if (!['kb', 'roundup', 'loop', 'firm'].includes(view)) view = 'kb';
   document.querySelectorAll('.res-switch-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.resView === view)));
   document.getElementById('resKB').hidden = view !== 'kb';
   document.getElementById('roundup').hidden = view !== 'roundup';
   document.getElementById('loop').hidden = view !== 'loop';
+  document.getElementById('resFirm').hidden = view !== 'firm';
   try { localStorage.setItem('cs-res-view', view); } catch (e) { /* private mode */ }
   if (view === 'loop' && load) loadLoop();
   if (view === 'roundup' && load) loadRoundup();
+  if (view === 'kb' && load) openKnowledgeBase();
+  if (view === 'firm' && load) { ensureTabData('firm'); document.getElementById('q')?.focus(); }
 }
 
 function setupRoundup() {
@@ -146,5 +149,5 @@ function setupRoundup() {
   let saved = 'kb';
   try { saved = localStorage.getItem('cs-res-view') || 'kb'; } catch (e) { /* private mode */ }
   // Restore the last view, but don't load until the person has signed in and opened Resources.
-  if (saved === 'roundup' || saved === 'loop') setResourcesView(saved, false);
+  if (saved !== 'kb') setResourcesView(saved, false);
 }
