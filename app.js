@@ -2938,14 +2938,14 @@ const faCzLink = (id) => CZ_ACCOUNT_URL.replace('{id}', encodeURIComponent(id));
 
 function faReadiness(f) {
   const items = [
-    ['Sales notes', f.notes.sales], ['Intake process', f.notes.intake], ['Key challenges', f.notes.challenges],
+    ['Intake process', f.notes.intake], ['Key challenges', f.notes.challenges],
     ['Onboarding deck', f.links.deck], ['Docs folder', f.links.docs],
   ];
   return items.map(([k, v]) => `<span class="fa-chk ${v ? 'ok' : 'miss'}">${v ? '✓' : '!'} ${esc(k)}</span>`).join('');
 }
 
 function faNotes(f) {
-  const blocks = [['Sales onboarding notes', f.notes.sales], ['Intake process', f.notes.intake],
+  const blocks = [['Intake process', f.notes.intake],
     ['Key challenges', f.notes.challenges], ['AI demo notes', f.notes.aiDemo]].filter(([, v]) => v);
   const links = [f.links.deck && `<a href="${esc(f.links.deck)}" target="_blank" rel="noopener">Onboarding deck ↗</a>`,
     f.links.docs && `<a href="${esc(f.links.docs)}" target="_blank" rel="noopener">Docs folder ↗</a>`].filter(Boolean).join(' · ');
