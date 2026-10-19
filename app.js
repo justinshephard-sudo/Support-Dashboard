@@ -3248,17 +3248,20 @@ const loopSlug = (s) => String(s || '').toLowerCase().replace(/[^a-z]+/g, '-');
 
 function loopRow(it, canEdit) {
   const pill = `<span class="loop-pill s-${loopSlug(it.status)}">${esc(it.status || 'No status')}</span>`;
-  return `<li class="loop-row" data-id="${esc(it.id)}">
-      ${canEdit ? `<button type="button" class="loop-status" data-id="${esc(it.id)}" aria-label="Change status (now ${esc(it.status)})">${pill}</button>` : pill}
+  return `<li class="loop-card s-${loopSlug(it.status)}" data-id="${esc(it.id)}">
+      <div class="loop-card-top">
+        ${canEdit ? `<button type="button" class="loop-status" data-id="${esc(it.id)}" aria-label="Change status (now ${esc(it.status)})">${pill}</button>` : pill}
+        ${it.outcome && it.outcome !== 'Under Review' ? `<span class="loop-tag o-${loopSlug(it.outcome)}">${esc(it.outcome)}</span>` : ''}
+      </div>
       <button type="button" class="loop-open" data-id="${esc(it.id)}">
         <span class="loop-item">${esc(it.item || 'Untitled')}</span>
-        <span class="loop-meta">
-          ${it.type ? `<span class="loop-tag">${esc(it.type)}</span>` : ''}
-          ${it.raisedBy ? `<span class="loop-tag">${esc(it.raisedBy)}</span>` : ''}
-          ${it.outcome && it.outcome !== 'Under Review' ? `<span class="loop-tag o-${loopSlug(it.outcome)}">${esc(it.outcome)}</span>` : ''}
-          <span class="loop-when">${it.status === 'Closed' ? 'closed ' + esc(loopAgo(it.closed || it.edited)) : 'raised ' + esc(loopAgo(it.raised))}</span>
-        </span>
+        ${it.notes ? `<span class="loop-snip">${esc(it.notes)}</span>` : ''}
       </button>
+      <div class="loop-card-foot">
+        ${it.type ? `<span class="loop-tag">${esc(it.type)}</span>` : ''}
+        ${it.raisedBy ? `<span class="loop-tag">${esc(it.raisedBy)}</span>` : ''}
+        <span class="loop-when">${it.status === 'Closed' ? 'closed ' + esc(loopAgo(it.closed || it.edited)) : 'raised ' + esc(loopAgo(it.raised))}</span>
+      </div>
     </li>`;
 }
 
@@ -3266,22 +3269,33 @@ function renderLoop() {
   const d = LOOP.data;
   const root = document.getElementById('loop');
   const groups = LOOP_GROUPS.map((g) => ({ ...g, items: d.items.filter((x) => x.status === g.status) }));
+  const oldest = groups[0].items.reduce((m, x) => (x.raised && (!m || x.raised < m) ? x.raised : m), '');
   root.innerHTML = `
-    <div class="loop-top">
-      <div>
-        <h2>Team Loop Tracker</h2>
-        <p class="loop-sub">Open, in progress, and closed in the last ${d.closedDays} days. Updates live from Notion.</p>
+    <section class="loop-hero">
+      <div class="loop-hero-text">
+        <div class="loop-eyebrow">Close the loop</div>
+        <h2>Team <span>Loop Tracker</span></h2>
+        <p>What the team raised, what we’re doing about it, and what we closed this week. Updates live from Notion.</p>
+        <div class="loop-stats">
+          ${groups.map((g) => `<a class="loop-stat s-${loopSlug(g.status)}" href="#loop-${loopSlug(g.status)}"><b>${g.items.length}</b><span>${esc(g.title)}</span></a>`).join('')}
+        </div>
+        <div class="loop-actions">
+          ${d.canEdit ? '<button type="button" class="loop-btn primary" id="loopAdd">+ Add item</button>' : ''}
+          <a class="loop-btn" href="${LOOP_NOTION_URL}" target="_blank" rel="noopener">Open in Notion ↗</a>
+        </div>
       </div>
-      <div class="loop-actions">
-        ${d.canEdit ? '<button type="button" class="mgr-btn on" id="loopAdd">+ Add item</button>' : ''}
-        <a class="mgr-btn" href="${LOOP_NOTION_URL}" target="_blank" rel="noopener">Open in Notion ↗</a>
+      <div class="loop-hero-art">
+        <div class="loop-bubble">${groups[0].items.length ? `${groups[0].items.length} loop${groups[0].items.length === 1 ? '' : 's'} to close${oldest ? ` — oldest from ${esc(loopAgo(oldest))}` : ''}!` : 'Every loop is closed. Nice!'}</div>
+        <img src="assets/merlin-loopinator.webp" alt="Merlin and the Loop-in-ator" width="560" height="443">
       </div>
+    </section>
+    <div class="loop-board">
+      ${groups.map((g) => `<section class="loop-col s-${loopSlug(g.status)}" id="loop-${loopSlug(g.status)}">
+          <h3><span class="loop-dot"></span>${esc(g.title)} <span class="loop-count">${g.items.length}</span></h3>
+          ${g.items.length ? `<ul class="loop-list">${g.items.map((it) => loopRow(it, d.canEdit)).join('')}</ul>` : `<p class="loop-empty">${g.status === 'Closed' ? 'Nothing closed yet this week.' : 'Nothing here.'}</p>`}
+        </section>`).join('')}
     </div>
-    ${groups.map((g) => `<section class="loop-group">
-        <h3>${esc(g.title)} <span class="loop-count">${g.items.length}</span></h3>
-        ${g.items.length ? `<ul class="loop-list">${g.items.map((it) => loopRow(it, d.canEdit)).join('')}</ul>` : '<p class="loop-empty">Nothing here.</p>'}
-      </section>`).join('')}
-    <p class="loop-foot">${d.canEdit ? 'Click a status to change it, or an item to edit it.' : 'Click an item for details. Managers can edit.'} · checked ${new Date(d.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</p>`;
+    <p class="loop-foot"><span class="loop-live"></span>${d.canEdit ? 'Click a status to change it, or a card to edit it.' : 'Click a card for details. Managers can edit.'} · checked ${new Date(d.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</p>`;
 }
 
 /* ---- saving ---- */
@@ -3316,7 +3330,7 @@ function loopStatusMenu(btn) {
   const menu = document.createElement('div');
   menu.className = 'loop-menu';
   menu.innerHTML = LOOP.data.options.Status.map((s) => `<button type="button" data-status="${esc(s)}" class="${s === it.status ? 'cur' : ''}"><span class="loop-pill s-${loopSlug(s)}">${esc(s)}</span></button>`).join('');
-  btn.closest('.loop-row').appendChild(menu);
+  btn.closest('.loop-card').appendChild(menu);
   menu.addEventListener('click', (e) => {
     const b = e.target.closest('[data-status]');
     if (!b) return;
