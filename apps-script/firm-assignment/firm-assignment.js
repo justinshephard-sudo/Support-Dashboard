@@ -66,7 +66,7 @@ function doPost(e) {
   try {
     var who = verify_(b.token);
     if (!who.ok) return json_(who);
-    if (b.action === 'load') return json_(load_());
+    if (b.action === 'load') return json_(load_(!!b.force));
     if (b.action === 'assign') return json_(assign_(b, who.email));
     if (b.action === 'setRotation') return json_(setRotation_(b));
     if (b.action === 'setTier') return json_(setTier_(b));
@@ -98,6 +98,50 @@ function czGet_(path, params) {
   return out;
 }
 
+function qs_(params) {
+  return Object.keys(params || {}).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+}
+
+// Several OData reads at once: first pages in parallel (with $count), then every
+// remaining page in parallel via $skip. Returns one array of rows per request.
+function czGetMany_(reqs) {
+  var headers = czHeaders_();
+  var fetch = function (urls) {
+    return UrlFetchApp.fetchAll(urls.map(function (u) { return { url: u, headers: headers, muteHttpExceptions: true }; }))
+      .map(function (res) {
+        if (res.getResponseCode() !== 200) throw new Error('ChurnZero HTTP ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+        return JSON.parse(res.getContentText());
+      });
+  };
+  var base = reqs.map(function (r) {
+    var p = {}; Object.keys(r.params).forEach(function (k) { p[k] = r.params[k]; });
+    p.$top = 100;
+    return { path: r.path, params: p };
+  });
+  var first = fetch(base.map(function (r) { var p = JSON.parse(JSON.stringify(r.params)); p.$count = 'true'; return CZ_BASE + r.path + '?' + qs_(p); }));
+  var out = first.map(function (b) { return b.value || []; });
+  var more = [];
+  first.forEach(function (b, i) {
+    var total = b['@odata.count'] || 0;
+    for (var skip = 100; skip < total; skip += 100) {
+      var p = JSON.parse(JSON.stringify(base[i].params)); p.$skip = skip;
+      more.push({ i: i, skip: skip, url: CZ_BASE + base[i].path + '?' + qs_(p) });
+    }
+  });
+  if (more.length) {
+    fetch(more.map(function (m) { return m.url; })).forEach(function (b, k) { out[more[k].i] = out[more[k].i].concat(b.value || []); });
+  }
+  return out;
+}
+
+function userMap_(rows) {
+  var map = {};
+  rows.forEach(function (u) {
+    map[u.Id] = { id: u.Id, name: (String(u.FirstName || '').trim() + ' ' + String(u.LastName || '').trim()).trim(), email: u.Email, active: u.IsActive };
+  });
+  return map;
+}
+
 function users_() {
   var map = {};
   czGet_('/UserAccount', { $select: 'Id,FirstName,LastName,Email,IsActive', $top: 100 }).forEach(function (u) {
@@ -110,16 +154,34 @@ function sinceIso_(days) {
   return new Date(Date.now() - days * 864e5).toISOString().replace(/\.\d+Z$/, 'Z');
 }
 
-function load_() {
-  var users = users_();
-  var owned = czGet_('/Account', {
-    $filter: 'IsActive eq true and UserAccountId ne null',
-    $select: 'Id,StartDate,TotalContractAmount,UserAccountId,Cf', $top: 100,
-  });
-  var queueRaw = czGet_('/Account', {
-    $filter: "IsActive eq true and UserAccountId eq null and Cf/OnboardingStatus eq 'Pre-Kickoff' and StartDate ge " + sinceIso_(QUEUE_DAYS),
-    $select: 'Id,Name,ExternalId,StartDate,TotalContractAmount,LicenseCount,Cf', $top: 100,
-  });
+var QUEUE_CF = ['FirmId', 'OwnerId', 'PracticeArea', 'ImplementationType', 'AgencyFirm', 'AgencyClientFirm', 'Consultant',
+  'PartnerType', 'SalesOnboardingNotes', 'IntakeProcess', 'KeyChallenges', 'AiDemoNotes', 'OnboardingDeckLink', 'OnboardingDocumentsFolder'];
+var LOAD_CACHE_SECONDS = 60;
+
+function load_(force) {
+  var cache = CacheService.getScriptCache();
+  if (!force) {
+    var hit = cache.get('load');
+    if (hit) return JSON.parse(hit);
+  }
+  var out = buildLoad_();
+  try { cache.put('load', JSON.stringify(out), LOAD_CACHE_SECONDS); } catch (e) { /* over 100KB: skip caching */ }
+  return out;
+}
+
+function clearLoadCache_() { CacheService.getScriptCache().remove('load'); }
+
+function buildLoad_() {
+  // Only the fields we use: pulling every custom field made each 100-row page ~600 KB.
+  var got = czGetMany_([
+    { path: '/UserAccount', params: { $select: 'Id,FirstName,LastName,Email,IsActive' } },
+    { path: '/Account', params: { $filter: 'IsActive eq true and UserAccountId ne null',
+      $select: 'Id,StartDate,TotalContractAmount,UserAccountId,Cf/AccountManager,Cf/OnboardingStatus' } },
+    { path: '/Account', params: {
+      $filter: "IsActive eq true and UserAccountId eq null and Cf/OnboardingStatus eq 'Pre-Kickoff' and StartDate ge " + sinceIso_(QUEUE_DAYS),
+      $select: 'Id,Name,ExternalId,StartDate,TotalContractAmount,LicenseCount,' + QUEUE_CF.map(function (f) { return 'Cf/' + f; }).join(',') } },
+  ]);
+  var users = userMap_(got[0]), owned = got[1], queueRaw = got[2];
 
   // Per-owner load. The rotation = owners with an AM name who have an open onboarding.
   var reps = {};
@@ -179,8 +241,7 @@ function load_() {
     };
   }).sort(function (a, b) { return a.start < b.start ? -1 : 1; });
 
-  addLeadSource_(queue);
-  addContacts_(queue);
+  addQueueDetails_(queue);
   var pr = reps[PARTNER_REP_ID];
   var partnerRep = { id: PARTNER_REP_ID, name: (users[PARTNER_REP_ID] && users[PARTNER_REP_ID].name) || 'Kennedy Wickham',
     open: pr ? pr.open : 0, firms: pr ? pr.firms : 0, openMrr: pr ? Math.round(pr.openMrr) : 0, lastStart: pr ? pr.lastStart : '' };
@@ -248,15 +309,22 @@ function suggest_(queue, reps, highMin, partnerRep) {
   });
 }
 
+function addQueueDetails_(queue) {
+  if (!queue.length) return;
+  var ids = queue.map(function (f) { return 'AccountId eq ' + Number(f.czId); }).join(' or ');
+  var got = czGetMany_([
+    { path: '/CustomListOpportunity', params: { $filter: '(' + ids + ') and Won eq true', $select: 'AccountId,LeadSource,LeadSourceDetail,CreatedDate' } },
+    { path: '/Contact', params: { $filter: ids, $select: 'Id,FirstName,LastName,Email,AccountId,Cf/IncludeInOnboarding' } },
+  ]);
+  applyLeadSource_(queue, got[0]);
+  applyContacts_(queue, groupContacts_(got[1]));
+}
+
 // Lead source lives on the closed-won opportunity (ChurnZero's synced CustomListOpportunity),
 // not the account — the account-level field is blank on new firms.
-function addLeadSource_(queue) {
-  if (!queue.length) return;
+function applyLeadSource_(queue, opps) {
   var byAcct = {};
-  czGet_('/CustomListOpportunity', {
-    $filter: '(' + queue.map(function (f) { return 'AccountId eq ' + Number(f.czId); }).join(' or ') + ') and Won eq true',
-    $select: 'AccountId,LeadSource,LeadSourceDetail,CreatedDate', $top: 100,
-  }).forEach(function (o) {
+  opps.forEach(function (o) {
     var cur = byAcct[o.AccountId];
     if (!cur || String(o.CreatedDate) > String(cur.CreatedDate)) byAcct[o.AccountId] = o;
   });
@@ -273,11 +341,15 @@ function addLeadSource_(queue) {
 // the kickoff play emails those contacts.
 function contactsFor_(accountIds) {
   if (!accountIds.length) return {};
-  var by = {};
-  czGet_('/Contact', {
+  return groupContacts_(czGet_('/Contact', {
     $filter: accountIds.map(function (id) { return 'AccountId eq ' + Number(id); }).join(' or '),
-    $select: 'Id,FirstName,LastName,Email,AccountId,Cf', $top: 100,
-  }).forEach(function (c) {
+    $select: 'Id,FirstName,LastName,Email,AccountId,Cf/IncludeInOnboarding', $top: 100,
+  }));
+}
+
+function groupContacts_(rows) {
+  var by = {};
+  rows.forEach(function (c) {
     (by[c.AccountId] = by[c.AccountId] || []).push({
       name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() || c.Email || 'Contact ' + c.Id,
       email: c.Email || '', onboarding: !!(c.Cf || {}).IncludeInOnboarding,
@@ -286,8 +358,7 @@ function contactsFor_(accountIds) {
   return by;
 }
 
-function addContacts_(queue) {
-  var by = contactsFor_(queue.map(function (f) { return f.czId; }));
+function applyContacts_(queue, by) {
   queue.forEach(function (f) {
     f.contacts = by[f.czId] || [];
     f.onboardingContacts = f.contacts.filter(function (c) { return c.onboarding; }).map(function (c) { return c.name; });
@@ -327,6 +398,7 @@ function assign_(b, by) {
     after = czGet_('/Account', { $filter: 'Id eq ' + Number(b.czId), $select: 'Id,UserAccountId,Cf' })[0];
     confirmed = !!after && after.UserAccountId === Number(b.userId) && (after.Cf || {}).ImplementationType === PREMIUM;
   }
+  clearLoadCache_();
   appendLog_({
     by: by, firm: acct.Name, firmId: String((acct.Cf || {}).FirmId || acct.ExternalId), czId: acct.Id,
     mrr: acct.TotalContractAmount, suggested: b.suggestedName || '', assigned: rep.name, userId: rep.id,
@@ -352,7 +424,7 @@ function setRotation_(b) {
   var skip = rotationSkips_();
   if (b.included) delete skip[b.userId]; else skip[b.userId] = true;
   PropertiesService.getScriptProperties().setProperty('ROTATION_SKIP', JSON.stringify(skip));
-  return load_();
+  return load_(true);
 }
 
 function tier_() {
@@ -371,7 +443,7 @@ function setTier_(b) {
     t.min = m;
   }
   PropertiesService.getScriptProperties().setProperty('TIER', JSON.stringify(t));
-  return load_();
+  return load_(true);
 }
 
 /* ---------- one-off write test (run from the editor) ----------

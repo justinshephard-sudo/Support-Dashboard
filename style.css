@@ -709,3 +709,7 @@ body.drill-open{overflow:hidden}
 .loop-form-actions{display:flex;align-items:center;gap:12px}
 @media (max-width:1100px){.loop-board{grid-template-columns:1fr}.loop-hero{grid-template-columns:minmax(0,1fr) 280px}}
 @media (max-width:720px){.loop-hero{grid-template-columns:1fr;padding:24px 20px}.loop-hero-art{margin:6px auto -24px;text-align:center}.loop-hero-art img{max-width:220px}.loop-bubble{left:0;top:-10px}.loop-grid{grid-template-columns:1fr}.loop-stat{min-width:0;flex:1}}
+.loop-note{margin-top:14px;font-size:13.5px;font-weight:600;color:#b86400;background:rgba(255,144,17,.1);border-radius:12px;padding:9px 14px}
+#loopRefresh.spin{opacity:.7;pointer-events:none}
+.session-banner{position:fixed;left:16px;bottom:16px;z-index:1000;display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:calc(100% - 32px);background:#233043;color:#fff;font-size:14px;font-weight:600;border-radius:999px;padding:8px 8px 8px 18px;box-shadow:0 12px 28px rgba(0,0,0,.3)}
+.session-banner button{font:700 13.5px var(--font);color:#fff;background:var(--grad-orange);border:none;border-radius:999px;padding:7px 16px;cursor:pointer}

@@ -27,7 +27,8 @@ var MANAGERS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@
 var DATABASE_ID = 'e4a103fc90624ce1b0396a50fc9e76f8'; // Team Loop Tracker
 var NOTION_VERSION = '2022-06-28';
 var CLOSED_DAYS = 6;
-var CACHE_SECONDS = 10;
+var FRESH_MS = 15000;          // serve the cached list if it's newer than this
+var STALE_SECONDS = 6 * 3600;  // keep the last good list this long, for when Notion is slow or down
 var SELECTS = {
   Status: ['Open', 'In Progress', 'Closed'],
   Outcome: ['Under Review', 'Implementing', 'Partially Implementing', 'Not Implementing', 'N/A'],
@@ -85,6 +86,16 @@ function tokenRequest_(payload) {
   return { ok: true, body: body };
 }
 
+// Run from the editor to see whether the Notion connection is stored and working.
+function checkNotion() {
+  var p = PropertiesService.getScriptProperties();
+  Logger.log('Client ID set: ' + !!p.getProperty('NOTION_CLIENT_ID') + ' · secret set: ' + !!p.getProperty('NOTION_CLIENT_SECRET') +
+    ' · token stored: ' + !!p.getProperty('NOTION_TOKEN'));
+  if (!p.getProperty('NOTION_TOKEN')) { Logger.log('Not connected: run startNotionAuth and finish the Allow step.'); return; }
+  var d = load_(true);
+  Logger.log('Connected ✓ — ' + d.items.length + ' items visible.');
+}
+
 /* ---------- Notion API ---------- */
 
 function notion_(method, path, payload, retried) {
@@ -96,7 +107,15 @@ function notion_(method, path, payload, retried) {
     headers: { Authorization: 'Bearer ' + token, 'Notion-Version': NOTION_VERSION },
   };
   if (payload) opts.payload = JSON.stringify(payload);
-  var r = UrlFetchApp.fetch('https://api.notion.com/v1' + path, opts);
+  var r;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    r = UrlFetchApp.fetch('https://api.notion.com/v1' + path, opts);
+    var code = r.getResponseCode();
+    if (code !== 429 && code < 500) break;
+    // Rate-limited or Notion hiccup: wait (Retry-After if given) and try again.
+    var wait = Number((r.getHeaders() || {})['Retry-After'] || (r.getHeaders() || {})['retry-after'] || 0) * 1000 || 700 * (attempt + 1);
+    Utilities.sleep(Math.min(wait, 3000));
+  }
   if (r.getResponseCode() === 401 && !retried && p.getProperty('NOTION_REFRESH')) {
     var ref = tokenRequest_({ grant_type: 'refresh_token', refresh_token: p.getProperty('NOTION_REFRESH') });
     if (ref.ok) return notion_(method, path, payload, true);
@@ -125,10 +144,36 @@ function toItem_(pg) {
 
 /* ---------- actions ---------- */
 
-function load_() {
+// One shared copy of the list: fresh for FRESH_MS, refreshed by whichever request
+// gets the lock first (the rest wait and reuse it), and the last good copy is
+// served if Notion fails.
+function load_(force) {
   var cache = CacheService.getScriptCache();
-  var hit = cache.get('items');
-  if (hit) return JSON.parse(hit);
+  var cached = readCache_(cache);
+  if (!force && cached && Date.now() - cached.fetched < FRESH_MS) return cached.data;
+  var lock = LockService.getScriptLock();
+  var locked = lock.tryLock(8000);
+  try {
+    cached = readCache_(cache);
+    if (!force && cached && Date.now() - cached.fetched < FRESH_MS) return cached.data;
+    try {
+      var data = fetchItems_();
+      cache.put('items2', JSON.stringify({ fetched: Date.now(), data: data }), STALE_SECONDS);
+      return data;
+    } catch (err) {
+      if (cached) { var d = cached.data; d.stale = true; d.staleReason = String(err.message || err); return d; }
+      throw err;
+    }
+  } finally {
+    if (locked) lock.releaseLock();
+  }
+}
+
+function readCache_(cache) {
+  try { var c = cache.get('items2'); return c ? JSON.parse(c) : null; } catch (e) { return null; }
+}
+
+function fetchItems_() {
   var since = Utilities.formatDate(new Date(Date.now() - CLOSED_DAYS * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');
   var closed = { property: 'Status', select: { equals: 'Closed' } };
   var filter = { or: [
@@ -146,9 +191,7 @@ function load_() {
     items = items.concat((res.results || []).map(toItem_));
     cursor = res.has_more ? res.next_cursor : null;
   } while (cursor && ++guard < 10);
-  var out = { ok: true, items: items, options: SELECTS, closedDays: CLOSED_DAYS, at: new Date().toISOString() };
-  cache.put('items', JSON.stringify(out), CACHE_SECONDS);
-  return out;
+  return { ok: true, items: items, options: SELECTS, closedDays: CLOSED_DAYS, at: new Date().toISOString() };
 }
 
 function pageText_(id) {
@@ -190,7 +233,7 @@ function update_(b) {
   if (f.status === 'Closed') props['Date Closed'] = { date: { start: today_() } };
   else if (f.status) props['Date Closed'] = { date: null };
   var pg = notion_('patch', '/pages/' + b.id, { properties: props });
-  CacheService.getScriptCache().remove('items');
+  CacheService.getScriptCache().remove('items2');
   return { ok: true, item: toItem_(pg) };
 }
 
@@ -201,8 +244,22 @@ function create_(b) {
     type: f.type || undefined, raisedBy: f.raisedBy || undefined });
   props['Date Raised'] = { date: { start: today_() } };
   var pg = notion_('post', '/pages', { parent: { database_id: DATABASE_ID }, properties: props });
-  CacheService.getScriptCache().remove('items');
+  CacheService.getScriptCache().remove('items2');
   return { ok: true, item: toItem_(pg) };
+}
+
+// Optional: run installWarmTrigger once from the editor. Every minute on weekday
+// working hours it refreshes the shared list, so people opening the tab rarely wait on Notion.
+function warmLoopCache() {
+  var h = Number(Utilities.formatDate(new Date(), 'America/Los_Angeles', 'H'));
+  var dow = Number(Utilities.formatDate(new Date(), 'America/Los_Angeles', 'u'));
+  if (dow > 5 || h < 6 || h > 18) return;
+  load_(true);
+}
+function installWarmTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'warmLoopCache') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('warmLoopCache').timeBased().everyMinutes(1).create();
+  Logger.log('Warm-up trigger installed.');
 }
 
 /* ---------- entry ---------- */
@@ -214,7 +271,7 @@ function doPost(e) {
     var who = verify_(b.token);
     if (!who.ok) return json_(who);
     if (b.action === 'load') {
-      var d = load_();
+      var d = load_(!!b.force);
       d.canEdit = who.manager;
       return json_(d);
     }

@@ -97,7 +97,7 @@ const MONTH_NAMES = MONTH_TABS.map((m) => m.name);
    it now reads via the Sheets API using the signed-in user's OAuth token,
    which lets the spreadsheet be private instead of "anyone with the link".
    -------------------------------------------------------------------------- */
-const AUTH = { token: null, email: null, tokenClient: null, gidTitle: {} };
+const AUTH = { token: null, email: null, tokenClient: null, gidTitle: {}, expiresAt: 0 };
 window.AUTH = AUTH;   // the embedded Additional Services app (services/) reuses this sign-in
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -124,6 +124,9 @@ function initAuth(onReady) {
     callback: async (resp) => {
       if (resp.error) { gateError('Sign-in failed — please try again.'); return; }
       AUTH.token = resp.access_token;
+      AUTH.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+      // Renewing an expired session: keep the page as it is, just swap the token.
+      if (AUTH.email) { hideSessionBanner(); return; }
       let info;
       try {
         info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -147,6 +150,28 @@ function initAuth(onReady) {
   const btn = document.getElementById('gateBtn');
   if (btn) btn.addEventListener('click', () => AUTH.tokenClient.requestAccessToken({ prompt: '' }));
 }
+
+/* Google access tokens last an hour. Near the end (or after a request comes back
+   "session expired") a small banner offers one-click renewal; renewing needs a
+   click because browsers block sign-in popups that open on their own. */
+function showSessionBanner(expired) {
+  let b = document.getElementById('sessionBanner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'sessionBanner';
+    b.className = 'session-banner';
+    b.innerHTML = '<span></span><button type="button">Stay signed in</button>';
+    b.querySelector('button').addEventListener('click', () => AUTH.tokenClient.requestAccessToken({ prompt: '' }));
+    document.body.appendChild(b);
+  }
+  b.querySelector('span').textContent = expired || Date.now() > AUTH.expiresAt
+    ? 'Your Google sign-in expired.' : 'Your Google sign-in expires in a few minutes.';
+}
+function hideSessionBanner() { document.getElementById('sessionBanner')?.remove(); }
+setInterval(() => {
+  if (AUTH.email && AUTH.expiresAt && AUTH.expiresAt - Date.now() < 5 * 60000) showSessionBanner();
+}, 30000);
+const isSessionError = (e) => /session expired|not signed in/i.test(String(e && e.message));
 
 async function sheetsApi(path, sheetId = SHEET_ID) {
   const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + path, {
@@ -2910,7 +2935,7 @@ async function faCall(body) {
   return data;
 }
 
-async function loadAssign() {
+async function loadAssign(force) {
   if (FA.loading) return;
   FA.loading = true;
   const err = document.getElementById('faError');
@@ -2918,9 +2943,10 @@ async function loadAssign() {
   document.getElementById('faRefresh').disabled = true;
   if (!FA.data) document.getElementById('faBody').innerHTML = '<div class="res-loading">Checking ChurnZero for new firms…</div>';
   try {
-    FA.data = await faCall({ action: 'load' });
+    FA.data = await faCall({ action: 'load', force: !!force });
     renderAssign();
   } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
     err.textContent = 'Couldn’t load from ChurnZero: ' + e.message;
     err.hidden = false;
     if (!FA.data) document.getElementById('faBody').innerHTML = '';
@@ -3104,12 +3130,13 @@ async function faAssign(btn) {
 }
 
 function showAssign() {
+  const stale = FA.data && Date.now() - new Date(FA.data.generated) > 60000;
   document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
   document.querySelectorAll('.view').forEach((x) => x.classList.remove('active'));
   const v = document.getElementById('view-assign');
   v.classList.add('active');
   v.scrollIntoView({ block: 'start' });
-  loadAssign();
+  if (!FA.data) loadAssign(); else { renderAssign(); if (stale) loadAssign(); }
 }
 function leaveAssign() {
   const v = document.getElementById('view-assign');
@@ -3120,7 +3147,7 @@ function leaveAssign() {
 }
 
 function setupAssign() {
-  document.getElementById('faRefresh').addEventListener('click', () => { FA.done = {}; loadAssign(); });
+  document.getElementById('faRefresh').addEventListener('click', () => { FA.done = {}; loadAssign(true); });
   const body = document.getElementById('faBody');
   body.addEventListener('click', (e) => {
     const btn = e.target.closest('.fa-assign');
@@ -3187,6 +3214,8 @@ function updateAssignButton() {
     anchor.after(btn);
   }
   if (btn) btn.hidden = !(overridesUnlocked && canAssign());
+  // Warm it up in the background so the page opens with data already there.
+  if (overridesUnlocked && canAssign() && !FA.data && !FA.loading && AUTH.token) loadAssign();
   if (!overridesUnlocked) leaveAssign();
 }
 
@@ -3194,18 +3223,18 @@ function updateAssignButton() {
    Loop Tracker (Resources tab) — the Notion "Team Loop Tracker", live, for the
    close-the-loop meeting. Everyone can read; managers change status with one
    click, open an item to edit it, or add one. Reads and writes go through
-   apps-script/loop-tracker, which holds the Notion connection. While the view
-   is open it re-checks every LOOP_POLL_MS so everyone in the meeting stays in sync.
+   apps-script/loop-tracker, which holds the Notion connection. The last list is
+   kept in this browser so the view opens instantly; ↻ Refresh pulls the latest.
    ========================================================================== */
 const LOOP_URL = 'https://script.google.com/macros/s/AKfycbxQVzKZdB8ecIFscQUDX3uoL8CCzzH1qFiL3VtfJymAAwZPGulkn34MQi2sLt-b7NdN/exec';
 const LOOP_NOTION_URL = 'https://www.notion.so/e4a103fc90624ce1b0396a50fc9e76f8';
-const LOOP_POLL_MS = 20000;
+const LOOP_STORE = 'cs-loop-cache';
 const LOOP_GROUPS = [
   { status: 'Open', title: 'Open' },
   { status: 'In Progress', title: 'In Progress' },
   { status: 'Closed', title: 'Closed this week' },
 ];
-const LOOP = { data: null, loading: false, timer: null, openId: null, saving: 0 };
+const LOOP = { data: null, loading: false, openId: null, saving: 0, note: '' };
 
 async function loopCall(body) {
   const res = await fetch(LOOP_URL, {
@@ -3218,31 +3247,38 @@ async function loopCall(body) {
   return data;
 }
 
-async function loadLoop(quiet) {
+async function loadLoop(force) {
   if (LOOP.loading || !AUTH.token) return;
-  LOOP.loading = true;
   const root = document.getElementById('loop');
-  if (!LOOP.data && !quiet) root.innerHTML = '<div class="res-loading">Loading the Loop Tracker…</div>';
-  try {
-    const data = await loopCall({ action: 'load' });
-    // Don't let a poll overwrite a change that's still saving, or close an open status menu.
-    if (!LOOP.saving && !(quiet && document.querySelector('.loop-menu'))) { LOOP.data = data; renderLoop(); }
-  } catch (e) {
-    if (!quiet || !LOOP.data) root.innerHTML = `<div class="error-banner">Couldn’t load the Loop Tracker: ${esc(e.message)}</div>`;
-  } finally {
-    LOOP.loading = false;
+  if (!LOOP.data) {
+    try { LOOP.data = JSON.parse(localStorage.getItem(LOOP_STORE) || 'null'); } catch (e) { /* private mode */ }
+    if (LOOP.data) { LOOP.data.canEdit = false; LOOP.note = 'Showing your last copy — checking Notion…'; renderLoop(); }
+    else root.innerHTML = '<div class="res-loading">Loading the Loop Tracker…</div>';
   }
+  LOOP.loading = true;
+  document.getElementById('loopRefresh')?.classList.add('spin');
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const data = await loopCall({ action: 'load', force: !!force });
+      LOOP.data = data;
+      LOOP.note = data.stale ? `Notion didn’t answer, so this is the list from ${new Date(data.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Try Refresh in a minute.` : '';
+      try { localStorage.setItem(LOOP_STORE, JSON.stringify(data)); } catch (e) { /* full or private */ }
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (isSessionError(e)) { showSessionBanner(true); break; }
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+  }
+  LOOP.loading = false;
+  if (lastErr) {
+    if (LOOP.data) LOOP.note = isSessionError(lastErr) ? 'Your sign-in expired — click “Stay signed in”, then Refresh.' : 'Couldn’t reach Notion just now — showing the last copy. Try Refresh.';
+    else root.innerHTML = `<div class="error-banner">Couldn’t load the Loop Tracker: ${esc(lastErr.message)} <button type="button" class="mgr-btn" id="loopRetry">Try again</button></div>`;
+  }
+  if (LOOP.data) renderLoop();
 }
-
-function loopStartPolling() {
-  loopStopPolling();
-  LOOP.timer = setInterval(() => {
-    if (document.hidden || document.getElementById('loop').hidden) return;
-    if (!document.getElementById('view-resources').classList.contains('active')) return;
-    loadLoop(true);
-  }, LOOP_POLL_MS);
-}
-function loopStopPolling() { if (LOOP.timer) clearInterval(LOOP.timer); LOOP.timer = null; }
 
 const loopAgo = (d) => {
   if (!d) return '';
@@ -3280,12 +3316,13 @@ function renderLoop() {
       <div class="loop-hero-text">
         <div class="loop-eyebrow">Close the loop</div>
         <h2>Team <span>Loop Tracker</span></h2>
-        <p>What the team raised, what we’re doing about it, and what we closed this week. Updates live from Notion.</p>
+        <p>What the team raised, what we’re doing about it, and what we closed this week. From Notion.</p>
         <div class="loop-stats">
           ${groups.map((g) => `<a class="loop-stat s-${loopSlug(g.status)}" href="#loop-${loopSlug(g.status)}"><b>${g.items.length}</b><span>${esc(g.title)}</span></a>`).join('')}
         </div>
         <div class="loop-actions">
           ${d.canEdit ? '<button type="button" class="loop-btn primary" id="loopAdd">+ Add item</button>' : ''}
+          <button type="button" class="loop-btn" id="loopRefresh">↻ Refresh</button>
           <a class="loop-btn" href="${LOOP_NOTION_URL}" target="_blank" rel="noopener">Open in Notion ↗</a>
         </div>
       </div>
@@ -3300,7 +3337,8 @@ function renderLoop() {
           ${g.items.length ? `<ul class="loop-list">${g.items.map((it) => loopRow(it, d.canEdit)).join('')}</ul>` : `<p class="loop-empty">${g.status === 'Closed' ? 'Nothing closed yet this week.' : 'Nothing here.'}</p>`}
         </section>`).join('')}
     </div>
-    <p class="loop-foot"><span class="loop-live"></span>${d.canEdit ? 'Click a status to change it, or a card to edit it.' : 'Click a card for details. Managers can edit.'} · checked ${new Date(d.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</p>`;
+    ${LOOP.note ? `<p class="loop-note">${esc(LOOP.note)}</p>` : ''}
+    <p class="loop-foot">${d.canEdit ? 'Click a status to change it, or a card to edit it.' : 'Click a card for details. Managers can edit.'} · from Notion at ${new Date(d.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</p>`;
 }
 
 /* ---- saving ---- */
@@ -3318,7 +3356,8 @@ async function loopSave(id, fields) {
     return true;
   } catch (e) {
     Object.assign(it, before);
-    alert('Couldn’t save to Notion: ' + e.message);
+    if (isSessionError(e)) showSessionBanner(true);
+    alert(isSessionError(e) ? 'Your Google sign-in expired. Click “Stay signed in” at the bottom of the page, then try again.' : 'Couldn’t save to Notion: ' + e.message);
     return false;
   } finally {
     LOOP.saving--;
@@ -3492,6 +3531,7 @@ function setupLoop() {
     const open = e.target.closest('.loop-open');
     if (open) { loopOpenPanel(open.dataset.id); return; }
     if (e.target.closest('#loopAdd')) loopAddForm();
+    if (e.target.closest('#loopRefresh') || e.target.closest('#loopRetry')) loadLoop(true);
   });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.loop-menu') && !e.target.closest('.loop-status')) document.querySelectorAll('.loop-menu').forEach((m) => m.remove());
@@ -3638,7 +3678,7 @@ function setResourcesView(view, load = true) {
   document.getElementById('roundup').hidden = view !== 'roundup';
   document.getElementById('loop').hidden = view !== 'loop';
   try { localStorage.setItem('cs-res-view', view); } catch (e) { /* private mode */ }
-  if (view === 'loop') { if (load) loadLoop(); loopStartPolling(); } else loopStopPolling();
+  if (view === 'loop' && load) loadLoop();
   if (view === 'roundup' && load) loadRoundup();
 }
 
