@@ -2891,7 +2891,7 @@ function updateScorecardsButton() {
 const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbxkDLI7ldy0AtXq4iUjDB0b4MAdzkzJ0QSditt1sxFReXnoo5JPg8HzrC4feE1-flXyvg/exec';
 const ASSIGN_EMAILS = ['justin.shephard@lawmatics.com', 'clare@lawmatics.com', 'johnny@lawmatics.com'];
 // ChurnZero account page; {id} = the ChurnZero account Id.
-const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/accounts/{id}';
+const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/account/{id}/details';
 const ASSIGN_PLAY = 'Onboarding New Customer Kickoff (NEW)';
 const FA = { data: null, loading: false, done: {} };
 
@@ -2981,7 +2981,7 @@ function faFirmCard(f) {
         <div class="fa-why">${esc(faWhy(top))}</div>
         <label class="fa-change">Assign to
           <select class="fa-select" data-cz="${f.czId}">
-            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
+            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
           </select>
         </label>
         <div class="fa-why fa-why-alt" hidden></div>
@@ -2996,6 +2996,7 @@ function faFirmCard(f) {
       <div class="fa-left">
         <div class="fa-firm-head">
           <h3>${esc(f.name)}</h3>
+          ${f.high ? `<span class="fa-flag fa-high">High MRR${f.tierFallback ? ' · no high-MRR AM in rotation' : ''}</span>` : ''}
           ${f.flags.map((x) => `<span class="fa-flag">${esc(x)}</span>`).join('')}
         </div>
         <div class="fa-facts">
@@ -3032,10 +3033,14 @@ function renderAssign() {
 
     <section class="fa-section">
       <div class="fa-section-head"><h3>Rotation</h3><span>Who suggestions pick from: AMs with at least one open onboarding. Untick someone who’s out.</span></div>
+      <form class="fa-tier" id="faTierForm">High-MRR tier: firms at
+        <label>$<input type="number" min="0" step="50" id="faTierMin" value="${esc(d.highMin)}">/mo</label> and up go only to the AMs marked High MRR, and those AMs get only those firms.
+        <button type="submit" class="mgr-btn">Save</button></form>
       <div class="table-wrap"><table class="fa-table">
-        <thead><tr><th>In rotation</th><th>AM</th><th>Open OBs</th><th>Last new firm</th><th>Firms</th><th>Onboarding MRR</th><th>Total MRR</th></tr></thead>
+        <thead><tr><th>In rotation</th><th>High MRR</th><th>AM</th><th>Open OBs</th><th>Last new firm</th><th>Firms</th><th>Onboarding MRR</th><th>Total MRR</th></tr></thead>
         <tbody>${(d.reps || []).map((r) => `<tr class="${r.included ? '' : 'off'}">
             <td><input type="checkbox" class="fa-rot" data-user="${r.id}"${r.included ? ' checked' : ''} aria-label="Include ${esc(r.name)}"></td>
+            <td><input type="checkbox" class="fa-tierrep" data-user="${r.id}"${r.high ? ' checked' : ''} aria-label="${esc(r.name)} takes high-MRR firms"></td>
             <td>${esc(r.name)}</td><td>${r.open}</td><td>${r.lastStart ? esc(faDaysAgo(r.lastStart)) : '—'}</td>
             <td>${r.firms}</td><td>${fmtMoney(r.openMrr)}</td><td>${fmtMoney(r.mrr)}</td></tr>`).join('')}</tbody>
       </table></div>
@@ -3101,6 +3106,21 @@ function setupAssign() {
     const btn = e.target.closest('.fa-assign');
     if (btn) faAssign(btn);
   });
+  body.addEventListener('submit', async (e) => {
+    if (e.target.id !== 'faTierForm') return;
+    e.preventDefault();
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    try {
+      FA.data = await faCall({ action: 'setTier', min: Number(document.getElementById('faTierMin').value) });
+      renderAssign();
+    } catch (err) {
+      btn.disabled = false;
+      const box = document.getElementById('faError');
+      box.textContent = 'Couldn’t save the threshold: ' + err.message;
+      box.hidden = false;
+    }
+  });
   body.addEventListener('change', async (e) => {
     const sel = e.target.closest('.fa-select');
     if (sel) {
@@ -3114,11 +3134,14 @@ function setupAssign() {
       card.querySelector('.fa-assign').textContent = changed ? `Assign to ${r.name.split(' ')[0]}` : 'Approve & assign';
       return;
     }
-    const rot = e.target.closest('.fa-rot');
+    const rot = e.target.closest('.fa-rot, .fa-tierrep');
     if (rot) {
       rot.disabled = true;
+      const uid = Number(rot.dataset.user);
       try {
-        FA.data = await faCall({ action: 'setRotation', userId: Number(rot.dataset.user), included: rot.checked });
+        FA.data = await faCall(rot.classList.contains('fa-rot')
+          ? { action: 'setRotation', userId: uid, included: rot.checked }
+          : { action: 'setTier', userId: uid, high: rot.checked });
         renderAssign();
       } catch (err) {
         rot.checked = !rot.checked;

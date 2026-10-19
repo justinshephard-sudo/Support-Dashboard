@@ -44,6 +44,9 @@ var MIN_START = '2025-01-01';
 var PREMIUM = 'Premium Onboarding';
 // How much each factor counts toward the suggestion (sums to 100).
 var WEIGHTS = { open: 40, since: 30, book: 15, value: 15 };
+// High-MRR tier: these AMs only get firms at or above the threshold, and those
+// firms go only to them. Both are editable on the page (stored in TIER).
+var TIER_DEFAULT = { reps: { 7: true, 71: true }, min: 1000 }; // Elliott Jones, Julio Ortiz
 
 function authorize() {
   SpreadsheetApp.openById(LOG_SHEET_ID);
@@ -64,6 +67,7 @@ function doPost(e) {
     if (b.action === 'load') return json_(load_());
     if (b.action === 'assign') return json_(assign_(b, who.email));
     if (b.action === 'setRotation') return json_(setRotation_(b));
+    if (b.action === 'setTier') return json_(setTier_(b));
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String((err && err.message) || err) });
@@ -140,11 +144,13 @@ function load_() {
   });
 
   var skipped = rotationSkips_();
+  var tier = tier_();
   var rotation = Object.keys(reps).map(function (k) { return reps[k]; })
     .filter(function (r) { return r.am && r.open > 0; })
     .map(function (r) {
       r.email = users[r.id] ? users[r.id].email : '';
       r.included = !skipped[r.id];
+      r.high = !!tier.reps[r.id];
       r.mrr = Math.round(r.mrr); r.openMrr = Math.round(r.openMrr);
       return r;
     })
@@ -169,10 +175,10 @@ function load_() {
     };
   }).sort(function (a, b) { return a.start < b.start ? -1 : 1; });
 
-  suggest_(queue, rotation);
+  suggest_(queue, rotation, tier.min);
   var props = PropertiesService.getScriptProperties();
   return {
-    ok: true, queue: queue, reps: rotation, weights: WEIGHTS, recent: log.slice(0, 25),
+    ok: true, queue: queue, reps: rotation, weights: WEIGHTS, highMin: tier.min, recent: log.slice(0, 25),
     canWrite: !!props.getProperty('CZ_APP_KEY'), generated: new Date().toISOString(),
   };
 }
@@ -183,11 +189,16 @@ function load_() {
    higher. Firms are suggested oldest first, and each pick counts against that
    rep for the next firm, so a batch of three new firms spreads out. */
 
-function suggest_(queue, reps) {
-  var sim = reps.filter(function (r) { return r.included; })
+function suggest_(queue, reps, highMin) {
+  var all = reps.filter(function (r) { return r.included; })
     .map(function (r) { return { r: r, open: r.open, openMrr: r.openMrr, firms: r.firms, lastStart: r.lastStart }; });
   var today = new Date();
   queue.forEach(function (f) {
+    f.high = f.mrr >= highMin;
+    // Score only the tier this firm belongs to; fall back to everyone if that tier is empty.
+    var sim = all.filter(function (s) { return !!s.r.high === f.high; });
+    f.tierFallback = !sim.length;
+    if (!sim.length) sim = all;
     if (!sim.length) { f.ranking = []; return; }
     var days = function (s) { return s.lastStart ? Math.max(0, Math.round((today - new Date(s.lastStart + 'T12:00:00')) / 864e5)) : 365; };
     var norm = function (vals, higherIsBetter) {
@@ -205,6 +216,11 @@ function suggest_(queue, reps) {
         open: s.open, daysSince: days(s), firms: s.firms, openMrr: Math.round(s.openMrr),
       };
     }).sort(function (x, y) { return y.score - x.score || x.open - y.open || y.daysSince - x.daysSince; });
+    // Everyone else stays pickable in the dropdown, unscored.
+    all.forEach(function (s) {
+      if (sim.indexOf(s) === -1) ranked.push({ userId: s.r.id, name: s.r.name, score: null, outside: true,
+        open: s.open, daysSince: days(s), firms: s.firms, openMrr: Math.round(s.openMrr) });
+    });
     f.ranking = ranked;
     var top = sim.filter(function (s) { return s.r.id === ranked[0].userId; })[0];
     top.open++; top.firms++; top.openMrr += f.mrr; top.lastStart = Utilities.formatDate(today, 'America/Los_Angeles', 'yyyy-MM-dd');
@@ -265,6 +281,25 @@ function setRotation_(b) {
   var skip = rotationSkips_();
   if (b.included) delete skip[b.userId]; else skip[b.userId] = true;
   PropertiesService.getScriptProperties().setProperty('ROTATION_SKIP', JSON.stringify(skip));
+  return load_();
+}
+
+function tier_() {
+  try {
+    var t = JSON.parse(PropertiesService.getScriptProperties().getProperty('TIER') || 'null');
+    return t && t.reps ? t : TIER_DEFAULT;
+  } catch (e) { return TIER_DEFAULT; }
+}
+
+function setTier_(b) {
+  var t = tier_();
+  if (b.userId != null) { if (b.high) t.reps[b.userId] = true; else delete t.reps[b.userId]; }
+  if (b.min != null) {
+    var m = Number(b.min);
+    if (!(m >= 0)) throw new Error('enter a dollar amount');
+    t.min = m;
+  }
+  PropertiesService.getScriptProperties().setProperty('TIER', JSON.stringify(t));
   return load_();
 }
 

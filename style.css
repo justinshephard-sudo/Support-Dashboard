@@ -614,3 +614,8 @@ body.drill-open{overflow:hidden}
 .fa-table td:first-child{width:90px}
 .fa-foot{margin-top:18px;font-size:12.5px;color:var(--text-3)}
 @media (max-width:820px){.fa-firm{grid-template-columns:1fr}.fa-pick,.fa-done{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:14px}}
+.fa-flag.fa-high{background:rgba(6,139,255,.14);color:#0569c2}
+.fa-tier{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:14px;color:var(--text-2);margin-bottom:12px}
+.fa-tier input{width:90px;font:600 14px var(--font);color:var(--text-1);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:5px 8px;margin:0 2px}
+.fa-tier .mgr-btn{font-size:13px;padding:6px 14px}
+.fa-table td:nth-child(2){width:90px}
