@@ -171,6 +171,10 @@ function build_() {
   var archiveTab = ss.getSheetByName(ARCHIVE_TAB);
   var archive = archiveTab ? readEvents_(archiveTab, 'h', cutoff) : [];
   var hist = readEvents_(tab_(ss, GID.historical), 'h', cutoff);
+  // A month the live feed fully covers comes from the live feed only, so an archived copy made
+  // with older MRR math can never be counted on top of it.
+  var first = live.reduce(function (m, e) { return e.changeYm && (!m || e.changeYm < m) ? e.changeYm : m; }, '');
+  if (first) archive = archive.filter(function (e) { return !e.changeYm || e.changeYm <= first; });
   var events = netWithinMonth_(washCancelReactivate_(mergeFeeds_(live, archive.concat(hist))));
 
   var scheduled = readScheduled_();
