@@ -25,6 +25,7 @@ function setupTabs() {
     const v = document.getElementById('view-' + t.dataset.tab);
     if (v) v.classList.add('active');
     if (t.dataset.tab === 'mrr') openMrr();
+    if (t.dataset.tab === 'csm') openCsm();
     if (t.dataset.tab === 'impl') ensureTabData('impl').then(drawImplCharts);
     if (t.dataset.tab === 'services') mountServices();
     if (t.dataset.tab === 'resources') openResources();
@@ -68,6 +69,7 @@ function bootstrap() {
   setupRoundup();
   setupLoop();
   setupMrr();
+  setupCsm();
   setupScorecards();
   setupAssign();
   setupTheme();
