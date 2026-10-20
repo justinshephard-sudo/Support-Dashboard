@@ -673,8 +673,14 @@ function pullAiUsage_(force) {
     }
     return UrlFetchApp.fetch(endpoint, opts);
   };
-  var res = ids.length ? call(true) : call(false);
-  if (ids.length && res.getResponseCode() !== 200 && res.getResponseCode() !== 202) res = call(false);   // question not filtered yet
+  var t = Date.now(), filtered = ids.length > 0;
+  var res = filtered ? call(true) : call(false);
+  if (filtered && res.getResponseCode() !== 200 && res.getResponseCode() !== 202) {   // question not filtered yet
+    console.warn('Metabase rejected the customer_ids filter (' + res.getResponseCode() + '): ' + res.getContentText().slice(0, 300));
+    filtered = false;
+    res = call(false);
+  }
+  var queryMs = Date.now() - t;
   if (res.getResponseCode() !== 200 && res.getResponseCode() !== 202) throw new Error('Metabase returned ' + res.getResponseCode());
   var rows = JSON.parse(res.getContentText());
   // An empty answer means something went wrong; keep the last good copy.
@@ -682,6 +688,8 @@ function pullAiUsage_(force) {
   var head = Object.keys(rows[0]).concat('pulled_at'), at = new Date().toISOString();
   writeAiUsage_(head, rows.map(function (r) { return head.map(function (h) { return h === 'pulled_at' ? at : r[h]; }); }));
   p.setProperty('AI_USAGE_PULLED', String(Date.now()));
+  Logger.log('Metabase query %s s · %s rows · %s', (queryMs / 1000).toFixed(1), rows.length,
+    filtered ? 'filtered to ' + ids.length + ' AI add-on firms' : 'NOT filtered (all firms)');
   return true;
 }
 
