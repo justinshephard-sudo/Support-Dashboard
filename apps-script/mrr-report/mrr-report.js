@@ -113,12 +113,12 @@ function warmMrr() {
     writeCache_(cache, cached);
   } else {
     rebuild_(cache, cached);
-    cache.remove('csm_n');   // its growth/AI totals come from the MRR copy just rebuilt
+    cache.remove(CSM_CACHE + 'n');   // its growth/AI totals come from the MRR copy just rebuilt
   }
   // CSM inputs (the hourly month-end copy, the daily Accounts sync) change at most hourly.
-  var csm = readCache_(cache, 'csm_');
+  var csm = readCache_(cache, CSM_CACHE);
   if (!csm || Date.now() - csm.built > 55 * 60 * 1000) {
-    try { writeCache_(cache, buildCsm_(), 'csm_'); } catch (e) { console.error(e && e.stack || e); }
+    try { writeCache_(cache, buildCsm_(), CSM_CACHE); } catch (e) { console.error(e && e.stack || e); }
   }
 }
 
@@ -493,16 +493,18 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 // (commission.js, in the MRR sheet's script) copies these three months out of its private
 // sheet into this tab every hour, so the dashboard never needs the commission sheet.
 var MONTH_END_TAB = 'CSM Retention Months';
+// Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
+var CSM_CACHE = 'csm3_';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 
 // warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
 function loadCsm_(force) {
   var cache = CacheService.getScriptCache();
-  var hit = readCache_(cache, 'csm_');
+  var hit = readCache_(cache, CSM_CACHE);
   if (!force && hit && Date.now() - hit.built < 3 * 3600 * 1000) return hit;
   try {
     var data = buildCsm_();
-    writeCache_(cache, data, 'csm_');
+    writeCache_(cache, data, CSM_CACHE);
     return data;
   } catch (err) {
     console.error(err && err.stack || err);

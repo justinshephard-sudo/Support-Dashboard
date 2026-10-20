@@ -52,7 +52,7 @@ function prefetchCsm() {
   if (CSM.data || CSM.loading) return;
   try {
     const saved = JSON.parse(sessionStorage.getItem(CSM_STORE) || 'null');
-    if (saved) CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, saved);
+    if (saved && saved.months) CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, saved);
   } catch (e) { /* private mode */ }
   loadCsm(false);
 }
