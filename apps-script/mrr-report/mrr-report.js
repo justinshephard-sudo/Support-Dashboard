@@ -473,7 +473,9 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 
 /* ---------- CSM: NRR / GRR and account health ---------- */
 
-var MONTH_END_TAB = 'MRR Month-End';   // the commission snapshot (commission.js in the MRR sheet's script)
+// The commission snapshot (commission.js in the MRR sheet's script, COMMISSION_SHEET_ID).
+var MONTH_END_SHEET_ID = '1O79enX6Wj_74Vd7lefAsKDX8GqcAjE3IvSz1A92E3u0';
+var MONTH_END_TAB = 'MRR Month-End';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 
 // Month-end snapshots and ChurnZero health change slowly: rebuilt at most every 30 minutes.
@@ -500,9 +502,10 @@ function buildCsm_() {
 // 13 months earlier. The rep is whoever owned the firm at the start of the window.
 // firms: [company, am6, start6, am13, start13, now]
 function readMonthEnd_() {
-  var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
-  var sh = ss.getSheetByName(MONTH_END_TAB);
-  if (!sh) return { error: 'The "' + MONTH_END_TAB + '" tab isn’t in the MRR sheet.' };
+  var sh;
+  try { sh = SpreadsheetApp.openById(MONTH_END_SHEET_ID).getSheetByName(MONTH_END_TAB); }
+  catch (e) { return { error: 'Can’t open the month-end MRR sheet — it needs to be shared with the dashboard’s owner.' }; }
+  if (!sh) return { error: 'The "' + MONTH_END_TAB + '" tab is missing from the month-end MRR sheet.' };
   // Only the columns we use (the tab holds every customer for every month since 2023).
   var last = sh.getLastRow();
   var h = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(function (x) { return String(x).trim(); });
