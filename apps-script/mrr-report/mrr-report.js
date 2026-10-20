@@ -36,6 +36,10 @@ var GID = {
   scheduled: 0,              // Scheduled Churn (in CHURN_SHEET_ID)
 };
 var SNAPSHOT_TAB = 'MRR Snapshot';
+// Churn reasons, practice area, churn score and lead volume come from ChurnZero, via the
+// daily Accounts sync (apps-script/sync-accounts.gs) in the Support Team Report sheet.
+var ACCOUNTS_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
+var ACCOUNTS_TAB = 'Accounts';
 var TZ = 'America/Los_Angeles';
 var MONTHS_BACK = 16;          // 13 months of charts + 3 trailing months for the forecasts (covers YTD too)
 var EXCLUDED_FIRMS = /cardinal law/i;
@@ -162,7 +166,7 @@ function build_() {
   events.forEach(function (e) { if (e.cat === 'c') want[e.firm] = 1; });
   scheduled.forEach(function (s) { want[s.firm] = 1; });
   retention.detail.forEach(function (r) { want[r.firm] = 1; });
-  var sf = readSalesforce_(tab_(ss, GID.sf), want);
+  var sf = readChurnDetail_(ss, want);
 
   return {
     ok: true,
@@ -318,6 +322,34 @@ function readScheduled_() {
 }
 
 // firmId → [practice area, churn reason, churn details, churn score, onboarding CSAT, avg monthly leads]
+// ChurnZero first; the old Salesforce Detail tab only fills gaps (it stopped updating
+// when the Chargebee sync's Salesforce sign-in lapsed, and can be retired).
+function readChurnDetail_(ss, want) {
+  var out = {};
+  try {
+    var sh = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(ACCOUNTS_TAB);
+    var rows = sh ? rows_(sh) : [];
+    if (rows.length && 'ChurnCategory#' in rows[0]) {
+      rows.forEach(function (r) {
+        var id = firmId_(r['FirmId#']);
+        if (!id || !want[id]) return;
+        out[id] = [
+          String(r['PracticeArea#']).trim(), String(r['ChurnCategory#']).trim(),
+          String(r['ChurnDetails#']).trim().slice(0, 600), String(r['ChurnScore#']).trim(), '',
+          String(r['AvgLeadsMonthly#']).trim(),
+        ];
+      });
+    }
+  } catch (e) { console.error('Accounts tab unavailable: ' + e); }
+  var legacy = readSalesforce_(tab_(ss, GID.sf), want);
+  Object.keys(legacy).forEach(function (id) {
+    var cz = out[id];
+    if (!cz) { out[id] = legacy[id]; return; }
+    for (var i = 0; i < cz.length; i++) if (!cz[i]) cz[i] = legacy[id][i];
+  });
+  return out;
+}
+
 function readSalesforce_(sh, want) {
   var out = {};
   rows_(sh).forEach(function (r) {
@@ -396,7 +428,9 @@ function name_(v) { return String(v || '').trim().replace(/^Swetha Devakuma$/, '
 function firmId_(v) {
   var s = String(v == null ? '' : v).trim();
   var n = s.replace(/[$,\s]/g, '');
-  return /^\d+(\.0+)?$/.test(n) ? String(parseInt(n, 10)) : s;
+  if (/^\d+(\.0+)?$/.test(n)) return String(parseInt(n, 10));
+  var lead = s.match(/^(\d+)~\|~/);   // ChurnZero ExternalId "4492~|~001Pj…"
+  return lead ? lead[1] : s;
 }
 
 // A Date, an ISO string, or "M/D/YY H:MM" → "YYYY-MM-DD" in Pacific time.

@@ -33,6 +33,8 @@ var CZ_COLUMNS = [
   'TenureDays', 'MattersPerMonth', 'LeadVolume', 'TotalSms', 'SmsPlanType', 'Activities30',
   'Employees', 'Contacts', 'OnboardingStatus', 'City', 'Website',
   'ChargebeePlan', 'ChargebeeStart', 'AddOns', 'InvoiceBalance', 'LegacyContract', 'MRRSource',
+  // Churn detail for the MRR Report (replaces the Salesforce Detail tab).
+  'ChurnCategory', 'ChurnDetails', 'AvgLeadsMonthly',
 ];
 
 var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmount', 'NextRenewalDate', 'LicenseCount',
@@ -40,7 +42,7 @@ var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmou
 var ACCOUNT_CF = ['FirmId', 'PrimaryPracticeArea', 'PracticeArea', 'AccountManager', 'ChargebeeAccountStatus', 'ContractStatus',
   'CurrentTermEnd', 'RemainingBillingCycles', 'DangerZone', 'CancellationRequested', 'AverageCsatLast60', 'AvgMattersCreatedmonth',
   'LeadVolume', 'AvgMonthlyLeadVolumelifetime', 'TotalSms', 'SmsPlanType', 'OfActivitiesLoggedl30', 'Employees',
-  'OnboardingStatus', 'Website', 'CurrentMrrStartingMrr'];
+  'OnboardingStatus', 'Website', 'CurrentMrrStartingMrr', 'ChurnCategory', 'ChurnDetails'];
 
 // Daily trigger entry point: the Accounts tab (Firm Lookup). Records the outcome on
 // the "Sync Status" tab, which the dashboard shows, so a failure (e.g. an expired
@@ -174,6 +176,9 @@ function accountToRow_(a, ctx) {
     AddOns: addOnSummary_(ctx.addOns[acctId]),
     InvoiceBalance: balanceSummary_(ctx.unpaid[acctId]),
     LegacyContract: legacySummary_(ctx.legacy[acctId]),
+    ChurnCategory: cf.ChurnCategory || '',
+    ChurnDetails: String(cf.ChurnDetails || '').slice(0, 600),
+    AvgLeadsMonthly: leadAvg == null || leadAvg === '' ? '' : String(Math.round(leadAvg)),
   };
   return CZ_COLUMNS.map(function (c) { return map[c]; });
 }
@@ -294,7 +299,8 @@ function writeAccountsTab_(rows) {
   var sheet = ss.getSheetByName(CZ_ACCOUNTS_TAB);
   if (!sheet) sheet = ss.insertSheet(CZ_ACCOUNTS_TAB);
   sheet.clearContents();
-  var out = [CZ_COLUMNS].concat(rows);
+  // Free text from ChurnZero (e.g. churn details) can't run as a formula.
+  var out = [CZ_COLUMNS].concat(rows.map(function (r) { return r.map(dashSafe_); }));
   // Plain text, so Sheets doesn't turn dates, IDs or "Oct 2026" into numbers or dates.
   if (out.length) sheet.getRange(1, 1, out.length, CZ_COLUMNS.length).setNumberFormat('@').setValues(out);
 }
