@@ -669,6 +669,23 @@ function checkCsm() {
     h.firms.filter(function (f) { return f[2] != null && f[2] >= h.good; }).length + ' good, ' +
     h.firms.filter(function (f) { return f[2] != null && f[2] < h.bad; }).length + ' bad'));
 }
+// Run from the editor after setting METABASE_URL / METABASE_KEY / METABASE_CARD: pulls the
+// Merlin AI usage question now and logs what the CSM tab will show.
+function checkMetabase() {
+  var p = PropertiesService.getScriptProperties();
+  ['METABASE_URL', 'METABASE_KEY', 'METABASE_CARD'].forEach(function (k) {
+    Logger.log('%s: %s', k, p.getProperty(k) ? (k === 'METABASE_KEY' ? 'set' : p.getProperty(k)) : 'MISSING');
+  });
+  var t = Date.now();
+  if (!pullAiUsage_()) { Logger.log('Not pulled: a Metabase property is missing.'); return; }
+  Logger.log('Pulled from Metabase in %s s.', ((Date.now() - t) / 1000).toFixed(1));
+  var h = readAiHealth_();
+  Logger.log('Merlin AI health: %s', h.error || (h.firms.length + ' add-on firms · usage ' + h.asOf + ' · ' +
+    h.firms.filter(function (f) { return f[2] != null && f[2] >= h.good; }).length + ' good, ' +
+    h.firms.filter(function (f) { return f[2] != null && f[2] < h.bad; }).length + ' bad'));
+  CacheService.getScriptCache().remove(CSM_CACHE + 'n');   // the CSM tab rebuilds with these numbers
+}
+
 function mrrUnpackAi_() {
   var d = load_(true), i = d.events.fields.indexOf('ai'), n = 0, sum = 0;
   d.events.rows.forEach(function (r) { if (r[i]) { n++; sum += r[i]; } });
