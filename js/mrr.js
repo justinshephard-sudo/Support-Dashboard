@@ -265,9 +265,7 @@ function renderMrr() {
   const st = d.sync || {};
   const synced = st.lastSuccess || d.synced ? new Date(st.lastSuccess || d.synced) : null;
   const old = st.failed || st.partial || (synced && Date.now() - synced > 5 * 3600e3);
-  const partialTxt = (st.steps || []).includes('Salesforce Detail')
-    ? ' — MRR is current, but Salesforce details (churn reasons, practice area) didn’t update: the sync’s Salesforce sign-in needs renewing.'
-    : ` — MRR is current, but ${(st.steps || []).join(', ') || 'one part'} didn’t update.`;
+  const partialTxt = ` — MRR is current, but ${(st.steps || []).join(', ') || 'one part'} didn’t update.`;
   const when = synced ? synced.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   const syncTxt = (synced ? `Synced from Chargebee ${when}` : 'Sync time unknown') +
     (st.failed ? ' — the latest sync failed, so some numbers may be out of date.' : st.partial ? partialTxt : old ? ' — over 5 hours ago, so the sync may have stopped.' : '');
@@ -566,7 +564,7 @@ function mrrInsights(el) {
       <div class="mrr-insight"><b>${agency.length}</b> agency-client firms, ${mrrMoney(mrrSum(agency, (e) => Math.abs(e.amt)))} of the loss.</div>
       <div class="mrr-insight"><b>${notPaid.length}</b> non-payment cancellations (involuntary), ${mrrMoney(mrrSum(notPaid, (e) => Math.abs(e.amt)))}.</div>
       <div class="mrr-insight wide"><h4>Top reasons by MRR</h4><ol>${top.map((r) => `<li><button type="button" class="mrr-link" data-reason="${esc(r.reason)}">${esc(r.reason)}</button> — ${mrrPlural(r.n, 'firm')} · ${mrrMoney(r.amt)}</li>`).join('')}</ol></div>
-      ${samples.length ? `<div class="mrr-insight wide"><h4>In their words (Salesforce churn details)</h4>${samples.map((e) => `<p><b>${esc(e.company)}:</b> ${esc(e.details)}</p>`).join('')}</div>` : ''}
+      ${samples.length ? `<div class="mrr-insight wide"><h4>In their words (churn details from ChurnZero)</h4>${samples.map((e) => `<p><b>${esc(e.company)}:</b> ${esc(e.details)}</p>`).join('')}</div>` : ''}
     </div>` : '<div class="empty-note">No cancellations this month.</div>'}`;
 }
 

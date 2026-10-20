@@ -417,8 +417,13 @@ function readSyncStatus_(ss) {
   if (!sh || sh.getLastRow() < 2) return null;
   var r = sh.getRange(2, 1, 1, 5).getDisplayValues()[0];
   // Only the step names go to the page (e.g. "Salesforce Detail"), not the raw error text.
-  var steps = String(r[4] || '').split(' | ').map(function (x) { return x.split(':')[0].trim(); }).filter(Boolean);
-  return { lastSuccess: r[1], lastRun: r[2], result: r[3], failed: /^FAILED/.test(r[3]), partial: /^PARTIAL/.test(r[3]), steps: steps };
+  // Salesforce Detail was retired (churn detail comes from ChurnZero), so a leftover
+  // failure for it isn't a problem worth flagging.
+  var steps = String(r[4] || '').split(' | ').map(function (x) { return x.split(':')[0].trim(); })
+    .filter(function (x) { return x && x !== 'Salesforce Detail'; });
+  var failed = /^FAILED/.test(r[3]) && steps.length > 0;
+  var partial = /^PARTIAL/.test(r[3]) && steps.length > 0;
+  return { lastSuccess: r[1] || (failed ? '' : r[2]), lastRun: r[2], result: r[3], failed: failed, partial: partial, steps: steps };
 }
 
 /* ---------- parsing ---------- */
