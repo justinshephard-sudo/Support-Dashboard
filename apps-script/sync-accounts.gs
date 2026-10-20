@@ -8,8 +8,9 @@
         CZ_USER  = justin.shephard@lawmatics.com
         CZ_KEY   = <your ChurnZero REST API key>     (never commit this)
       (CZ_BASE is optional; defaults to the lawmatics US1 instance.)
-        CB_API_KEY = <read-only Chargebee API key>  → MRR comes straight from Chargebee
-      (without it, MRR falls back to ChurnZero's copy.)
+      MRR comes from Chargebee via the MRR Data sheet's "CSM Retention Months" tab
+      (refreshed hourly by the Chargebee sync), so this script needs no Chargebee key;
+      if that tab is unavailable, MRR falls back to ChurnZero's copy.
    4. Run syncChurnZeroAccounts once (authorize when prompted) to test.
    5. Run installSyncTriggers once: daily syncChurnZeroAccounts (~4am) and
         syncImplementationDaily (~5am). Daily keeps the CZ key alive (it expires
@@ -115,7 +116,7 @@ function syncAccounts_() {
 
   // Related custom tables, grouped by internal ChurnZero AccountId.
   var ctx = {
-    cbMrr: fetchChargebeeMrr_(props.getProperty('CB_API_KEY')),
+    cbMrr: readSnapshotMrr_(),
     addOns: groupBy_(fetchAllCZ_(base + '/CustomListSubscriptionAddOn?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
     subs:   groupBy_(fetchAllCZ_(base + '/CustomListChargebeeSubscription?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
     legacy: groupBy_(fetchAllCZ_(base + '/CustomListLegacyContracts?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
@@ -188,30 +189,30 @@ function accountToRow_(a, ctx) {
 // Firm ID → current MRR in dollars, summed across that firm's Chargebee customers.
 // Chargebee keeps customer.mrr current with the customer's active subscriptions.
 // Returns null when there's no key (or Chargebee is unreachable), so the sync still runs.
-var CB_SITE = 'lawmatics';
-function fetchChargebeeMrr_(key) {
-  if (!key) return null;
-  var headers = { Authorization: 'Basic ' + Utilities.base64Encode(key + ':') };
-  var byFirm = {}, offset = '', guard = 0;
+// Each firm's current Chargebee MRR, from the hourly month-end snapshot copy in the MRR Data
+// sheet (this month's rows). Replaces a separate full Chargebee pull; checked side by side on
+// 2026-10-20 (2,051 firms identical, 3 timing differences).
+var MRR_DATA_SHEET_ID = '1zecFQqzYlxl7JQt1NYE_VgC5ak-UIf5MV01vjOYezgY';
+var SNAPSHOT_COPY_TAB = 'CSM Retention Months';
+function readSnapshotMrr_() {
   try {
-    do {
-      var url = 'https://' + CB_SITE + '.chargebee.com/api/v2/customers?limit=100' + (offset ? '&offset=' + encodeURIComponent(offset) : '');
-      var resp = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
-      if (resp.getResponseCode() !== 200) throw new Error('Chargebee HTTP ' + resp.getResponseCode() + ': ' + resp.getContentText().slice(0, 200));
-      var body = JSON.parse(resp.getContentText());
-      (body.list || []).forEach(function (row) {
-        var c = row.customer || {};
-        var id = firmKey_(c.cf_firm_id);
-        if (!id || c.deleted) return;
-        byFirm[id] = (byFirm[id] || 0) + (Number(c.mrr) || 0) / 100;
-      });
-      offset = body.next_offset || '';
-    } while (offset && ++guard < 400);
+    var sh = SpreadsheetApp.openById(MRR_DATA_SHEET_ID).getSheetByName(SNAPSHOT_COPY_TAB);
+    var rows = sh ? sh.getDataRange().getDisplayValues() : [];
+    var h = rows.length ? rows[0] : [];
+    var iM = h.indexOf('Month'), iMrr = h.indexOf('MRR'), iF = h.indexOf('Firm ID');
+    if (iM < 0 || iMrr < 0 || iF < 0) throw new Error(SNAPSHOT_COPY_TAB + ' has no Firm ID column yet');
+    var latest = rows.slice(1).reduce(function (m, r) { return r[iM] > m ? r[iM] : m; }, '');
+    var byFirm = {};
+    rows.slice(1).forEach(function (r) {
+      if (r[iM] !== latest) return;
+      var id = firmKey_(r[iF]);
+      if (id) byFirm[id] = (byFirm[id] || 0) + (Number(String(r[iMrr]).replace(/[$,\s]/g, '')) || 0);
+    });
+    return Object.keys(byFirm).length ? byFirm : null;
   } catch (e) {
-    console.error('Chargebee MRR unavailable, using ChurnZero: ' + e);
+    console.error('Chargebee MRR snapshot unavailable, using ChurnZero: ' + e);
     return null;
   }
-  return byFirm;
 }
 
 // ChurnZero ExternalId is sometimes "4492~|~001Pj…"; the Firm ID is the leading number.
