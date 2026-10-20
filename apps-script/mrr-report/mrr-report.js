@@ -62,6 +62,7 @@ function doPost(e) {
     var who = dashAuth_(b.token);
     if (!who.ok) return dashJson_(who);
     if (b.action === 'load') return dashJson_(load_(!!b.force));
+    if (b.action === 'csm') return dashJson_(loadCsm_(!!b.force));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
@@ -124,21 +125,23 @@ function installMrrTrigger() {
   Logger.log('warmMrr runs every 30 minutes.');
 }
 
-function writeCache_(cache, data) {
+function writeCache_(cache, data, prefix) {
+  prefix = prefix || 'mrr_';
   var packed = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(data))).getBytes());
   var parts = {};
   var n = Math.ceil(packed.length / CHUNK);
-  for (var i = 0; i < n; i++) parts['mrr_' + i] = packed.slice(i * CHUNK, (i + 1) * CHUNK);
-  parts.mrr_n = String(n);
+  for (var i = 0; i < n; i++) parts[prefix + i] = packed.slice(i * CHUNK, (i + 1) * CHUNK);
+  parts[prefix + 'n'] = String(n);
   cache.putAll(parts, STALE_SECONDS);
 }
 
-function readCache_(cache) {
+function readCache_(cache, prefix) {
+  prefix = prefix || 'mrr_';
   try {
-    var n = Number(cache.get('mrr_n') || 0);
+    var n = Number(cache.get(prefix + 'n') || 0);
     if (!n) return null;
     var keys = [];
-    for (var i = 0; i < n; i++) keys.push('mrr_' + i);
+    for (var i = 0; i < n; i++) keys.push(prefix + i);
     var got = cache.getAll(keys);
     var packed = keys.map(function (k) { return got[k] || ''; });
     if (packed.some(function (p) { return !p; })) return null;
@@ -183,7 +186,7 @@ function build_() {
   };
 }
 
-var EVENT_FIELDS = ['ym', 'cat', 'amt', 'company', 'am', 'owner', 'firm', 'date', 'created', 'notPaid', 'agency', 'leads', 'src'];
+var EVENT_FIELDS = ['ym', 'cat', 'amt', 'company', 'am', 'owner', 'firm', 'date', 'created', 'notPaid', 'agency', 'leads', 'src', 'ai'];
 var SCHEDULED_FIELDS = ['date', 'company', 'firm', 'mrr', 'agency', 'owner', 'am', 'leads', 'created'];
 
 // Arrays instead of objects: about a third of the size on the wire.
@@ -237,6 +240,7 @@ function readEvents_(sh, src, cutoff) {
     out.push({
       ym: ym, changeYm: changeYm, status: status, cat: cat,
       amt: money_(r['MRR Impact']),
+      ai: money_(r['AI MRR Impact#'] || 0),   // AI add-on part of an existing firm's up/downgrade
       company: company,
       am: name_(r['Customers.Account Manager#']),
       owner: name_(r['Customers.Owner#']),
@@ -293,6 +297,7 @@ function netWithinMonth_(events) {
     if (Math.abs(net) < 0.005) return;
     var e = Object.assign({}, g[g.length - 1]);
     e.amt = Math.round(net * 100) / 100;
+    e.ai = Math.round(g.reduce(function (t, x) { return t + (x.ai || 0); }, 0) * 100) / 100;
     e.cat = net > 0 ? 'u' : 'd';
     out.push(e);
   });
@@ -466,9 +471,102 @@ function ymNorm_(v) {
 function monthKey_(d) { return Utilities.formatDate(d, TZ, 'yyyy-MM'); }
 function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); return x; }
 
+/* ---------- CSM: NRR / GRR and account health ---------- */
+
+var MONTH_END_TAB = 'MRR Month-End';   // the commission snapshot (commission.js in the MRR sheet's script)
+var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
+
+// Month-end snapshots and ChurnZero health change slowly: rebuilt at most every 30 minutes.
+function loadCsm_(force) {
+  var cache = CacheService.getScriptCache();
+  var hit = readCache_(cache, 'csm_');
+  if (!force && hit && Date.now() - hit.built < 30 * 60 * 1000) return hit;
+  try {
+    var data = buildCsm_();
+    writeCache_(cache, data, 'csm_');
+    return data;
+  } catch (err) {
+    console.error(err && err.stack || err);
+    if (hit) { hit.stale = true; return hit; }
+    throw err;
+  }
+}
+
+function buildCsm_() {
+  return { ok: true, built: Date.now(), retention: readMonthEnd_(), health: readHealth_() };
+}
+
+// Each firm's MRR at month-ends: the latest month (this month, refreshed hourly) vs. 6 and
+// 13 months earlier. The rep is whoever owned the firm at the start of the window.
+// firms: [company, am6, start6, am13, start13, now]
+function readMonthEnd_() {
+  var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
+  var sh = ss.getSheetByName(MONTH_END_TAB);
+  if (!sh) return { error: 'The "' + MONTH_END_TAB + '" tab isn’t in the MRR sheet.' };
+  // Only the columns we use (the tab holds every customer for every month since 2023).
+  var last = sh.getLastRow();
+  var h = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(function (x) { return String(x).trim(); });
+  var col = function (n) { var i = h.indexOf(n); if (i < 0) throw new Error(MONTH_END_TAB + ' has no "' + n + '" column'); return sh.getRange(2, i + 1, Math.max(1, last - 1), 1).getDisplayValues(); };
+  var M = col('Month'), ID = col('Customer ID'), CO = col('Company'), AM = col('Account Manager'), MRR = col('MRR'), AG = col('Agency Firm');
+  var all = {};
+  M.forEach(function (r) { var ym = ymNorm_(r[0]); if (ym) all[ym] = 1; });
+  var end = Object.keys(all).sort().pop();
+  if (!end) return { error: 'No month-end snapshots yet.' };
+  var shift = function (ym, n) { var y = +ym.slice(0, 4), m = +ym.slice(5) - 1 + n; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return y + '-' + ('0' + (m + 1)).slice(-2); };
+  var s6 = shift(end, -6), s13 = shift(end, -13), want = {};
+  want[end] = want[s6] = want[s13] = 1;
+  var by = {}, months = {};
+  for (var i = 0; i < M.length; i++) {
+    var ym = ymNorm_(M[i][0]);
+    if (!want[ym] || !ID[i][0] || truthy_(AG[i][0])) continue;   // agency partner records aren't customers
+    months[ym] = 1;
+    (by[ym] = by[ym] || {})[ID[i][0]] = { co: String(CO[i][0]).trim(), am: name_(AM[i][0]), mrr: money_(MRR[i][0]) };
+  }
+  var now = by[end] || {}, a6 = by[s6] || {}, a13 = by[s13] || {};
+  var ids = {};
+  [a6, a13].forEach(function (m) { Object.keys(m).forEach(function (id) { if (m[id].mrr > 0) ids[id] = 1; }); });
+  var firms = Object.keys(ids).map(function (id) {
+    var x6 = a6[id], x13 = a13[id], n = now[id];
+    return [(n || x6 || x13).co, x6 && x6.mrr > 0 ? x6.am : '', x6 && x6.mrr > 0 ? x6.mrr : 0,
+      x13 && x13.mrr > 0 ? x13.am : '', x13 && x13.mrr > 0 ? x13.mrr : 0, n ? n.mrr : 0];
+  });
+  return { end: end, start6: by[s6] ? s6 : '', start13: by[s13] ? s13 : '', firms: firms };
+}
+
+// Active accounts by AM with ChurnZero's churn score, from the daily Accounts sync.
+// accounts: [name, am, score, mrr]
+function readHealth_() {
+  var sh = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(ACCOUNTS_TAB);
+  if (!sh) return { error: 'Accounts tab missing' };
+  var rows = rows_(sh);
+  var accounts = rows.filter(function (r) {
+    return String(r['ContractStatus#']).trim() !== 'Inactive' && money_(r['MRR#']) > 0 && String(r['AccountManager#']).trim();
+  }).map(function (r) {
+    var sc = String(r['ChurnScore#']).trim();
+    return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#'])];
+  });
+  return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts };
+}
+
 /* ---------- editor helpers ---------- */
 
 // Run once from the editor: approves sheet + cache access and logs what the page will get.
+// Run from the editor: shows what the CSM tab will get.
+function checkCsm() {
+  var t = Date.now();
+  var d = buildCsm_();
+  Logger.log('built in %s s', ((Date.now() - t) / 1000).toFixed(1));
+  Logger.log('retention: %s', d.retention.error || ('end ' + d.retention.end + ' · 6m from ' + d.retention.start6 + ' · 13m from ' + d.retention.start13 + ' · firms ' + d.retention.firms.length));
+  Logger.log('health: %s', d.health.error || (d.health.accounts.length + ' active accounts, ' + d.health.accounts.filter(function (a) { return a[2] == null; }).length + ' unscored'));
+  var ai = mrrUnpackAi_();
+  Logger.log('AI upsell events: %s', ai);
+}
+function mrrUnpackAi_() {
+  var d = load_(true), i = d.events.fields.indexOf('ai'), n = 0, sum = 0;
+  d.events.rows.forEach(function (r) { if (r[i]) { n++; sum += r[i]; } });
+  return n + ' events, net $' + Math.round(sum);
+}
+
 function checkMrr() {
   var t = Date.now();
   var d = build_();
