@@ -511,7 +511,7 @@ function loadCsm_(force) {
   var hit = readCache_(cache, CSM_CACHE);
   if (!force && hit && Date.now() - hit.built < 3 * 3600 * 1000) return hit;
   try {
-    var data = buildCsm_();
+    var data = buildCsm_(force);
     writeCache_(cache, data, CSM_CACHE);
     return data;
   } catch (err) {
@@ -521,17 +521,18 @@ function loadCsm_(force) {
   }
 }
 
-function buildCsm_() {
+// force (the page's Refresh) also rebuilds the MRR copy, so a sync that just ran shows up.
+function buildCsm_(force) {
   var ai;
   try { ai = readAiHealth_(); } catch (e) { console.error(e && e.stack || e); ai = { error: 'Couldn’t read Merlin AI usage.' }; }
-  return { ok: true, built: Date.now(), history: readFirmHistory_(), health: readHealth_(), months: repMonths_(), ai: ai };
+  return { ok: true, built: Date.now(), history: readFirmHistory_(), health: readHealth_(), months: repMonths_(force), ai: ai };
 }
 
 // Per-rep totals for the last 13 months, from the MRR copy already in the cache, so the CSM
 // tab doesn't need the full event list just to draw its cards.
 // months[am][ym] = [net, expansion, changes, aiAdded, aiRemoved]
-function repMonths_() {
-  var d = load_(false);
+function repMonths_(force) {
+  var d = load_(!!force);
   var f = d.events.fields, sf = d.scheduled.fields;
   var at = function (row, fields, k) { return row[fields.indexOf(k)]; };
   var from = Utilities.formatDate(addMonths_(new Date(), -13), TZ, 'yyyy-MM');
