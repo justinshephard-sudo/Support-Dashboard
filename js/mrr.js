@@ -264,10 +264,13 @@ function renderMrr() {
   // The Chargebee sync runs every 2 hours; flag it when the last run failed or it's gone quiet.
   const st = d.sync || {};
   const synced = st.lastSuccess || d.synced ? new Date(st.lastSuccess || d.synced) : null;
-  const old = st.failed || (synced && Date.now() - synced > 5 * 3600e3);
+  const old = st.failed || st.partial || (synced && Date.now() - synced > 5 * 3600e3);
+  const partialTxt = (st.steps || []).includes('Salesforce Detail')
+    ? ' — MRR is current, but Salesforce details (churn reasons, practice area) didn’t update: the sync’s Salesforce sign-in needs renewing.'
+    : ` — MRR is current, but ${(st.steps || []).join(', ') || 'one part'} didn’t update.`;
   const when = synced ? synced.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   const syncTxt = (synced ? `Synced from Chargebee ${when}` : 'Sync time unknown') +
-    (st.failed ? ' — the latest sync failed, so some numbers may be out of date.' : old ? ' — over 5 hours ago, so the sync may have stopped.' : '');
+    (st.failed ? ' — the latest sync failed, so some numbers may be out of date.' : st.partial ? partialTxt : old ? ' — over 5 hours ago, so the sync may have stopped.' : '');
   // Merlin's mood follows the month: flush when net is up, sweating the receipts when it's down.
   const art = t.net >= 0
     ? { src: 'assets/merlin-money.webp', h: 511, alt: 'Merlin in a gold chain, throwing cash' }
