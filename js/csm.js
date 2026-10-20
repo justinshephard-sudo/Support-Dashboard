@@ -1,9 +1,10 @@
 /* ==========================================================================
    CSM — each rep's book: retention (6- and 13-month NRR / GRR), growth this
    month, AI upsells against the $500/mo target, and account health.
-   Data: the MRR Report backend (apps-script/mrr-report): `load` for MRR events
-   (shared with the MRR Report tab) and `csm` for month-end snapshots + ChurnZero
-   health. Reps are the ones on the Implementation tab.
+   Data: the MRR Report backend (apps-script/mrr-report): `csm` for the cards (month-end
+   snapshots, ChurnZero health, per-rep monthly totals) and `load` — shared with the MRR
+   Report tab — for the firm-level events behind the pop-ups. Reps are the ones on the
+   Implementation tab.
    ========================================================================== */
 const CSM_AI_TARGET = 500;
 const CSM = { data: null, loading: null, ym: '', error: '' };
@@ -26,15 +27,14 @@ async function loadCsm(force) {
   CSM.loading = (async () => {
     document.getElementById('csmRefresh')?.classList.add('spin');
     try {
-      const [csm] = await Promise.all([
-        mrrCall({ action: 'csm', force: !!force }),
-        MRR.data && !force ? null : loadMrr(force),
-        ensureTabData('impl'),
-      ]);
+      // One small download: retention, health and per-rep monthly totals. The full MRR
+      // event list (only needed inside pop-ups) loads separately in the background.
+      const [csm] = await Promise.all([mrrCall({ action: 'csm', force: !!force }), ensureTabData('impl')]);
+      if (force) loadMrr(true); else prefetchMrr();
       const changed = !CSM.data || csm.built !== CSM.data.built || force;
       CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, csm);
       try { sessionStorage.setItem(CSM_STORE, JSON.stringify(csm)); } catch (e) { /* full or private */ }
-      CSM.error = MRR.data ? '' : 'MRR data didn’t load.';
+      CSM.error = '';
       if (!changed && !force) return;
     } catch (e) {
       if (isSessionError(e)) showSessionBanner(true);
@@ -62,7 +62,7 @@ function openCsm() {
   if (!root.innerHTML) root.innerHTML = '<div class="mrr-hero" id="csmHero"></div><div id="csmError" class="error-banner" hidden></div><div id="csmBody"><div class="res-loading">Pulling each rep’s book…</div></div>';
   if (!CSM.data) prefetchCsm();
   // Draw straight away from the saved copy (once Implementation's reps are in), then refresh behind it.
-  if (CSM.data && MRR.data) ensureTabData('impl').then(renderCsm);
+  if (CSM.data) ensureTabData('impl').then(renderCsm);
 }
 
 /* ---------- calculations ---------- */
@@ -76,14 +76,27 @@ function csmRetention(firms, startIdx, amIdx, rep) {
   return { book, start, now, nrr: start ? (now / start) * 100 : null, grr: start ? (kept / start) * 100 : null };
 }
 
+// Card totals come pre-summed from the backend: [net, expansion, changes, aiAdded, aiRemoved].
 function csmMonth(ym, rep) {
+  const t = ((CSM.data.months || {})[rep] || {})[ym] || [0, 0, 0, 0, 0];
+  return { net: t[0], expansion: t[1], changes: t[2], aiAdded: t[3], aiRemoved: t[4] };
+}
+
+// The firms behind a card's growth / AI numbers (needs the full MRR event list).
+function csmMonthRows(ym, rep) {
   const rows = MRR.all.filter((e) => e.ym === ym && mrrAm(e) === rep);
-  const net = mrrSum(rows);
-  const expansion = mrrSum(rows.filter((e) => e.cat === 'u' || e.cat === 'r'));
-  const aiRows = MRR.events.filter((e) => e.ym === ym && mrrAm(e) === rep && e.ai);
-  const aiAdded = aiRows.reduce((s, e) => s + Math.max(0, e.ai), 0);
-  const aiRemoved = aiRows.reduce((s, e) => s + Math.min(0, e.ai), 0);
-  return { rows, net, expansion, aiRows, aiAdded, aiRemoved };
+  return { rows, aiRows: rows.filter((e) => e.ai) };
+}
+
+async function csmWithEvents(fn) {
+  if (!MRR.data) {
+    mrrModal('Loading…', '', '<div class="res-loading">Pulling the firm-level detail…</div>');
+    prefetchMrr();
+    await MRR.loading;
+    mrrCloseModal();
+    if (!MRR.data) return;
+  }
+  fn();
 }
 
 function csmHealth(rep) {
@@ -104,7 +117,7 @@ function renderCsm() {
   if (!err) return;
   err.hidden = !CSM.error;
   err.textContent = CSM.error ? 'Couldn’t load the CSM page: ' + CSM.error : '';
-  if (!CSM.data || !MRR.data) { if (CSM.error) document.getElementById('csmBody').innerHTML = ''; return; }
+  if (!CSM.data) { if (CSM.error) document.getElementById('csmBody').innerHTML = ''; return; }
   const cur = mrrCur();
   if (!CSM.ym) CSM.ym = cur;
   const ret = CSM.data.retention || {};
@@ -151,7 +164,7 @@ function renderCsm() {
       </div>
       <button type="button" class="csm-row" data-csm-growth="${esc(rep)}">
         <span>Account growth</span><b class="${m.net >= 0 ? 'pos' : 'neg'}">${mrrMoney(m.net, true)}</b>
-        <small>${mrrMoney(m.expansion, true)} expansion · ${mrrPlural(m.rows.length, 'change')}</small></button>
+        <small>${mrrMoney(m.expansion, true)} expansion · ${mrrPlural(m.changes, 'change')}</small></button>
       <button type="button" class="csm-row" data-csm-ai="${esc(rep)}">
         <span>AI upsells</span><b>${mrrMoney(m.aiAdded)} <small>/ ${mrrMoney(CSM_AI_TARGET)}</small></b>
         <div class="csm-meter${m.aiAdded >= CSM_AI_TARGET ? ' hit' : ''}"><i style="width:${pct}%"></i></div>
@@ -202,7 +215,7 @@ function csmHealthDrill(rep) {
 }
 
 function csmAiDrill(rep) {
-  const m = csmMonth(CSM.ym, rep);
+  const m = Object.assign(csmMonth(CSM.ym, rep), csmMonthRows(CSM.ym, rep));
   MRR.drill = null;
   mrrModal(`${rep} — AI upsells, ${mrrYmLabel(CSM.ym)}`, `${mrrMoney(m.aiAdded)} added of the ${mrrMoney(CSM_AI_TARGET)} target${m.aiRemoved ? ` · ${mrrMoney(m.aiRemoved, true)} removed` : ''}`,
     m.aiRows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>AI MRR change</th><th>Total change</th></tr></thead><tbody>
@@ -221,9 +234,9 @@ function setupCsm() {
     const r = t.closest('[data-csm-ret]');
     if (r) { csmRetentionDrill(r.dataset.csmRet, r.dataset.rep); return; }
     const g = t.closest('[data-csm-growth]');
-    if (g) { const rep = g.dataset.csmGrowth; mrrOpenDrill(`${rep} — account growth`, mrrYmLabel(CSM.ym), csmMonth(CSM.ym, rep).rows, 'move'); return; }
+    if (g) { const rep = g.dataset.csmGrowth; csmWithEvents(() => mrrOpenDrill(`${rep} — account growth`, mrrYmLabel(CSM.ym), csmMonthRows(CSM.ym, rep).rows, 'move')); return; }
     const a = t.closest('[data-csm-ai]');
-    if (a) { csmAiDrill(a.dataset.csmAi); return; }
+    if (a) { csmWithEvents(() => csmAiDrill(a.dataset.csmAi)); return; }
     const h = t.closest('[data-csm-health]');
     if (h) csmHealthDrill(h.dataset.csmHealth);
   });

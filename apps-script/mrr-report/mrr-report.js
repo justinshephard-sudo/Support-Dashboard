@@ -113,6 +113,7 @@ function warmMrr() {
     writeCache_(cache, cached);
   } else {
     rebuild_(cache, cached);
+    cache.remove('csm_n');   // its growth/AI totals come from the MRR copy just rebuilt
   }
   // CSM inputs (the hourly month-end copy, the daily Accounts sync) change at most hourly.
   var csm = readCache_(cache, 'csm_');
@@ -511,7 +512,32 @@ function loadCsm_(force) {
 }
 
 function buildCsm_() {
-  return { ok: true, built: Date.now(), retention: readMonthEnd_(), health: readHealth_() };
+  return { ok: true, built: Date.now(), retention: readMonthEnd_(), health: readHealth_(), months: repMonths_() };
+}
+
+// Per-rep totals for the last 13 months, from the MRR copy already in the cache, so the CSM
+// tab doesn't need the full event list just to draw its cards.
+// months[am][ym] = [net, expansion, changes, aiAdded, aiRemoved]
+function repMonths_() {
+  var d = load_(false);
+  var f = d.events.fields, sf = d.scheduled.fields;
+  var at = function (row, fields, k) { return row[fields.indexOf(k)]; };
+  var from = Utilities.formatDate(addMonths_(new Date(), -13), TZ, 'yyyy-MM');
+  var out = {};
+  var add = function (am, ym, amt, cat, ai) {
+    if (ym < from) return;
+    am = String(am || '').trim() || '— Unassigned —';
+    var m = (out[am] = out[am] || {});
+    var t = (m[ym] = m[ym] || [0, 0, 0, 0, 0]);
+    t[0] += amt; t[2]++;
+    if (cat === 'u' || cat === 'r') t[1] += amt;
+    if (ai > 0) t[3] += ai; else if (ai < 0) t[4] += ai;
+  };
+  d.events.rows.forEach(function (r) { add(at(r, f, 'am'), at(r, f, 'ym'), at(r, f, 'amt'), at(r, f, 'cat'), at(r, f, 'ai') || 0); });
+  // Firms scheduled to cancel count in the month they leave, as on the MRR Report.
+  d.scheduled.rows.forEach(function (r) { var dt = at(r, sf, 'date'); if (dt >= d.today) add(at(r, sf, 'am'), dt.slice(0, 7), -Math.abs(at(r, sf, 'mrr')), 'c', 0); });
+  Object.keys(out).forEach(function (am) { Object.keys(out[am]).forEach(function (ym) { out[am][ym] = out[am][ym].map(function (v) { return Math.round(v * 100) / 100; }); }); });
+  return out;
 }
 
 // Each firm's MRR at month-ends: the latest month (this month, refreshed hourly) vs. 6 and
