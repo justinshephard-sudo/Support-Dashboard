@@ -111,9 +111,14 @@ function warmMrr() {
   if (cached && sync && cached.sync && sync.lastRun && sync.lastRun === cached.sync.lastRun) {
     cached.checked = Date.now();
     writeCache_(cache, cached);
-    return;
+  } else {
+    rebuild_(cache, cached);
   }
-  rebuild_(cache, cached);
+  // CSM inputs (the hourly month-end copy, the daily Accounts sync) change at most hourly.
+  var csm = readCache_(cache, 'csm_');
+  if (!csm || Date.now() - csm.built > 55 * 60 * 1000) {
+    try { writeCache_(cache, buildCsm_(), 'csm_'); } catch (e) { console.error(e && e.stack || e); }
+  }
 }
 
 // Run once from the editor: refreshes the copy every 30 minutes (the Chargebee sync is hourly).
@@ -489,11 +494,11 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 
-// Month-end snapshots and ChurnZero health change slowly: rebuilt at most every 30 minutes.
+// warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
 function loadCsm_(force) {
   var cache = CacheService.getScriptCache();
   var hit = readCache_(cache, 'csm_');
-  if (!force && hit && Date.now() - hit.built < 30 * 60 * 1000) return hit;
+  if (!force && hit && Date.now() - hit.built < 3 * 3600 * 1000) return hit;
   try {
     var data = buildCsm_();
     writeCache_(cache, data, 'csm_');

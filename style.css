@@ -835,21 +835,23 @@ button.mrr-stat span{color:var(--lm-blue)}
 .csm-kpis .mrr-kpi b{font-size:26px}
 .mrr-kpi:not(.up):not(.down) b{color:#fff}
 .csm-head{margin:20px 0 12px}
-.csm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.csm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
 .csm-card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:16px;display:flex;flex-direction:column;gap:10px}
 .csm-card header{display:flex;align-items:center;gap:10px}
 .csm-card h3{font-size:17px;font-weight:700}
-.csm-ret{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.csm-ret{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}
+.csm-ret-h{font-size:11.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;text-align:center}
+.csm-ret-l{font-size:12.5px;font-weight:700;color:var(--text-2);letter-spacing:.04em;padding-right:4px}
 .csm-ret button,.csm-row{font:inherit;color:var(--text-1);text-align:left;background:var(--surface-2);border:1px solid transparent;border-radius:var(--radius-sm);cursor:pointer;transition:border-color .15s}
-.csm-ret button{display:flex;flex-direction:column;padding:8px 9px}
+.csm-ret button{display:flex;justify-content:center;padding:7px 8px}
 .csm-ret button:hover,.csm-row:hover{border-color:var(--border-str)}
 .csm-ret button:focus-visible,.csm-row:focus-visible{outline:2px solid var(--lm-blue);outline-offset:2px}
 .csm-ret span{font-size:11.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
-.csm-ret b{font-size:17px;font-variant-numeric:tabular-nums}
+.csm-ret b{font-size:18px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .csm-ret b.up,.csm-row b.pos{color:var(--st-good)}.csm-ret b.down,.csm-row b.neg{color:var(--st-critical)}
 .csm-row{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:4px 10px;padding:10px 12px}
 .csm-row>span{font-size:12.5px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em}
-.csm-row>b{font-size:19px;font-variant-numeric:tabular-nums;text-align:right}
+.csm-row>b{font-size:19px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
 .csm-row>b small{font-size:12.5px;color:var(--text-3);font-weight:600}
 .csm-row>small,.csm-row>div{grid-column:1/-1}
 .csm-row>small{font-size:12.5px;color:var(--text-3)}

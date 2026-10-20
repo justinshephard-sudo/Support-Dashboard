@@ -17,6 +17,10 @@ function csmReps() {
   return [...new Set(reps)].filter((r) => r && r !== 'Unassigned').sort((a, b) => a.localeCompare(b));
 }
 
+// The last copy lives in this browser tab (sessionStorage): reopening is instant while a
+// fresh copy loads behind it. It's also fetched quietly once Support has loaded.
+const CSM_STORE = 'cs-csm-cache';
+
 async function loadCsm(force) {
   if (CSM.loading) return CSM.loading;
   CSM.loading = (async () => {
@@ -27,8 +31,11 @@ async function loadCsm(force) {
         MRR.data && !force ? null : loadMrr(force),
         ensureTabData('impl'),
       ]);
+      const changed = !CSM.data || csm.built !== CSM.data.built || force;
       CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, csm);
+      try { sessionStorage.setItem(CSM_STORE, JSON.stringify(csm)); } catch (e) { /* full or private */ }
       CSM.error = MRR.data ? '' : 'MRR data didn’t load.';
+      if (!changed && !force) return;
     } catch (e) {
       if (isSessionError(e)) showSessionBanner(true);
       CSM.error = e.message;
@@ -41,11 +48,21 @@ async function loadCsm(force) {
   return CSM.loading;
 }
 
+function prefetchCsm() {
+  if (CSM.data || CSM.loading) return;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(CSM_STORE) || 'null');
+    if (saved) CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, saved);
+  } catch (e) { /* private mode */ }
+  loadCsm(false);
+}
+
 function openCsm() {
   const root = document.getElementById('csm');
   if (!root.innerHTML) root.innerHTML = '<div class="mrr-hero" id="csmHero"></div><div id="csmError" class="error-banner" hidden></div><div id="csmBody"><div class="res-loading">Pulling each rep’s book…</div></div>';
-  if (!CSM.data) loadCsm(false);
-  else renderCsm();
+  if (!CSM.data) prefetchCsm();
+  // Draw straight away from the saved copy (once Implementation's reps are in), then refresh behind it.
+  if (CSM.data && MRR.data) ensureTabData('impl').then(renderCsm);
 }
 
 /* ---------- calculations ---------- */
@@ -124,10 +141,13 @@ function renderCsm() {
     return `<article class="csm-card">
       <header><span class="fa-av">${esc(rep.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span><h3>${esc(rep)}</h3></header>
       <div class="csm-ret">
-        <button type="button" data-csm-ret="nrr6" data-rep="${esc(rep)}"><span>NRR 6m</span><b class="${csmTone(r6.nrr, 100, 95)}">${csmPct(r6.nrr)}</b></button>
-        <button type="button" data-csm-ret="grr6" data-rep="${esc(rep)}"><span>GRR 6m</span><b class="${csmTone(r6.grr, 95, 90)}">${csmPct(r6.grr)}</b></button>
-        <button type="button" data-csm-ret="nrr13" data-rep="${esc(rep)}"><span>NRR 13m</span><b class="${csmTone(r13.nrr, 100, 90)}">${csmPct(r13.nrr)}</b></button>
-        <button type="button" data-csm-ret="grr13" data-rep="${esc(rep)}"><span>GRR 13m</span><b class="${csmTone(r13.grr, 90, 80)}">${csmPct(r13.grr)}</b></button>
+        <span></span><span class="csm-ret-h">6 mo</span><span class="csm-ret-h">13 mo</span>
+        <span class="csm-ret-l">NRR</span>
+        <button type="button" data-csm-ret="nrr6" data-rep="${esc(rep)}" aria-label="6-month NRR"><b class="${csmTone(r6.nrr, 100, 95)}">${csmPct(r6.nrr)}</b></button>
+        <button type="button" data-csm-ret="nrr13" data-rep="${esc(rep)}" aria-label="13-month NRR"><b class="${csmTone(r13.nrr, 100, 90)}">${csmPct(r13.nrr)}</b></button>
+        <span class="csm-ret-l">GRR</span>
+        <button type="button" data-csm-ret="grr6" data-rep="${esc(rep)}" aria-label="6-month GRR"><b class="${csmTone(r6.grr, 95, 90)}">${csmPct(r6.grr)}</b></button>
+        <button type="button" data-csm-ret="grr13" data-rep="${esc(rep)}" aria-label="13-month GRR"><b class="${csmTone(r13.grr, 90, 80)}">${csmPct(r13.grr)}</b></button>
       </div>
       <button type="button" class="csm-row" data-csm-growth="${esc(rep)}">
         <span>Account growth</span><b class="${m.net >= 0 ? 'pos' : 'neg'}">${mrrMoney(m.net, true)}</b>
