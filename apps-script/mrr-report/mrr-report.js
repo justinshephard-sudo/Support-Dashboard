@@ -36,6 +36,7 @@ var GID = {
   scheduled: 0,              // Scheduled Churn (in CHURN_SHEET_ID)
 };
 var SNAPSHOT_TAB = 'MRR Snapshot';
+var ARCHIVE_TAB = 'MRR Impact Archive';
 // Churn reasons, practice area, churn score and lead volume come from ChurnZero, via the
 // daily Accounts sync (apps-script/sync-accounts.gs) in the Support Team Report sheet.
 var ACCOUNTS_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
@@ -156,9 +157,13 @@ function build_() {
   var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
   var cutoff = monthKey_(addMonths_(new Date(), -MONTHS_BACK));
 
+  // Live = Chargebee's last ~90 days (it drops older events); Archive = finished months frozen
+  // by the sync before they age out; Historical = the one-time export before the live feed.
   var live = readEvents_(tab_(ss, GID.live), 'l', cutoff);
+  var archiveTab = ss.getSheetByName(ARCHIVE_TAB);
+  var archive = archiveTab ? readEvents_(archiveTab, 'h', cutoff) : [];
   var hist = readEvents_(tab_(ss, GID.historical), 'h', cutoff);
-  var events = netWithinMonth_(washCancelReactivate_(mergeFeeds_(live, hist)));
+  var events = netWithinMonth_(washCancelReactivate_(mergeFeeds_(live, archive.concat(hist))));
 
   var scheduled = readScheduled_();
   var retention = readRetention_(ss);
