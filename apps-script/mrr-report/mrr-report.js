@@ -640,13 +640,17 @@ function pullAiUsage_() {
   // An empty answer means something went wrong; keep the last good copy.
   if (!Array.isArray(rows) || !rows.length) throw new Error('Metabase returned no rows');
   var head = Object.keys(rows[0]).concat('pulled_at'), at = new Date().toISOString();
+  writeAiUsage_(head, rows.map(function (r) { return head.map(function (h) { return h === 'pulled_at' ? at : r[h]; }); }));
+  return true;
+}
+
+function writeAiUsage_(head, rows) {
   var cell = function (v) { return String(v == null ? '' : v).replace(/^([=+@])/, "'$1"); };
-  var out = [head].concat(rows.map(function (r) { return head.map(function (h) { return h === 'pulled_at' ? at : cell(r[h]); }); }));
+  var out = [head].concat(rows.map(function (r) { return r.map(cell); }));
   var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
   var sh = ss.getSheetByName(AI_USAGE_TAB) || ss.insertSheet(AI_USAGE_TAB);
   sh.clearContents();
   sh.getRange(1, 1, out.length, head.length).setNumberFormat('@').setValues(out);
-  return true;
 }
 
 /* ---------- editor helpers ---------- */
