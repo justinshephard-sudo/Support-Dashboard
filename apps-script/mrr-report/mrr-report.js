@@ -495,8 +495,9 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 // (commission.js, in the MRR sheet's script) copies these three months out of its private
 // sheet into this tab every hour, so the dashboard never needs the commission sheet.
 var MONTH_END_TAB = 'CSM Retention Months';
+var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm4_';
+var CSM_CACHE = 'csm5_';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
@@ -523,7 +524,7 @@ function loadCsm_(force) {
 function buildCsm_() {
   var ai;
   try { ai = readAiHealth_(); } catch (e) { console.error(e && e.stack || e); ai = { error: 'Couldn’t read Merlin AI usage.' }; }
-  return { ok: true, built: Date.now(), retention: readMonthEnd_(), health: readHealth_(), months: repMonths_(), ai: ai };
+  return { ok: true, built: Date.now(), history: readFirmHistory_(), health: readHealth_(), months: repMonths_(), ai: ai };
 }
 
 // Per-rep totals for the last 13 months, from the MRR copy already in the cache, so the CSM
@@ -549,6 +550,26 @@ function repMonths_() {
   d.scheduled.rows.forEach(function (r) { var dt = at(r, sf, 'date'); if (dt >= d.today) add(at(r, sf, 'am'), dt.slice(0, 7), -Math.abs(at(r, sf, 'mrr')), 'c', 0); });
   Object.keys(out).forEach(function (am) { Object.keys(out[am]).forEach(function (ym) { out[am][ym] = out[am][ym].map(function (v) { return Math.round(v * 100) / 100; }); }); });
   return out;
+}
+
+// Cohort and all-time retention, from the CSM Firm History tab Johnny's hourly snapshot writes
+// (one row per customer). Last month is the checkpoint: the 6-month cohort is firms whose first
+// paid month was 6 months before it, the 13-month cohort 13 months before (Johnny's Month 13
+// convention). Credit goes to each firm's latest AM: its current AM, or its AM when it cancelled.
+// firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow]
+function readFirmHistory_() {
+  var sh = SpreadsheetApp.openById(MRR_SHEET_ID).getSheetByName(HISTORY_TAB);
+  if (!sh) return { error: 'Waiting for the first firm history — it arrives with the next hourly snapshot.' };
+  var rows = rows_(sh);
+  // Mid-month dates, so the script's time zone can't tip a month boundary.
+  var shift = function (ym, n) { return monthKey_(new Date(+ym.slice(0, 4), +ym.slice(5) - 1 + n, 15)); };
+  var now = monthKey_(new Date()), checkpoint = shift(now, -1);
+  var first = rows.length ? ymNorm_(rows[0]['First Snapshot#']) : '';
+  var firms = rows.filter(function (r) { return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0; }).map(function (r) {
+    return [String(r['Company#']).trim(), name_(r['Account Manager#']), ymNorm_(r['Signup Month#']), money_(r['Start MRR#']),
+      money_(r['Last Month MRR#']), money_(r['MRR Now#'])];
+  });
+  return { now: now, checkpoint: checkpoint, cohort6: shift(checkpoint, -6), cohort13: shift(checkpoint, -13), first: first, firms: firms };
 }
 
 // Each firm's MRR at month-ends: the latest month (this month, refreshed hourly) vs. 6 and
@@ -661,7 +682,10 @@ function checkCsm() {
   var t = Date.now();
   var d = buildCsm_();
   Logger.log('built in %s s', ((Date.now() - t) / 1000).toFixed(1));
-  Logger.log('retention: %s', d.retention.error || ('end ' + d.retention.end + ' · 6m from ' + d.retention.start6 + ' · 13m from ' + d.retention.start13 + ' · firms ' + d.retention.firms.length));
+  var hi = d.history;
+  Logger.log('retention: %s', hi.error || ('checkpoint ' + hi.checkpoint + ' · 6m cohort ' + hi.cohort6 + ' (' +
+    hi.firms.filter(function (f) { return f[2] === hi.cohort6; }).length + ' firms) · 13m cohort ' + hi.cohort13 + ' (' +
+    hi.firms.filter(function (f) { return f[2] === hi.cohort13; }).length + ' firms) · all-time ' + hi.firms.length + ' firms since ' + hi.first));
   Logger.log('health: %s', d.health.error || (d.health.accounts.length + ' active accounts, ' + d.health.accounts.filter(function (a) { return a[2] == null; }).length + ' unscored'));
   Logger.log('AI upsell events: %s', mrrUnpackAi_());
   var h = d.ai;

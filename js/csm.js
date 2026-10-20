@@ -1,5 +1,5 @@
 /* ==========================================================================
-   CSM — each rep's book: retention (6- and 13-month NRR / GRR), growth this
+   CSM — each rep's book: retention (6- and 13-month cohort and all-time NRR / GRR), growth this
    month, AI upsells against the $500/mo target, and account health.
    Data: the MRR Report backend (apps-script/mrr-report): `csm` for the cards (month-end
    snapshots, ChurnZero health, per-rep monthly totals) and `load` — shared with the MRR
@@ -32,7 +32,7 @@ async function loadCsm(force) {
       const [csm] = await Promise.all([mrrCall({ action: 'csm', force: !!force }), ensureTabData('impl')]);
       if (force) loadMrr(true); else prefetchMrr();
       const changed = !CSM.data || csm.built !== CSM.data.built || force;
-      CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, csm);
+      CSM.data = Object.assign({ history: {}, health: { accounts: [], bad: 33, good: 67 } }, csm);
       try { sessionStorage.setItem(CSM_STORE, JSON.stringify(csm)); } catch (e) { /* full or private */ }
       CSM.error = '';
       if (!changed && !force) return;
@@ -52,7 +52,7 @@ function prefetchCsm() {
   if (CSM.data || CSM.loading) return;
   try {
     const saved = JSON.parse(sessionStorage.getItem(CSM_STORE) || 'null');
-    if (saved && saved.months) CSM.data = Object.assign({ retention: {}, health: { accounts: [], bad: 33, good: 67 } }, saved);
+    if (saved && saved.months && saved.history) CSM.data = Object.assign({ history: {}, health: { accounts: [], bad: 33, good: 67 } }, saved);
   } catch (e) { /* private mode */ }
   loadCsm(false);
 }
@@ -66,15 +66,24 @@ function openCsm() {
 }
 
 /* ---------- calculations ---------- */
-// NRR = the book's MRR now ÷ its MRR at the window start (expansion counts).
-// GRR = the same, but no firm counts for more than it started with (only what was kept).
-function csmRetention(firms, startIdx, amIdx, rep) {
-  const book = firms.filter((f) => f[startIdx] > 0 && (rep == null || f[amIdx] === rep));
-  const start = book.reduce((s, f) => s + f[startIdx], 0);
-  const now = book.reduce((s, f) => s + f[5], 0);
-  const kept = book.reduce((s, f) => s + Math.min(f[5], f[startIdx]), 0);
-  return { book, start, now, nrr: start ? (now / start) * 100 : null, grr: start ? (kept / start) * 100 : null };
+// kind 6 / 13: the firms whose first paid month was 6 / 13 months before last month (they've just
+// completed that month), measured at the end of last month. 'bob': every firm the rep has had,
+// measured now. NRR = MRR then ÷ starting MRR (expansion counts); GRR = the same with no firm
+// counting for more than it started with. Firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow].
+const CSM_WINDOWS = { 6: '6 mo', 13: '13 mo', bob: 'BoB' };
+function csmRetention(kind, rep) {
+  const h = CSM.data.history || {};
+  const cohort = kind === 'bob' ? null : h[`cohort${kind}`];
+  const at = cohort ? 4 : 5;
+  const book = (h.firms || []).filter((f) => (!cohort || f[2] === cohort) && (rep == null || f[1] === rep));
+  const start = book.reduce((s, f) => s + f[3], 0);
+  const now = book.reduce((s, f) => s + f[at], 0);
+  const kept = book.reduce((s, f) => s + Math.min(f[at], f[3]), 0);
+  return { book, at, cohort, start, now, nrr: start ? (now / start) * 100 : null, grr: start ? (kept / start) * 100 : null };
 }
+// Colour thresholds [good, okay] per window.
+const CSM_TONE = { nrr: { 6: [100, 95], 13: [100, 90], bob: [100, 90] }, grr: { 6: [95, 90], 13: [90, 80], bob: [90, 80] } };
+const csmTo = (metric, kind, v) => csmTone(v, ...CSM_TONE[metric][kind]);
 
 // Card totals come pre-summed from the backend: [net, expansion, changes, aiAdded, aiRemoved].
 function csmMonth(ym, rep) {
@@ -137,11 +146,10 @@ function renderCsm() {
   if (!CSM.data) { if (CSM.error) document.getElementById('csmBody').innerHTML = ''; return; }
   const cur = mrrCur();
   if (!CSM.ym) CSM.ym = cur;
-  const ret = CSM.data.retention || {};
-  const firms = ret.firms || [];
-  const t6 = csmRetention(firms, 2, 1), t13 = csmRetention(firms, 4, 3);
+  const hist = CSM.data.history || {};
   const reps = csmReps();
-  const tile = (label, v, key, good, ok) => `<button type="button" class="mrr-kpi ${csmTone(v, good, ok)}" data-csm-ret="${key}"><span>${label}</span><b>${csmPct(v)}</b><small>Team · how ⓘ</small></button>`;
+  const team = { 6: csmRetention(6), 13: csmRetention(13), bob: csmRetention('bob') };
+  const tile = (metric, kind, label) => `<button type="button" class="mrr-kpi ${csmTo(metric, kind, team[kind][metric])}" data-csm-ret="${metric}" data-kind="${kind}"><span>${label} ${metric.toUpperCase()}</span><b>${csmPct(team[kind][metric])}</b><small>Team · ${mrrPlural(team[kind].book.length, 'firm')} · how ⓘ</small></button>`;
 
   document.getElementById('csmHero').innerHTML = `
     <div class="fa-hero-text">
@@ -149,11 +157,10 @@ function renderCsm() {
       <h2>CSM <span>Scorecard</span></h2>
       <p>Retention, growth, AI upsells and account health for each rep’s book. Click any number for the firms behind it.</p>
       <div class="mrr-kpis csm-kpis">
-        ${tile('6-month NRR', t6.nrr, 'nrr6', 100, 95)}${tile('6-month GRR', t6.grr, 'grr6', 95, 90)}
-        ${tile('13-month NRR', t13.nrr, 'nrr13', 100, 90)}${tile('13-month GRR', t13.grr, 'grr13', 90, 80)}
+        ${tile('nrr', 6, '6-month')}${tile('nrr', 13, '13-month')}${tile('nrr', 'bob', 'All-time')}${tile('grr', 6, '6-month')}${tile('grr', 13, '13-month')}${tile('grr', 'bob', 'All-time')}
       </div>
       <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button>
-        <span class="mrr-sync">${ret.end ? `Book MRR as of ${esc(mrrYmLabel(ret.end))} · 6-month window from ${esc(ret.start6 ? mrrYmLabel(ret.start6) : '—')}, 13-month from ${esc(ret.start13 ? mrrYmLabel(ret.start13) : '—')}` : esc(ret.error || '')}</span></div>
+        <span class="mrr-sync">${hist.checkpoint ? `6- and 13-month: firms that signed up in ${esc(mrrYmLabel(hist.cohort6))} and ${esc(mrrYmLabel(hist.cohort13))}, as of the end of ${esc(mrrYmLabel(hist.checkpoint))} · All-time: every firm since ${esc(mrrYmLabel(hist.first))}, as of now` : esc(hist.error || '')}</span></div>
     </div>
     <div class="fa-hero-art">
       <div class="loop-bubble">Every rep’s goal: ${mrrMoney(CSM_AI_TARGET)}/mo in new AI upsells.</div>
@@ -162,7 +169,8 @@ function renderCsm() {
 
   const min = mrrAddYm(cur, -12);
   const cards = reps.map((rep) => {
-    const r6 = csmRetention(firms, 2, 1, rep), r13 = csmRetention(firms, 4, 3, rep);
+    const r = { 6: csmRetention(6, rep), 13: csmRetention(13, rep), bob: csmRetention('bob', rep) };
+    const cell = (metric, kind) => `<button type="button" data-csm-ret="${metric}" data-kind="${kind}" data-rep="${esc(rep)}" aria-label="${CSM_WINDOWS[kind]} ${metric.toUpperCase()}"><b class="${csmTo(metric, kind, r[kind][metric])}">${csmPct(r[kind][metric])}</b></button>`;
     const m = csmMonth(CSM.ym, rep);
     const h = csmHealth(rep);
     const total = h.good.length + h.okay.length + h.bad.length + h.none.length;
@@ -172,13 +180,9 @@ function renderCsm() {
     return `<article class="csm-card">
       <header><span class="fa-av">${esc(rep.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span><h3>${esc(rep)}</h3></header>
       <div class="csm-ret">
-        <span></span><span class="csm-ret-h">6 mo</span><span class="csm-ret-h">13 mo</span>
-        <span class="csm-ret-l">NRR</span>
-        <button type="button" data-csm-ret="nrr6" data-rep="${esc(rep)}" aria-label="6-month NRR"><b class="${csmTone(r6.nrr, 100, 95)}">${csmPct(r6.nrr)}</b></button>
-        <button type="button" data-csm-ret="nrr13" data-rep="${esc(rep)}" aria-label="13-month NRR"><b class="${csmTone(r13.nrr, 100, 90)}">${csmPct(r13.nrr)}</b></button>
-        <span class="csm-ret-l">GRR</span>
-        <button type="button" data-csm-ret="grr6" data-rep="${esc(rep)}" aria-label="6-month GRR"><b class="${csmTone(r6.grr, 95, 90)}">${csmPct(r6.grr)}</b></button>
-        <button type="button" data-csm-ret="grr13" data-rep="${esc(rep)}" aria-label="13-month GRR"><b class="${csmTone(r13.grr, 90, 80)}">${csmPct(r13.grr)}</b></button>
+        <span></span>${Object.values(CSM_WINDOWS).map((l) => `<span class="csm-ret-h">${l}</span>`).join('')}
+        <span class="csm-ret-l">NRR</span>${cell('nrr', 6)}${cell('nrr', 13)}${cell('nrr', 'bob')}
+        <span class="csm-ret-l">GRR</span>${cell('grr', 6)}${cell('grr', 13)}${cell('grr', 'bob')}
       </div>
       <button type="button" class="csm-row" data-csm-growth="${esc(rep)}">
         <span>Account growth</span><b class="${m.net >= 0 ? 'pos' : 'neg'}">${mrrMoney(m.net, true)}</b>
@@ -200,27 +204,30 @@ function renderCsm() {
     <div class="mrr-panel-head csm-head"><h3>By rep</h3>
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
-    <p class="mrr-note csm-foot">Retention judges the book each rep held at the start of the window. Health is ChurnZero’s churn score: good is ${CSM.data.health.good}+, okay ${CSM.data.health.bad}–${CSM.data.health.good}, bad under ${CSM.data.health.bad}. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%.` : ''}</p>`;
+    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score: good is ${CSM.data.health.good}+, okay ${CSM.data.health.bad}–${CSM.data.health.good}, bad under ${CSM.data.health.bad}. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%.` : ''}</p>`;
 }
 
 /* ---------- pop-ups ---------- */
-function csmRetentionDrill(key, rep) {
-  const ret = CSM.data.retention;
-  const six = key.endsWith('6');
-  const [si, ai] = six ? [2, 1] : [4, 3];
-  const r = csmRetention(ret.firms || [], si, ai, rep || null);
-  const start = six ? ret.start6 : ret.start13;
-  const rows = r.book.slice().sort((a, b) => (a[5] - a[si]) - (b[5] - b[si]));
-  const lost = rows.filter((f) => f[5] === 0).length;
-  const delta = (f) => f[5] - f[si];
+function csmRetentionDrill(kind, rep) {
+  const h = CSM.data.history || {};
+  const r = csmRetention(kind, rep || null);
+  const then = (f) => f[3], now = (f) => f[r.at], delta = (f) => now(f) - then(f);
+  const rows = r.book.slice().sort((x, y) => delta(x) - delta(y));
+  const lost = rows.filter((f) => now(f) === 0).length;
+  const when = r.cohort ? `the end of ${esc(mrrYmLabel(h.checkpoint))}` : 'now';
+  const scope = r.cohort
+    ? `${mrrPlural(rows.length, 'firm')} that signed up in ${esc(mrrYmLabel(r.cohort))} and just completed month ${kind}`
+    : `${mrrPlural(rows.length, 'firm')} ${rep ? 'in the book' : 'in total'}, since ${esc(mrrYmLabel(h.first))}`;
   MRR.drill = null;
-  mrrModal(`${rep || 'Team'} — ${six ? '6' : '13'}-month retention`,
-    `NRR ${csmPct(r.nrr)} · GRR ${csmPct(r.grr)} · ${mrrPlural(rows.length, 'firm')} owned at the end of ${esc(start ? mrrYmLabel(start) : '—')} · ${lost} since cancelled`,
-    `<div class="mrr-method"><p><b>NRR</b> = the book’s MRR now (${mrrMoney(r.now)}) ÷ its MRR then (${mrrMoney(r.start)}). Upgrades count, so it can go over 100%.
-      <b>GRR</b> counts each firm at no more than its starting MRR, so it only shows what was kept (cancellations and downgrades).</p></div>
-    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${rep ? '' : '<th>AM then</th>'}<th>MRR then</th><th>MRR now</th><th>Change</th></tr></thead><tbody>
-      ${rows.map((f) => `<tr><td>${esc(f[0])}${f[5] === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${rep ? '' : `<td>${esc(f[ai] || '—')}</td>`}<td>${mrrMoney(f[si])}</td><td>${mrrMoney(f[5])}</td><td><b class="${delta(f) >= 0 ? 'pos' : 'neg'}">${mrrMoney(delta(f), true)}</b></td></tr>`).join('')}
-    </tbody></table></div>`);
+  mrrModal(`${rep || 'Team'} — ${kind === 'bob' ? 'all-time (book of business)' : `${kind}-month`} retention`,
+    `NRR ${csmPct(r.nrr)} · GRR ${csmPct(r.grr)} · ${scope} · ${lost} since cancelled`,
+    `<div class="mrr-method"><p>Each firm starts at its MRR in its <b>first paid month</b> and is compared with its MRR at ${when}.
+      <b>NRR</b> = ${mrrMoney(r.now)} ÷ ${mrrMoney(r.start)}; upgrades count, so it can go over 100%.
+      <b>GRR</b> counts each firm at no more than its starting MRR, so it only shows what was kept (cancellations and downgrades).
+      Firms count for their current AM, or the AM they had when they cancelled.${kind === 'bob' ? ` Firms already paying in ${esc(mrrYmLabel(h.first))}, when the snapshots begin, start from that month.` : ''}</p></div>
+    ${rows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR ${r.cohort ? 'end of ' + esc(mrrYmLabel(h.checkpoint)) : 'now'}</th><th>Change</th></tr></thead><tbody>
+      ${rows.map((f) => `<tr><td>${esc(f[0])}${now(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(then(f))}</td><td>${mrrMoney(now(f))}</td><td><b class="${delta(f) >= 0 ? 'pos' : 'neg'}">${mrrMoney(delta(f), true)}</b></td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="empty-note">No firms in this group.</div>'}`);
 }
 
 function csmHealthDrill(rep) {
@@ -267,7 +274,7 @@ function setupCsm() {
     const ym = t.closest('[data-csm-ym]');
     if (ym) { CSM.ym = mrrAddYm(CSM.ym, Number(ym.dataset.csmYm)); renderCsm(); return; }
     const r = t.closest('[data-csm-ret]');
-    if (r) { csmRetentionDrill(r.dataset.csmRet, r.dataset.rep); return; }
+    if (r) { csmRetentionDrill(r.dataset.kind === 'bob' ? 'bob' : Number(r.dataset.kind), r.dataset.rep); return; }
     const g = t.closest('[data-csm-growth]');
     if (g) { const rep = g.dataset.csmGrowth; csmWithEvents(() => mrrOpenDrill(`${rep} — account growth`, mrrYmLabel(CSM.ym), csmMonthRows(CSM.ym, rep).rows, 'move')); return; }
     const a = t.closest('[data-csm-ai]');
