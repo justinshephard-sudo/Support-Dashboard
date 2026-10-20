@@ -508,6 +508,7 @@ var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every ch
 var AI_ADDON_TAB = 'AI Add-on Firms';
 var AI_USAGE_TAB = 'Merlin AI Usage';
 var AI_HEALTH = { bad: 15, good: 50 };   // % of new leads touched
+var AI_PULL_EVERY_MS = 6 * 3600 * 1000;  // 30-day usage barely moves hour to hour
 
 // warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
 function loadCsm_(force) {
@@ -652,22 +653,45 @@ function readAiHealth_() {
   return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, asOf: asOf, firms: firms };
 }
 
-// Runs the saved Metabase question (production data) into the Merlin AI Usage tab. Needs Script
-// Properties METABASE_URL, METABASE_KEY and METABASE_CARD (the question's number); until they're
-// set, the tab keeps whatever was last imported by hand.
-function pullAiUsage_() {
+// Runs the saved Metabase question (production data) into the Merlin AI Usage tab, at most every
+// AI_PULL_EVERY_MS (force: now). Needs Script Properties METABASE_URL, METABASE_KEY and
+// METABASE_CARD (the question's number); until they're set, the tab keeps what was imported by hand.
+// The question takes the AI add-on firms' Chargebee IDs as {{customer_ids}}, so the live database
+// only counts those firms; a question without that filter still works (it's just slower).
+function pullAiUsage_(force) {
   var p = PropertiesService.getScriptProperties();
   var url = p.getProperty('METABASE_URL'), key = p.getProperty('METABASE_KEY'), card = p.getProperty('METABASE_CARD');
   if (!url || !key || !card) return false;
-  var res = UrlFetchApp.fetch(url.replace(/\/+$/, '') + '/api/card/' + encodeURIComponent(card) + '/query/json',
-    { method: 'post', headers: { 'x-api-key': key }, muteHttpExceptions: true });
-  if (res.getResponseCode() !== 200) throw new Error('Metabase returned ' + res.getResponseCode());
+  if (!force && Date.now() - Number(p.getProperty('AI_USAGE_PULLED') || 0) < AI_PULL_EVERY_MS) return false;
+  var endpoint = url.replace(/\/+$/, '') + '/api/card/' + encodeURIComponent(card) + '/query/json';
+  var ids = aiAddonCustomerIds_();
+  var call = function (withIds) {
+    var opts = { method: 'post', headers: { 'x-api-key': key }, muteHttpExceptions: true };
+    if (withIds) {
+      opts.contentType = 'application/json';
+      opts.payload = JSON.stringify({ parameters: [{ type: 'category', target: ['variable', ['template-tag', 'customer_ids']], value: ids.join(',') }] });
+    }
+    return UrlFetchApp.fetch(endpoint, opts);
+  };
+  var res = ids.length ? call(true) : call(false);
+  if (ids.length && res.getResponseCode() !== 200 && res.getResponseCode() !== 202) res = call(false);   // question not filtered yet
+  if (res.getResponseCode() !== 200 && res.getResponseCode() !== 202) throw new Error('Metabase returned ' + res.getResponseCode());
   var rows = JSON.parse(res.getContentText());
   // An empty answer means something went wrong; keep the last good copy.
   if (!Array.isArray(rows) || !rows.length) throw new Error('Metabase returned no rows');
   var head = Object.keys(rows[0]).concat('pulled_at'), at = new Date().toISOString();
   writeAiUsage_(head, rows.map(function (r) { return head.map(function (h) { return h === 'pulled_at' ? at : r[h]; }); }));
+  p.setProperty('AI_USAGE_PULLED', String(Date.now()));
   return true;
+}
+
+// Chargebee customer IDs of the firms with the AI credits add-on (Johnny's hourly list).
+function aiAddonCustomerIds_() {
+  var sh = SpreadsheetApp.openById(MRR_SHEET_ID).getSheetByName(AI_ADDON_TAB);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues()
+    .map(function (r) { return String(r[0]).trim(); })
+    .filter(function (id) { return /^[A-Za-z0-9_-]+$/.test(id); });
 }
 
 function writeAiUsage_(head, rows) {
@@ -706,7 +730,7 @@ function checkMetabase() {
     Logger.log('%s: %s', k, p.getProperty(k) ? (k === 'METABASE_KEY' ? 'set' : p.getProperty(k)) : 'MISSING');
   });
   var t = Date.now();
-  if (!pullAiUsage_()) { Logger.log('Not pulled: a Metabase property is missing.'); return; }
+  if (!pullAiUsage_(true)) { Logger.log('Not pulled: a Metabase property is missing.'); return; }
   Logger.log('Pulled from Metabase in %s s.', ((Date.now() - t) / 1000).toFixed(1));
   var h = readAiHealth_();
   Logger.log('Merlin AI health: %s', h.error || (h.firms.length + ' add-on firms · usage ' + h.asOf + ' · ' +
