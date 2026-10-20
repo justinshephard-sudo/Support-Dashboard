@@ -108,6 +108,23 @@ function csmHealth(rep) {
   return by;
 }
 
+// Merlin AI Health: add-on firms graded by the share of new leads Merlin scored or worked.
+function csmAiHealth(rep) {
+  const h = CSM.data.ai || {};
+  const grade = (f) => (f[2] == null ? 'none' : f[2] >= h.good ? 'good' : f[2] >= h.bad ? 'okay' : 'bad');
+  const by = { good: [], okay: [], bad: [], none: [] };
+  (h.firms || []).filter((f) => f[1] === rep).forEach((f) => by[grade(f)].push(f));
+  return by;
+}
+
+// A good/okay/bad/none bar with its legend, shared by both health rows.
+function csmHealthBar(h, noneLabel) {
+  const total = h.good.length + h.okay.length + h.bad.length + h.none.length;
+  const bar = (k) => (total ? `<i class="h-${k}" style="width:${(h[k].length / total) * 100}%"></i>` : '');
+  return `<div class="csm-health">${bar('good')}${bar('okay')}${bar('bad')}${bar('none')}</div>
+    <small class="csm-legend"><em class="h-good"></em>${h.good.length} good <em class="h-okay"></em>${h.okay.length} okay <em class="h-bad"></em>${h.bad.length} bad${h.none.length ? ` <em class="h-none"></em>${h.none.length} ${noneLabel}` : ''}</small>`;
+}
+
 const csmPct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
 const csmTone = (v, good, ok) => (v == null ? '' : v >= good ? 'up' : v >= ok ? '' : 'down');
 
@@ -150,7 +167,8 @@ function renderCsm() {
     const h = csmHealth(rep);
     const total = h.good.length + h.okay.length + h.bad.length + h.none.length;
     const pct = Math.min(100, (m.aiAdded / CSM_AI_TARGET) * 100);
-    const bar = (k) => (total ? `<i class="h-${k}" style="width:${(h[k].length / total) * 100}%"></i>` : '');
+    const ai = csmAiHealth(rep);
+    const aiTotal = ai.good.length + ai.okay.length + ai.bad.length + ai.none.length;
     return `<article class="csm-card">
       <header><span class="fa-av">${esc(rep.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span><h3>${esc(rep)}</h3></header>
       <div class="csm-ret">
@@ -171,8 +189,10 @@ function renderCsm() {
         ${m.aiRemoved ? `<small>${mrrMoney(m.aiRemoved, true)} AI removed</small>` : ''}</button>
       <button type="button" class="csm-row" data-csm-health="${esc(rep)}">
         <span>Account health</span><b>${total} <small>accounts</small></b>
-        <div class="csm-health">${bar('good')}${bar('okay')}${bar('bad')}${bar('none')}</div>
-        <small class="csm-legend"><em class="h-good"></em>${h.good.length} good <em class="h-okay"></em>${h.okay.length} okay <em class="h-bad"></em>${h.bad.length} bad${h.none.length ? ` <em class="h-none"></em>${h.none.length} unscored` : ''}</small></button>
+        ${csmHealthBar(h, 'unscored')}</button>
+      <button type="button" class="csm-row" data-csm-aihealth="${esc(rep)}">
+        <span>Merlin AI health</span><b>${aiTotal} <small>AI firms</small></b>
+        ${!CSM.data.ai ? '<small>Loading…</small>' : CSM.data.ai.error ? `<small>${esc(CSM.data.ai.error)}</small>` : aiTotal ? csmHealthBar(ai, 'no new leads') : '<small>No firms with the AI credits add-on.</small>'}</button>
     </article>`;
   }).join('');
 
@@ -180,7 +200,7 @@ function renderCsm() {
     <div class="mrr-panel-head csm-head"><h3>By rep</h3>
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
-    <p class="mrr-note csm-foot">Retention judges the book each rep held at the start of the window. Health is ChurnZero’s churn score: good is ${CSM.data.health.good}+, okay ${CSM.data.health.bad}–${CSM.data.health.good}, bad under ${CSM.data.health.bad}. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.</p>`;
+    <p class="mrr-note csm-foot">Retention judges the book each rep held at the start of the window. Health is ChurnZero’s churn score: good is ${CSM.data.health.good}+, okay ${CSM.data.health.bad}–${CSM.data.health.good}, bad under ${CSM.data.health.bad}. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%.` : ''}</p>`;
 }
 
 /* ---------- pop-ups ---------- */
@@ -214,6 +234,21 @@ function csmHealthDrill(rep) {
     </tbody></table></div>`);
 }
 
+function csmAiHealthDrill(rep) {
+  const d = CSM.data.ai || {};
+  const h = csmAiHealth(rep);
+  const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', 'No new leads']];
+  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (a[2] ?? 999) - (b[2] ?? 999)).map((f) => ({ f, k, l })));
+  const asOf = d.asOf ? `usage as of ${new Date(d.asOf).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'usage from a one-time Metabase export';
+  MRR.drill = null;
+  mrrModal(`${rep} — Merlin AI health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} with no new leads` : ''} · ${asOf}`,
+    `<div class="mrr-method"><p><b>Coverage</b> = new leads Merlin scored or worked with Engage in the last 30 days ÷ the firm’s new leads in that time, capped at 100% (re-scoring older leads can push it over).
+      Good is ${d.good}%+, okay ${d.bad}–${d.good}%, bad under ${d.bad}%. Every firm paying for the AI credits add-on is included, whenever it was added.</p></div>
+    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Health</th><th>Coverage</th><th>New leads</th><th>Scored</th><th>Engage</th><th>Credits used</th><th>Add-on MRR</th></tr></thead><tbody>
+      ${rows.map(({ f, k, l }) => `<tr><td>${esc(f[0])}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${f[3].toLocaleString()}</td><td>${f[4].toLocaleString()}</td><td>${f[5].toLocaleString()}</td><td>${mrrMoney(f[6])}</td><td>${mrrMoney(f[7])}</td></tr>`).join('')}
+    </tbody></table></div>`);
+}
+
 function csmAiDrill(rep) {
   const m = Object.assign(csmMonth(CSM.ym, rep), csmMonthRows(CSM.ym, rep));
   MRR.drill = null;
@@ -238,6 +273,8 @@ function setupCsm() {
     const a = t.closest('[data-csm-ai]');
     if (a) { csmWithEvents(() => csmAiDrill(a.dataset.csmAi)); return; }
     const h = t.closest('[data-csm-health]');
-    if (h) csmHealthDrill(h.dataset.csmHealth);
+    if (h) { csmHealthDrill(h.dataset.csmHealth); return; }
+    const ah = t.closest('[data-csm-aihealth]');
+    if (ah && CSM.data.ai && !CSM.data.ai.error) csmAiHealthDrill(ah.dataset.csmAihealth);
   });
 }

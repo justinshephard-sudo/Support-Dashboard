@@ -4,7 +4,8 @@
    Reads the tabs Johnny's Chargebee sync writes (MRR Data sheet + the
    Scheduled Churn sheet), cleans them into one consistent set of events, and
    hands them to the page. Everyone signed in to the dashboard (@lawmatics.com)
-   can read it; nothing is written anywhere.
+   can read it. The only thing it writes is the "Merlin AI Usage" tab (see
+   pullAiUsage_).
 
    One set of rules for every view (the old page used several):
      - Live and historical exports are merged; an event that's in both
@@ -118,6 +119,7 @@ function warmMrr() {
   // CSM inputs (the hourly month-end copy, the daily Accounts sync) change at most hourly.
   var csm = readCache_(cache, CSM_CACHE);
   if (!csm || Date.now() - csm.built > 55 * 60 * 1000) {
+    try { pullAiUsage_(); } catch (e) { console.error('Merlin AI usage: ' + (e && e.message || e)); }
     try { writeCache_(cache, buildCsm_(), CSM_CACHE); } catch (e) { console.error(e && e.stack || e); }
   }
 }
@@ -494,8 +496,13 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 // sheet into this tab every hour, so the dashboard never needs the commission sheet.
 var MONTH_END_TAB = 'CSM Retention Months';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm3_';
+var CSM_CACHE = 'csm4_';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
+// Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
+// them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
+var AI_ADDON_TAB = 'AI Add-on Firms';
+var AI_USAGE_TAB = 'Merlin AI Usage';
+var AI_HEALTH = { bad: 15, good: 50 };   // % of new leads touched
 
 // warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
 function loadCsm_(force) {
@@ -514,7 +521,9 @@ function loadCsm_(force) {
 }
 
 function buildCsm_() {
-  return { ok: true, built: Date.now(), retention: readMonthEnd_(), health: readHealth_(), months: repMonths_() };
+  var ai;
+  try { ai = readAiHealth_(); } catch (e) { console.error(e && e.stack || e); ai = { error: 'Couldn’t read Merlin AI usage.' }; }
+  return { ok: true, built: Date.now(), retention: readMonthEnd_(), health: readHealth_(), months: repMonths_(), ai: ai };
 }
 
 // Per-rep totals for the last 13 months, from the MRR copy already in the cache, so the CSM
@@ -593,6 +602,53 @@ function readHealth_() {
   return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts };
 }
 
+// firms: [company, am, coverage % (null = no new leads), leads, scored, engaged, credits $, add-on MRR]
+function readAiHealth_() {
+  var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
+  var list = ss.getSheetByName(AI_ADDON_TAB);
+  if (!list) return { error: 'Waiting for the AI add-on list — it arrives with the next hourly snapshot.' };
+  var use = ss.getSheetByName(AI_USAGE_TAB);
+  if (!use) return { error: 'Waiting for Merlin usage from Metabase.' };
+  var byCustomer = {}, byFirm = {}, asOf = '';
+  rows_(use).forEach(function (r) {
+    var u = { leads: num_(r['leads_30d#']), scored: num_(r['leads_scored_30d#']), engaged: num_(r['leads_engaged_30d#']), credits: num_(r['ai_credits_30d#']) };
+    var cid = String(r['billing_customer_id#'] || '').trim();
+    if (cid) byCustomer[cid] = u;
+    byFirm[firmId_(r['firm_id#'])] = u;
+    if (r['pulled_at#'] && r['pulled_at#'] > asOf) asOf = r['pulled_at#'];
+  });
+  var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the query = no leads and no AI use
+  var firms = rows_(list).map(function (r) {
+    var u = byCustomer[String(r['Customer ID#']).trim()] || byFirm[firmId_(r['Firm ID#'])] || none;
+    var cov = u.leads > 0 ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
+    return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#'])];
+  });
+  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, asOf: asOf, firms: firms };
+}
+
+// Runs the saved Metabase question (production data) into the Merlin AI Usage tab. Needs Script
+// Properties METABASE_URL, METABASE_KEY and METABASE_CARD (the question's number); until they're
+// set, the tab keeps whatever was last imported by hand.
+function pullAiUsage_() {
+  var p = PropertiesService.getScriptProperties();
+  var url = p.getProperty('METABASE_URL'), key = p.getProperty('METABASE_KEY'), card = p.getProperty('METABASE_CARD');
+  if (!url || !key || !card) return false;
+  var res = UrlFetchApp.fetch(url.replace(/\/+$/, '') + '/api/card/' + encodeURIComponent(card) + '/query/json',
+    { method: 'post', headers: { 'x-api-key': key }, muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('Metabase returned ' + res.getResponseCode());
+  var rows = JSON.parse(res.getContentText());
+  // An empty answer means something went wrong; keep the last good copy.
+  if (!Array.isArray(rows) || !rows.length) throw new Error('Metabase returned no rows');
+  var head = Object.keys(rows[0]).concat('pulled_at'), at = new Date().toISOString();
+  var cell = function (v) { return String(v == null ? '' : v).replace(/^([=+@])/, "'$1"); };
+  var out = [head].concat(rows.map(function (r) { return head.map(function (h) { return h === 'pulled_at' ? at : cell(r[h]); }); }));
+  var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
+  var sh = ss.getSheetByName(AI_USAGE_TAB) || ss.insertSheet(AI_USAGE_TAB);
+  sh.clearContents();
+  sh.getRange(1, 1, out.length, head.length).setNumberFormat('@').setValues(out);
+  return true;
+}
+
 /* ---------- editor helpers ---------- */
 
 // Run once from the editor: approves sheet + cache access and logs what the page will get.
@@ -603,8 +659,11 @@ function checkCsm() {
   Logger.log('built in %s s', ((Date.now() - t) / 1000).toFixed(1));
   Logger.log('retention: %s', d.retention.error || ('end ' + d.retention.end + ' · 6m from ' + d.retention.start6 + ' · 13m from ' + d.retention.start13 + ' · firms ' + d.retention.firms.length));
   Logger.log('health: %s', d.health.error || (d.health.accounts.length + ' active accounts, ' + d.health.accounts.filter(function (a) { return a[2] == null; }).length + ' unscored'));
-  var ai = mrrUnpackAi_();
-  Logger.log('AI upsell events: %s', ai);
+  Logger.log('AI upsell events: %s', mrrUnpackAi_());
+  var h = d.ai;
+  Logger.log('Merlin AI health: %s', h.error || (h.firms.length + ' add-on firms · usage ' + (h.asOf || 'from a manual import') + ' · ' +
+    h.firms.filter(function (f) { return f[2] != null && f[2] >= h.good; }).length + ' good, ' +
+    h.firms.filter(function (f) { return f[2] != null && f[2] < h.bad; }).length + ' bad'));
 }
 function mrrUnpackAi_() {
   var d = load_(true), i = d.events.fields.indexOf('ai'), n = 0, sum = 0;
