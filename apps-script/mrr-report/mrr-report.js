@@ -501,13 +501,13 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm5_';
+var CSM_CACHE = 'csm6_';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
 var AI_ADDON_TAB = 'AI Add-on Firms';
 var AI_USAGE_TAB = 'Merlin AI Usage';
-var AI_HEALTH = { bad: 15, good: 50 };   // % of new leads touched
+var AI_HEALTH = { bad: 15, good: 50, minLeads: 5 };   // % of new leads touched; under minLeads isn't graded
 var AI_PULL_EVERY_MS = 6 * 3600 * 1000;  // 30-day usage barely moves hour to hour
 
 // warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
@@ -629,7 +629,7 @@ function readHealth_() {
   return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts };
 }
 
-// firms: [company, am, coverage % (null = no new leads), leads, scored, engaged, credits $, add-on MRR]
+// firms: [company, am, coverage % (null = too few new leads to grade), leads, scored, engaged, credits $, add-on MRR]
 function readAiHealth_() {
   var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
   var list = ss.getSheetByName(AI_ADDON_TAB);
@@ -647,10 +647,10 @@ function readAiHealth_() {
   var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the query = no leads and no AI use
   var firms = rows_(list).map(function (r) {
     var u = byCustomer[String(r['Customer ID#']).trim()] || byFirm[firmId_(r['Firm ID#'])] || none;
-    var cov = u.leads > 0 ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
+    var cov = u.leads >= AI_HEALTH.minLeads ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#'])];
   });
-  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, asOf: asOf, firms: firms };
+  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, minLeads: AI_HEALTH.minLeads, asOf: asOf, firms: firms };
 }
 
 // Runs the saved Metabase question (production data) into the Merlin AI Usage tab, at most every
