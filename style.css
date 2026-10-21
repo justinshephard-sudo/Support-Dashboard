@@ -871,3 +871,20 @@ button.mrr-stat span{color:var(--lm-blue)}
 .mrr-step button[data-step],.mrr-step button[data-iym],.mrr-step button[data-csm-ym]{width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:22px;line-height:1;font-weight:700;color:var(--text-1);background:var(--surface-2);border:1px solid var(--border);border-radius:999px}
 .mrr-step button[data-step]:hover:not(:disabled),.mrr-step button[data-iym]:hover:not(:disabled),.mrr-step button[data-csm-ym]:hover:not(:disabled){color:var(--lm-blue);border-color:var(--lm-blue)}
 .csm-head .mrr-step b{font-size:16px}
+
+/* Excluded firms (Manager mode) */
+.excl-btn{font:600 12px/1 inherit;font-family:inherit;color:var(--st-critical);background:transparent;border:1px solid currentColor;border-radius:999px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+.excl-btn:hover{background:color-mix(in srgb,var(--st-critical) 10%,transparent)}
+.excl-btn:disabled{opacity:.6;cursor:default}
+.excl-entry{margin-left:10px;font-size:12px;padding:5px 12px;vertical-align:middle}
+.excl-backdrop{z-index:950}
+.excl-dialog{max-width:560px}
+.excl-form{display:grid;gap:14px}
+.excl-form fieldset{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px 18px}
+.excl-form legend{font-weight:700;margin-bottom:6px;color:var(--text-2)}
+.excl-form label{display:flex;align-items:center;gap:6px;color:var(--text-1)}
+.excl-form label:has(input[name="reason"]){flex-direction:column;align-items:stretch;font-weight:700;color:var(--text-2)}
+.excl-form input[name="reason"]{font:inherit;padding:9px 12px;border:1px solid var(--border-str);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-1)}
+.excl-actions{display:flex;justify-content:flex-end;gap:8px}
+.excl-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:1100;background:#233043;color:#fff;padding:11px 18px;border-radius:999px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}
+.excl-entry,.excl-actions .loop-btn:not(.primary){color:var(--text-1);background:var(--surface-2);border:1px solid var(--border)}

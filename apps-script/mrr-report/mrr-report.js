@@ -501,11 +501,13 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm6_';
+var CSM_CACHE = 'csm7_';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
 var AI_ADDON_TAB = 'AI Add-on Firms';
+// Firms managers took out of the CSM numbers ("Excluded Firms" tab; see apps-script/exclusions.gs).
+var EXCLUDED_TAB = 'Excluded Firms';
 var AI_USAGE_TAB = 'Merlin AI Usage';
 var AI_HEALTH = { bad: 15, good: 50, minLeads: 5 };   // % of new leads touched; under minLeads isn't graded
 var AI_PULL_EVERY_MS = 6 * 3600 * 1000;  // 30-day usage barely moves hour to hour
@@ -528,15 +530,18 @@ function loadCsm_(force) {
 
 // force (the page's Refresh) also rebuilds the MRR copy, so a sync that just ran shows up.
 function buildCsm_(force) {
+  var skip = readExcluded_();
   var ai;
-  try { ai = readAiHealth_(); } catch (e) { console.error(e && e.stack || e); ai = { error: 'Couldn’t read Merlin AI usage.' }; }
-  return { ok: true, built: Date.now(), history: readFirmHistory_(), health: readHealth_(), months: repMonths_(force), ai: ai };
+  try { ai = readAiHealth_(skip); } catch (e) { console.error(e && e.stack || e); ai = { error: 'Couldn’t read Merlin AI usage.' }; }
+  return { ok: true, built: Date.now(), history: readFirmHistory_(skip), health: readHealth_(skip), months: repMonths_(force, skip), ai: ai,
+    excluded: Object.keys(skip) };
 }
 
 // Per-rep totals for the last 13 months, from the MRR copy already in the cache, so the CSM
 // tab doesn't need the full event list just to draw its cards.
 // months[am][ym] = [net, expansion, changes, aiAdded, aiRemoved]
-function repMonths_(force) {
+function repMonths_(force, skip) {
+  skip = skip || {};
   var d = load_(!!force);
   var f = d.events.fields, sf = d.scheduled.fields;
   var at = function (row, fields, k) { return row[fields.indexOf(k)]; };
@@ -551,9 +556,9 @@ function repMonths_(force) {
     if (cat === 'u' || cat === 'r') t[1] += amt;
     if (ai > 0) t[3] += ai; else if (ai < 0) t[4] += ai;
   };
-  d.events.rows.forEach(function (r) { add(at(r, f, 'am'), at(r, f, 'ym'), at(r, f, 'amt'), at(r, f, 'cat'), at(r, f, 'ai') || 0); });
+  d.events.rows.forEach(function (r) { if (!skip[at(r, f, 'firm')]) add(at(r, f, 'am'), at(r, f, 'ym'), at(r, f, 'amt'), at(r, f, 'cat'), at(r, f, 'ai') || 0); });
   // Firms scheduled to cancel count in the month they leave, as on the MRR Report.
-  d.scheduled.rows.forEach(function (r) { var dt = at(r, sf, 'date'); if (dt >= d.today) add(at(r, sf, 'am'), dt.slice(0, 7), -Math.abs(at(r, sf, 'mrr')), 'c', 0); });
+  d.scheduled.rows.forEach(function (r) { var dt = at(r, sf, 'date'); if (dt >= d.today && !skip[at(r, sf, 'firm')]) add(at(r, sf, 'am'), dt.slice(0, 7), -Math.abs(at(r, sf, 'mrr')), 'c', 0); });
   Object.keys(out).forEach(function (am) { Object.keys(out[am]).forEach(function (ym) { out[am][ym] = out[am][ym].map(function (v) { return Math.round(v * 100) / 100; }); }); });
   return out;
 }
@@ -562,8 +567,9 @@ function repMonths_(force) {
 // (one row per customer). Last month is the checkpoint: the 6-month cohort is firms whose first
 // paid month was 6 months before it, the 13-month cohort 13 months before (Johnny's Month 13
 // convention). Credit goes to each firm's latest AM: its current AM, or its AM when it cancelled.
-// firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow]
-function readFirmHistory_() {
+// firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow, firmId]
+function readFirmHistory_(skip) {
+  skip = skip || {};
   var sh = SpreadsheetApp.openById(MRR_SHEET_ID).getSheetByName(HISTORY_TAB);
   if (!sh) return { error: 'Waiting for the first firm history — it arrives with the next hourly snapshot.' };
   var rows = rows_(sh);
@@ -571,9 +577,11 @@ function readFirmHistory_() {
   var shift = function (ym, n) { return monthKey_(new Date(+ym.slice(0, 4), +ym.slice(5) - 1 + n, 15)); };
   var now = monthKey_(new Date()), checkpoint = shift(now, -1);
   var first = rows.length ? ymNorm_(rows[0]['First Snapshot#']) : '';
-  var firms = rows.filter(function (r) { return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0; }).map(function (r) {
+  var firms = rows.filter(function (r) {
+    return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0 && !skip[firmId_(r['Firm ID#'])];
+  }).map(function (r) {
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), ymNorm_(r['Signup Month#']), money_(r['Start MRR#']),
-      money_(r['Last Month MRR#']), money_(r['MRR Now#'])];
+      money_(r['Last Month MRR#']), money_(r['MRR Now#']), firmId_(r['Firm ID#'])];
   });
   return { now: now, checkpoint: checkpoint, cohort6: shift(checkpoint, -6), cohort13: shift(checkpoint, -13), first: first, firms: firms };
 }
@@ -615,22 +623,25 @@ function readMonthEnd_() {
 }
 
 // Active accounts by AM with ChurnZero's churn score, from the daily Accounts sync.
-// accounts: [name, am, score, mrr]
-function readHealth_() {
+// accounts: [name, am, score, mrr, firmId]
+function readHealth_(skip) {
+  skip = skip || {};
   var sh = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(ACCOUNTS_TAB);
   if (!sh) return { error: 'Accounts tab missing' };
   var rows = rows_(sh);
   var accounts = rows.filter(function (r) {
-    return String(r['ContractStatus#']).trim() !== 'Inactive' && money_(r['MRR#']) > 0 && String(r['AccountManager#']).trim();
+    return String(r['ContractStatus#']).trim() !== 'Inactive' && money_(r['MRR#']) > 0 && String(r['AccountManager#']).trim()
+      && !skip[firmId_(r['FirmId#'])];
   }).map(function (r) {
     var sc = String(r['ChurnScore#']).trim();
-    return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#'])];
+    return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#']), firmId_(r['FirmId#'])];
   });
   return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts };
 }
 
-// firms: [company, am, coverage % (null = too few new leads to grade), leads, scored, engaged, credits $, add-on MRR]
-function readAiHealth_() {
+// firms: [company, am, coverage % (null = too few new leads to grade), leads, scored, engaged, credits $, add-on MRR, firmId]
+function readAiHealth_(skip) {
+  skip = skip || {};
   var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
   var list = ss.getSheetByName(AI_ADDON_TAB);
   if (!list) return { error: 'Waiting for the AI add-on list — it arrives with the next hourly snapshot.' };
@@ -645,10 +656,10 @@ function readAiHealth_() {
     if (r['pulled_at#'] && r['pulled_at#'] > asOf) asOf = r['pulled_at#'];
   });
   var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the query = no leads and no AI use
-  var firms = rows_(list).map(function (r) {
+  var firms = rows_(list).filter(function (r) { return !skip[firmId_(r['Firm ID#'])]; }).map(function (r) {
     var u = byCustomer[String(r['Customer ID#']).trim()] || byFirm[firmId_(r['Firm ID#'])] || none;
     var cov = u.leads >= AI_HEALTH.minLeads ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
-    return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#'])];
+    return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#'])];
   });
   return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, minLeads: AI_HEALTH.minLeads, asOf: asOf, firms: firms };
 }
@@ -709,6 +720,18 @@ function writeAiUsage_(head, rows) {
   var sh = ss.getSheetByName(AI_USAGE_TAB) || ss.insertSheet(AI_USAGE_TAB);
   sh.clearContents();
   sh.getRange(1, 1, out.length, head.length).setNumberFormat('@').setValues(out);
+}
+
+// { firmId: true } for firms managers excluded from CSM (scope "CSM" or "Both").
+function readExcluded_() {
+  var out = {};
+  var sh = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(EXCLUDED_TAB);
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3).getDisplayValues().forEach(function (r) {
+    var id = firmId_(String(r[0]).replace(/~.*$/, ''));
+    if (id && (r[2] === 'CSM' || r[2] === 'Both')) out[id] = true;
+  });
+  return out;
 }
 
 /* ---------- editor helpers ---------- */

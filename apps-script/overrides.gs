@@ -1,5 +1,6 @@
 // LEGACY INCENTIVE OVERRIDES web app — bound to "Support Team Report 2026".
-// Writes the "Overrides" tab there (Month | Incentive | Winner | Updated | Stat text).
+// Writes the "Overrides" tab there (Month | Incentive | Winner | Updated | Stat text), and
+// (action exclude / unexclude) the "Excluded Firms" tab — see exclusions.gs.
 //
 // Security: only dashboard MANAGERS can write. Each request carries the viewer's
 // Google access token, checked by dashAuth_ (shared/dash-auth.js, copied in by
@@ -17,7 +18,11 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
   const who = dashAuth_(body.token);
   if (!who.ok) return dashJson_(who);
-  if (!who.manager) return dashJson_({ ok: false, error: 'Only managers can change incentives.' });
+  if (!who.manager) return dashJson_({ ok: false, error: 'Only managers can do that.' });
+  if (body.action === 'exclude' || body.action === 'unexclude') {
+    try { return dashJson_(handleExclusion_(body, who)); }
+    catch (err) { console.error(err); return dashJson_({ ok: false, error: 'Couldn’t save the exclusion.' }); }
+  }
 
   const monthKey = String(body.monthKey || '').trim().slice(0, 40);
   const incentiveKey = String(body.incentiveKey || '').trim().slice(0, 60);

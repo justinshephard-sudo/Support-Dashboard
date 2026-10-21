@@ -29,6 +29,7 @@ if want "$ONLY" bound; then
   cp "$AS/overrides.gs" "$BOUND/Code.js"
   cp "$AS/sync-accounts.gs" "$BOUND/sync-accounts.js"
   cp "$AS/implementation-sync.gs" "$BOUND/implementation-sync.js"
+  cp "$AS/exclusions.gs" "$BOUND/exclusions.js"
   push support-report-bound "$BOUND" AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g
 fi
 if want "$ONLY" master; then

@@ -804,6 +804,7 @@ function setManagerMode(on) {
   try { renderResources(); } catch (e) {}
   try { updateScorecardsButton(); } catch (e) {}
   try { updateAssignButton(); } catch (e) {}
+  try { renderExclEntries(); if (CSM.data) renderCsm(); } catch (e) {}
   const badge = document.getElementById('manager-mode-badge');
   if (on) showManagerBadge(); else if (badge) badge.remove();
 }

@@ -70,6 +70,7 @@ function bootstrap() {
   setupLoop();
   setupMrr();
   setupCsm();
+  setupExclusions();
   setupScorecards();
   setupAssign();
   setupTheme();

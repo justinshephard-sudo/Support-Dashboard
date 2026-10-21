@@ -30,7 +30,8 @@
    Which firms count (applies to every number): active accounts (IsActive eq true)
    that started on or after IMPL_MIN_START (StartDate, or Cf.CurrentTermStart when
    StartDate is blank), excluding agency firms, agency client firms, and consultants
-   (Cf.AgencyFirm / Cf.AgencyClientFirm / Cf.Consultant true).
+   (Cf.AgencyFirm / Cf.AgencyClientFirm / Cf.Consultant true), and firms managers excluded
+   from IM on the dashboard ("Excluded Firms" tab, exclusions.gs).
 
    Definitions:
      open onboarding  = OnboardingStatus "Pre-Kickoff" or "Open"
@@ -65,12 +66,13 @@ function syncImplementation() {
   var tz = Session.getScriptTimeZone() || 'America/Los_Angeles';
   var now = new Date();
 
+  var excluded = excludedFirmIds_('IM');   // managers' "Excluded Firms" list (exclusions.gs)
   var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
     .filter(function (a) {
       var cf = a.Cf || {};
       var start = implStart_(a);
       return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true &&
-        start && start >= IMPL_MIN_START;
+        start && start >= IMPL_MIN_START && !excluded[excludedFirmKey_(a.ExternalId || cf.FirmId)];
     });
   var activeIds = {}, repOf = {}, byId = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {

@@ -23,12 +23,15 @@ async function initImplementation() {
       fetchSheetByTitle('Impl - Monthly'),
       fetchSheetByTitle('Impl - Open Firms').catch(() => []),
       fetchSheetByTitle('Impl - Firm Events').catch(() => []),
+      loadExclusions(),
     ]);
     IMPL.events = sheetObjects(events);
     IMPL.months = sheetObjects(monthly).filter((m) => m.Month).map((m) => ({ ...m, Month: implMonthLabel(m.Month) }));
     IMPL.months.forEach((m) => IMPL.byLabel.set(m.Month, m));
     IMPL.open = sheetObjects(open);
+    exclApplyImpl();
     IMPL.loaded = true;
+    renderExclEntries();
   } catch (err) {
     console.error('Implementation data not available', err);
     const el = document.getElementById('impl-error');
@@ -292,8 +295,8 @@ function openImplDrill(col, label) {
   back.id = 'impl-drill';
   const count = spec.rows ? spec.rows.length : 0;
   const body = spec.rows && spec.rows.length
-    ? `<div class="table-wrap"><table class="drill-table"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>`
-      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+    ? `<div class="table-wrap"><table class="drill-table"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}</tr></thead>`
+      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
   back.innerHTML = `<div class="drill" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
@@ -450,7 +453,7 @@ function mountServices() {
   const root = document.getElementById('services-root');
   if (!root || root.querySelector('iframe')) return;
   const frame = document.createElement('iframe');
-  frame.src = 'services/index.html?v=2610201143';
+  frame.src = 'services/index.html?v=2610210636';
   frame.title = 'Additional Services';
   frame.className = 'services-frame';
   root.appendChild(frame);
