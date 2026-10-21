@@ -1,5 +1,6 @@
 /* ==========================================================================
-   CSM — each rep's book: retention (6- and 13-month cohort and all-time NRR / GRR), growth this
+   CSM — each rep's book: retention (6- and 13-month cohort and all-time NRR / GRR, and a
+   cohort-by-age grid), growth this
    month, AI upsells against the $500/mo target, and account health.
    Data: the MRR Report backend (apps-script/mrr-report): `csm` for the cards (month-end
    snapshots, ChurnZero health, per-rep monthly totals) and `load` — shared with the MRR
@@ -160,7 +161,7 @@ function renderCsm() {
       <div class="mrr-kpis csm-kpis">
         ${tile('nrr', 6, '6-month')}${tile('nrr', 13, '13-month')}${tile('nrr', 'bob', 'All-time')}${tile('grr', 6, '6-month')}${tile('grr', 13, '13-month')}${tile('grr', 'bob', 'All-time')}
       </div>
-      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button>
+      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="">Team cohort analysis</button>
         <span class="mrr-sync">${hist.checkpoint ? `6- and 13-month: firms that signed up in ${esc(mrrYmLabel(hist.cohort6))} and ${esc(mrrYmLabel(hist.cohort13))}, as of the end of ${esc(mrrYmLabel(hist.checkpoint))} · All-time: every firm since ${esc(mrrYmLabel(hist.first))}, as of now` : esc(hist.error || '')}</span></div>
     </div>
     <div class="fa-hero-art">
@@ -179,7 +180,8 @@ function renderCsm() {
     const ai = csmAiHealth(rep);
     const aiTotal = ai.good.length + ai.okay.length + ai.bad.length + ai.none.length;
     return `<article class="csm-card">
-      <header><span class="fa-av">${esc(rep.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span><h3>${esc(rep)}</h3></header>
+      <header><span class="fa-av">${esc(rep.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span><h3>${esc(rep)}</h3>
+        <button type="button" class="csm-cohort-btn" data-csm-cohort="${esc(rep)}">Cohort analysis</button></header>
       <div class="csm-ret">
         <span></span>${Object.values(CSM_WINDOWS).map((l) => `<span class="csm-ret-h">${l}</span>`).join('')}
         <span class="csm-ret-l">NRR</span>${cell('nrr', 6)}${cell('nrr', 13)}${cell('nrr', 'bob')}
@@ -267,12 +269,101 @@ function csmAiDrill(rep) {
     </tbody></table></div>` : '<div class="empty-note">No AI credits add-ons or Copilot seats added to existing firms this month yet.</div>');
 }
 
+/* ---------- cohort analysis ---------- */
+// Firms grouped by signup month (or quarter); each cell is the cohort's running NRR / GRR that many
+// months (quarters) after signup, against its MRR in the signup month. Same firms, credit and
+// GRR rule as the retention cells, so a cohort's M6 / M13 matches the 6- and 13-month numbers.
+// Firms already paying when the snapshots begin aren't a real cohort, so they're left out.
+const CSM_COH = { rep: '', period: 'month', metric: 'nrr', cohorts: 24, maxAge: 24 };
+const csmYmDiff = (a, b) => (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5) - +a.slice(5));
+
+function csmCohortGrid() {
+  const h = CSM.data.history || {};
+  const o = CSM_COH, step = o.period === 'quarter' ? 3 : 1;
+  const key = (ym) => (step === 3 ? `${ym.slice(0, 4)}-Q${Math.ceil(+ym.slice(5) / 3)}` : ym);
+  const label = (k) => (step === 3 ? `${k.slice(5)} ${k.slice(0, 4)}` : mrrYmLabel(k));
+  const oldest = key(mrrAddYm(h.checkpoint, -(o.cohorts - 1)));
+  const groups = {};
+  (h.firms || []).forEach((f) => {
+    if ((o.rep && f[1] !== o.rep) || !f[7] || !f[7].length || f[2] <= h.first || f[2] > h.checkpoint || key(f[2]) < oldest) return;
+    (groups[key(f[2])] = groups[key(f[2])] || []).push(f);
+  });
+  const ages = Math.floor(o.maxAge / step);
+  const rows = Object.keys(groups).sort().map((k) => {
+    const firms = groups[k];
+    const start = firms.reduce((s, f) => s + f[3], 0);
+    const cells = [];
+    for (let a = 1; a <= ages; a++) {
+      const m = a * step;
+      // Only once every firm in the cohort has finished that month.
+      if (firms.some((f) => csmYmDiff(f[2], h.checkpoint) < m)) { cells.push(null); continue; }
+      const at = (f) => f[7][m] || 0;
+      const now = firms.reduce((s, f) => s + at(f), 0);
+      const kept = firms.reduce((s, f) => s + Math.min(at(f), f[3]), 0);
+      const paying = firms.filter((f) => at(f) > 0).length;
+      cells.push({ v: start ? ((o.metric === 'nrr' ? now : kept) / start) * 100 : null, mrr: o.metric === 'nrr' ? now : kept, paying });
+    }
+    return { k, label: label(k), firms, start, cells };
+  });
+  return { rows, ages, step, customers: rows.reduce((s, r) => s + r.firms.length, 0) };
+}
+
+function csmCohortCell(c, r) {
+  if (!c) return '<td class="coh-na">–</td>';
+  if (c.v == null) return '<td>—</td>';
+  const v = c.v;
+  const bg = v >= 100 ? `rgba(20,184,166,${(0.14 + Math.min((v - 100) / 50, 1) * 0.5).toFixed(2)})` : `rgba(244,63,94,${(0.16 + Math.min((100 - v) / 60, 1) * 0.56).toFixed(2)})`;
+  const tip = `${mrrMoney(c.mrr)} of ${mrrMoney(r.start)} starting MRR · ${c.paying} of ${r.firms.length} still paying`;
+  return `<td style="background:${bg}" title="${esc(tip)}">${Math.round(v * 10) / 10}%</td>`;
+}
+
+function csmCohortBody() {
+  const o = CSM_COH, g = csmCohortGrid(), h = CSM.data.history || {};
+  const seg = (k, opts) => `<div class="mrr-seg">${opts.map(([v, l]) => `<button type="button" data-coh-${k}="${v}" aria-pressed="${o[k] === v}">${l}</button>`).join('')}</div>`;
+  const pick = (k, label) => `<label class="coh-pick">${label} <select class="fb-select" data-coh-sel="${k}">${[6, 12, 24, 36].map((n) => `<option value="${n}" ${o[k] === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
+  const p = g.step === 3 ? 'Q' : 'M';
+  return `<div class="coh-bar">${pick('cohorts', 'Cohorts (months)')}${pick('maxAge', 'Max age (months)')}
+      <span class="coh-gap"></span>${seg('period', [['month', 'Monthly'], ['quarter', 'Quarterly']])}${seg('metric', [['nrr', 'NRR'], ['grr', 'GRR']])}</div>
+    <div class="coh-totals">Total cohorts: <b>${g.rows.length}</b> <span>Total customers: <b>${g.customers}</b></span></div>
+    ${g.rows.length ? `<div class="table-wrap coh-wrap"><table class="csm-cohort"><thead><tr><th>Cohort</th><th>#</th>${Array.from({ length: g.ages }, (_, i) => `<th>${p}${i + 1}</th>`).join('')}</tr></thead><tbody>
+      ${g.rows.map((r) => `<tr><td title="${esc(mrrMoney(r.start))} starting MRR">${esc(r.label)}</td><td>${r.firms.length}</td>${r.cells.map((c) => csmCohortCell(c, r)).join('')}</tr>`).join('')}
+    </tbody></table></div>` : `<div class="empty-note">${(h.firms || []).some((f) => f[7] && f[7].length) ? 'No firms signed up in this window.' : 'The month-by-month MRR arrives with the next hourly snapshot.'}</div>`}
+    <div class="mrr-method"><p>Each row is the firms that signed up (first paid) in that ${g.step === 3 ? 'quarter' : 'month'}. ${p}${g.step === 3 ? '2 is 6 months' : '6 is 6 months'} after signup, measured at that month’s end against the cohort’s MRR in its signup month.
+      <b>NRR</b> counts upgrades, so it can go over 100%; <b>GRR</b> counts each firm at no more than it started with. Firms count for their current AM, or the AM they had when they cancelled.
+      Months run through ${esc(mrrYmLabel(h.checkpoint))} (the last full month); “–” is a month the cohort hasn’t reached yet. Hover a cell for the dollars behind it.</p></div>`;
+}
+
+function csmCohortOpen(rep) {
+  CSM_COH.rep = rep || '';
+  MRR.drill = null;
+  mrrModal(`${rep || 'Team'} — cohort analysis`, `Running ${CSM_COH.metric.toUpperCase()} by signup cohort and age`, csmCohortBody());
+  const wrap = document.getElementById('mrrDrill');
+  wrap.querySelector('.drill').classList.add('drill-wide');
+  const redraw = () => {
+    wrap.querySelector('.drill-body').innerHTML = csmCohortBody();
+    wrap.querySelector('.drill-note').textContent = `Running ${CSM_COH.metric.toUpperCase()} by signup cohort and age`;
+  };
+  wrap.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-coh-period],[data-coh-metric]');
+    if (!b) return;
+    if (b.dataset.cohPeriod) CSM_COH.period = b.dataset.cohPeriod;
+    if (b.dataset.cohMetric) CSM_COH.metric = b.dataset.cohMetric;
+    redraw();
+  });
+  wrap.addEventListener('change', (e) => {
+    const s = e.target.closest('[data-coh-sel]');
+    if (s) { CSM_COH[s.dataset.cohSel] = Number(s.value); redraw(); }
+  });
+}
+
 function setupCsm() {
   const root = document.getElementById('csm');
   if (!root) return;
   root.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('#csmRefresh')) { loadCsm(true); return; }
+    const co = t.closest('[data-csm-cohort]');
+    if (co) { csmCohortOpen(co.dataset.csmCohort); return; }
     const ym = t.closest('[data-csm-ym]');
     if (ym) { CSM.ym = mrrAddYm(CSM.ym, Number(ym.dataset.csmYm)); renderCsm(); return; }
     const r = t.closest('[data-csm-ret]');

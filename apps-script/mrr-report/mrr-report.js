@@ -501,7 +501,7 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm7_';
+var CSM_CACHE = 'csm8_';
 var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
@@ -567,7 +567,8 @@ function repMonths_(force, skip) {
 // (one row per customer). Last month is the checkpoint: the 6-month cohort is firms whose first
 // paid month was 6 months before it, the 13-month cohort 13 months before (Johnny's Month 13
 // convention). Credit goes to each firm's latest AM: its current AM, or its AM when it cancelled.
-// firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow, firmId]
+// firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow, firmId, monthly] — monthly is the
+// firm's MRR for each month from its signup month through this one (the cohort analysis grid).
 function readFirmHistory_(skip) {
   skip = skip || {};
   var sh = SpreadsheetApp.openById(MRR_SHEET_ID).getSheetByName(HISTORY_TAB);
@@ -581,7 +582,8 @@ function readFirmHistory_(skip) {
     return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0 && !skip[firmId_(r['Firm ID#'])];
   }).map(function (r) {
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), ymNorm_(r['Signup Month#']), money_(r['Start MRR#']),
-      money_(r['Last Month MRR#']), money_(r['MRR Now#']), firmId_(r['Firm ID#'])];
+      money_(r['Last Month MRR#']), money_(r['MRR Now#']), firmId_(r['Firm ID#']),
+      String(r['Monthly MRR#'] || '').split('|').filter(String).map(Number)];
   });
   return { now: now, checkpoint: checkpoint, cohort6: shift(checkpoint, -6), cohort13: shift(checkpoint, -13), first: first, firms: firms };
 }
