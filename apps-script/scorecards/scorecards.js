@@ -48,7 +48,7 @@ function doPost(e) {
   try {
     var who = verifyManager_(b.token);
     if (!who.ok) return json_(who);
-    if (b.action === 'load') return json_(load_());
+    if (b.action === 'load') return json_(loadCached_(!!b.force));
     if (b.action === 'set') return json_(set_(b, who.email));
     if (b.action === 'addRep') return json_(addRep_(b, who.email));
     return json_({ ok: false, error: 'unknown action' });
@@ -58,6 +58,39 @@ function doPost(e) {
 }
 
 /* ---------- read ---------- */
+
+// Reading every rep's tab takes several seconds, so the result is kept for CACHE_SECONDS.
+// Saves through the dashboard clear it; direct sheet edits show up within that time, or at once
+// with the page's Refresh (force).
+var CACHE_SECONDS = 600, CACHE_KEY = 'sc1_', CHUNK = 90000;
+function loadCached_(force) {
+  var cache = CacheService.getScriptCache();
+  if (!force) { var hit = readCache_(cache); if (hit) return hit; }
+  var data = load_();
+  data.loadedAt = new Date().toISOString();
+  writeCache_(cache, data);
+  return data;
+}
+function clearCache_() { CacheService.getScriptCache().remove(CACHE_KEY + 'n'); }
+function writeCache_(cache, data) {
+  var packed = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(data))).getBytes());
+  var parts = {}, n = Math.ceil(packed.length / CHUNK);
+  for (var i = 0; i < n; i++) parts[CACHE_KEY + i] = packed.slice(i * CHUNK, (i + 1) * CHUNK);
+  parts[CACHE_KEY + 'n'] = String(n);
+  cache.putAll(parts, CACHE_SECONDS);
+}
+function readCache_(cache) {
+  try {
+    var n = Number(cache.get(CACHE_KEY + 'n') || 0);
+    if (!n) return null;
+    var keys = [];
+    for (var i = 0; i < n; i++) keys.push(CACHE_KEY + i);
+    var got = cache.getAll(keys);
+    var packed = keys.map(function (k) { return got[k] || ''; });
+    if (packed.some(function (p) { return !p; })) return null;
+    return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(packed.join('')), 'application/x-gzip')).getDataAsString());
+  } catch (e) { return null; }
+}
 
 function load_() {
   var ss = SpreadsheetApp.openById(SCORECARD_SHEET_ID);
@@ -133,6 +166,7 @@ function set_(b, email) {
     range.setNote((v === '' || v == null ? 'Cleared' : 'Set') + ' by ' + email + ' via CS Dashboard, ' +
       Utilities.formatDate(new Date(), 'America/Los_Angeles', 'MMM d, yyyy h:mm a'));
     SpreadsheetApp.flush();
+    clearCache_();
   } finally {
     lock.releaseLock();
   }
@@ -171,7 +205,7 @@ function addRep_(b, email) {
   } finally {
     lock.releaseLock();
   }
-  return load_();
+  return loadCached_(true);
 }
 
 /* ---------- one-time layout upgrade ---------- */

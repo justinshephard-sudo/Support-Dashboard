@@ -923,3 +923,4 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .sp-done a{color:var(--lm-blue)}
 .sp-history summary{cursor:pointer;font-weight:700;font-size:13.5px;color:var(--text-2);margin-bottom:6px}
 @media (max-width:640px){.sp-body{padding:12px}.sp-qty{width:84px}.sp-actions{flex-direction:column}}
+#scRefresh.spin{opacity:.6;pointer-events:none}

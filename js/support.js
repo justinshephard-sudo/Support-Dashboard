@@ -1846,7 +1846,10 @@ async function main() {
 
     document.getElementById('last-updated').textContent = `Data loaded ${new Date().toLocaleString()}`;
     // Firm Lookup, Implementation, MRR and CSM load when first opened, or quietly once the Support tab is up.
-    const prefetch = () => { ensureTabData('impl'); ensureTabData('firm'); prefetchMrr(); prefetchCsm(); };
+    const prefetch = () => {
+      ensureTabData('impl'); ensureTabData('firm'); prefetchMrr(); prefetchCsm();
+      if (isManager()) loadScorecards();   // manager page: ready before it's opened
+    };
     setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(prefetch, { timeout: 5000 }) : prefetch()), 2500);
     setupManagerToggle();   // shows the toggle for allowlisted managers; restores per-tab state
     launchConfetti();

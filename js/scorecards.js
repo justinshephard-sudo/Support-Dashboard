@@ -18,6 +18,8 @@ const SC_COMPETENCIES = ['Problem-Solving & Advanced Issue Resolution', 'Team Co
   'Professional Growth & Development', 'Alignment with Company Values'];
 const SC_COL = (letter) => letter.charCodeAt(0) - 65;
 const SC = { loaded: false, loading: false, reps: [], tabs: {}, rubric: [], current: null };
+// The last copy lives in this browser tab, so the page opens instantly while a fresh copy loads.
+const SC_STORE = 'cs-sc-cache';
 
 /* ---- formatting + the rubric (mirrors the sheet's score formula) ---- */
 function scLevel(total) {
@@ -101,24 +103,43 @@ async function scCall(body) {
   return data;
 }
 
+function scApply(data) {
+  SC.reps = data.reps || [];
+  SC.tabs = data.tabs || {};
+  SC.rubric = data.rubric || [];
+  SC.loaded = true;
+}
+function scRender() {
+  // Don't redraw under someone mid-edit; their save redraws the tab anyway.
+  if (document.getElementById('scBody').contains(document.activeElement) && document.activeElement.matches('input, textarea')) return;
+  if (SC.current && SC.tabs[SC.current]) renderScorecard(SC.current); else renderScorecardList();
+}
+
 async function loadScorecards(force) {
   if (SC.loading || (SC.loaded && !force)) return;
+  if (!SC.loaded) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SC_STORE) || 'null');
+      if (saved && saved.tabs) { scApply(saved); scRender(); }
+    } catch (e) { /* private mode */ }
+  }
   SC.loading = true;
+  document.getElementById('scRefresh')?.classList.add('spin');
   const err = document.getElementById('scError');
   err.hidden = true;
   try {
-    const data = await scCall({ action: 'load' });
-    SC.reps = data.reps || [];
-    SC.tabs = data.tabs || {};
-    SC.rubric = data.rubric || [];
-    SC.loaded = true;
-    if (SC.current && SC.tabs[SC.current]) renderScorecard(SC.current); else renderScorecardList();
+    const data = await scCall({ action: 'load', force: !!force });
+    scApply(data);
+    try { sessionStorage.setItem(SC_STORE, JSON.stringify(data)); } catch (e) { /* full or private */ }
+    scRender();
   } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
     err.textContent = 'Couldn’t load scorecards: ' + e.message;
     err.hidden = false;
-    document.getElementById('scBody').innerHTML = '';
+    if (!SC.loaded) document.getElementById('scBody').innerHTML = '';
   } finally {
     SC.loading = false;
+    document.getElementById('scRefresh')?.classList.remove('spin');
   }
 }
 
@@ -128,6 +149,7 @@ async function scSave(cell, value, el) {
   try {
     const data = await scCall({ action: 'set', tab, cell, value });
     SC.tabs[tab] = data.tab;
+    try { sessionStorage.setItem(SC_STORE, JSON.stringify({ reps: SC.reps, tabs: SC.tabs, rubric: SC.rubric })); } catch (e) { /* full or private */ }
     if (SC.current === tab) renderScorecard(tab);
   } catch (e) {
     if (el) { el.classList.remove('saving'); el.classList.add('err'); el.title = e.message; }
@@ -344,6 +366,7 @@ async function scAddRep(form) {
 }
 
 function setupScorecards() {
+  document.getElementById('scRefresh')?.addEventListener('click', () => loadScorecards(true));
   const body = document.getElementById('scBody');
   body.addEventListener('submit', (e) => {
     if (e.target.id === 'scAddForm') { e.preventDefault(); scAddRep(e.target); }
