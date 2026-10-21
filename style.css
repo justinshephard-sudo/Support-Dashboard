@@ -880,6 +880,11 @@ button.mrr-stat span{color:var(--lm-blue)}
 .csm-cohort th:first-child,.csm-cohort td:first-child{position:sticky;left:0;z-index:2;text-align:left;font-weight:600;min-width:92px;background:var(--surface-1)}
 .csm-cohort th:first-child{background:var(--surface-2)}
 .csm-cohort td:nth-child(2){color:var(--text-3);min-width:34px}
+.csm-cohort td.coh-cell{cursor:pointer}
+.csm-cohort td.coh-cell:hover{outline:2px solid var(--lm-blue);outline-offset:-2px}
+.csm-cohort td.coh-cell:focus-visible{outline:2px solid var(--lm-blue);outline-offset:-2px}
+.coh-back{margin-bottom:12px}
+.coh-back .csm-cohort-btn{margin-left:0}
 .csm-cohort td.coh-na{color:var(--text-3);background:var(--surface-2)}
 .csm-cohort tbody tr:hover td{filter:brightness(.97)}
 .csm-pill{display:inline-block;color:#fff;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px}

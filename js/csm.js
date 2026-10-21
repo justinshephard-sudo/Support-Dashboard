@@ -301,7 +301,7 @@ function csmCohortGrid() {
       const now = firms.reduce((s, f) => s + at(f), 0);
       const kept = firms.reduce((s, f) => s + Math.min(at(f), f[3]), 0);
       const paying = firms.filter((f) => at(f) > 0).length;
-      cells.push({ v: start ? ((o.metric === 'nrr' ? now : kept) / start) * 100 : null, mrr: o.metric === 'nrr' ? now : kept, paying });
+      cells.push({ age: a, v: start ? ((o.metric === 'nrr' ? now : kept) / start) * 100 : null, mrr: o.metric === 'nrr' ? now : kept, paying });
     }
     return { k, label: label(k), firms, start, cells };
   });
@@ -314,7 +314,25 @@ function csmCohortCell(c, r) {
   const v = c.v;
   const bg = v >= 100 ? `rgba(20,184,166,${(0.14 + Math.min((v - 100) / 50, 1) * 0.5).toFixed(2)})` : `rgba(244,63,94,${(0.16 + Math.min((100 - v) / 60, 1) * 0.56).toFixed(2)})`;
   const tip = `${mrrMoney(c.mrr)} of ${mrrMoney(r.start)} starting MRR · ${c.paying} of ${r.firms.length} still paying`;
-  return `<td style="background:${bg}" title="${esc(tip)}">${Math.round(v * 10) / 10}%</td>`;
+  return `<td class="coh-cell" style="background:${bg}" title="${esc(tip)} · click for the firms" data-coh-k="${esc(r.k)}" data-coh-age="${c.age}" tabindex="0" role="button">${Math.round(v * 10) / 10}%</td>`;
+}
+
+// The firms behind one cell: each one's starting MRR and its MRR at that age.
+function csmCohortDrill(k, age) {
+  const o = CSM_COH, g = csmCohortGrid(), r = g.rows.find((x) => x.k === k);
+  if (!r) return;
+  const m = age * g.step, at = (f) => f[7][m] || 0, c = r.cells[age - 1];
+  const rows = r.firms.slice().sort((x, y) => (at(x) - x[3]) - (at(y) - y[3]));
+  const lost = rows.filter((f) => at(f) === 0).length;
+  const p = g.step === 3 ? `Q${age}` : `M${age}`;
+  MRR.drill = null;
+  mrrModal(`${o.rep || 'Team'} — ${r.label} cohort, ${p}`,
+    `${o.metric.toUpperCase()} ${csmPct(c && c.v)} · ${mrrPlural(rows.length, 'firm')} · ${lost} cancelled by then · ${m} month${m === 1 ? '' : 's'} after signup`,
+    `<div class="coh-back"><button type="button" class="csm-cohort-btn" data-coh-back>‹ Back to cohort analysis</button></div>
+    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${o.rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR at ${p}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${rows.map((f) => { const d = at(f) - f[3]; return `<tr><td>${esc(f[0])}${at(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${o.rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(f[3])}</td><td>${mrrMoney(at(f))}</td><td><b class="${d >= 0 ? 'pos' : 'neg'}">${mrrMoney(d, true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
+    </tbody></table></div>`);
+  document.getElementById('mrrDrill').addEventListener('click', (e) => { if (e.target.closest('[data-coh-back]')) csmCohortOpen(o.rep); });
 }
 
 function csmCohortBody() {
@@ -330,7 +348,7 @@ function csmCohortBody() {
     </tbody></table></div>` : `<div class="empty-note">${(h.firms || []).some((f) => f[7] && f[7].length) ? 'No firms signed up in this window.' : 'The month-by-month MRR arrives with the next hourly snapshot.'}</div>`}
     <div class="mrr-method"><p>Each row is the firms that signed up (first paid) in that ${g.step === 3 ? 'quarter' : 'month'}. ${p}${g.step === 3 ? '2 is 6 months' : '6 is 6 months'} after signup, measured at that month’s end against the cohort’s MRR in its signup month.
       <b>NRR</b> counts upgrades, so it can go over 100%; <b>GRR</b> counts each firm at no more than it started with. Firms count for their current AM, or the AM they had when they cancelled.
-      Months run through ${esc(mrrYmLabel(h.checkpoint))} (the last full month); “–” is a month the cohort hasn’t reached yet. Hover a cell for the dollars behind it.</p></div>`;
+      Months run through ${esc(mrrYmLabel(h.checkpoint))} (the last full month); “–” is a month the cohort hasn’t reached yet. Hover a cell for the dollars behind it; click it for the firms.</p></div>`;
 }
 
 function csmCohortOpen(rep) {
@@ -343,7 +361,10 @@ function csmCohortOpen(rep) {
     wrap.querySelector('.drill-body').innerHTML = csmCohortBody();
     wrap.querySelector('.drill-note').textContent = `Running ${CSM_COH.metric.toUpperCase()} by signup cohort and age`;
   };
+  const cell = (e) => { const td = e.target.closest('[data-coh-age]'); if (td) csmCohortDrill(td.dataset.cohK, Number(td.dataset.cohAge)); return !!td; };
+  wrap.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-coh-age]')) { e.preventDefault(); cell(e); } });
   wrap.addEventListener('click', (e) => {
+    if (cell(e)) return;
     const b = e.target.closest('[data-coh-period],[data-coh-metric]');
     if (!b) return;
     if (b.dataset.cohPeriod) CSM_COH.period = b.dataset.cohPeriod;
