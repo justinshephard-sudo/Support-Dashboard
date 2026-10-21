@@ -148,6 +148,12 @@ function users_() {
   return map;
 }
 
+// "5567" or "5567~|~001Pj…" → 5567 (0 when there's no Firm ID).
+function firmNum_(v) {
+  var m = String(v == null ? '' : v).match(/^\d+/);
+  return m ? Number(m[0]) : 0;
+}
+
 function sinceIso_(days) {
   return new Date(Date.now() - days * 864e5).toISOString().replace(/\.\d+Z$/, 'Z');
 }
@@ -174,12 +180,22 @@ function buildLoad_() {
   var got = czGetMany_([
     { path: '/UserAccount', params: { $select: 'Id,FirstName,LastName,Email,IsActive' } },
     { path: '/Account', params: { $filter: 'IsActive eq true and UserAccountId ne null',
-      $select: 'Id,StartDate,TotalContractAmount,UserAccountId,Cf/AccountManager,Cf/OnboardingStatus' } },
+      $select: 'Id,ExternalId,StartDate,TotalContractAmount,UserAccountId,Cf/AccountManager,Cf/OnboardingStatus' } },
     { path: '/Account', params: {
-      $filter: "IsActive eq true and UserAccountId eq null and Cf/OnboardingStatus eq 'Pre-Kickoff' and StartDate ge " + sinceIso_(QUEUE_DAYS),
+      // A brand-new firm can reach ChurnZero before its start date does, so a blank start counts as new.
+      $filter: "IsActive eq true and UserAccountId eq null and Cf/OnboardingStatus eq 'Pre-Kickoff' and (StartDate ge " + sinceIso_(QUEUE_DAYS) + ' or StartDate eq null)',
       $select: 'Id,Name,ExternalId,StartDate,TotalContractAmount,LicenseCount,' + QUEUE_CF.map(function (f) { return 'Cf/' + f; }).join(',') } },
   ]);
   var users = userMap_(got[0]), owned = got[1], queueRaw = got[2];
+
+  // A blank start date only counts as new for a recent firm. Firm IDs are handed out in order, so
+  // it must be at least the 20th-percentile Firm ID of firms that did start in the window (the
+  // percentile skips old firms that re-signed). Old records with no start date stay out.
+  var since = sinceIso_(QUEUE_DAYS);
+  var recent = owned.concat(queueRaw).filter(function (a) { return a.StartDate && String(a.StartDate) >= since; })
+    .map(function (a) { return firmNum_(a.ExternalId); }).filter(Boolean).sort(function (x, y) { return x - y; });
+  var newFrom = recent.length ? recent[Math.floor(recent.length * 0.2)] : Infinity;
+  queueRaw = queueRaw.filter(function (a) { return a.StartDate || firmNum_(a.ExternalId) >= newFrom; });
 
   // Per-owner load. The rotation = owners with an AM name who have an open onboarding.
   var reps = {};
@@ -237,7 +253,7 @@ function buildLoad_() {
       links: { deck: cf.OnboardingDeckLink || '', docs: cf.OnboardingDocumentsFolder || '' },
       leadSource: '', leadSourceDetail: '', partner: false, contacts: [], onboardingContacts: [],
     };
-  }).sort(function (a, b) { return a.start < b.start ? -1 : 1; });
+  }).sort(function (a, b) { return (a.start || '9999') < (b.start || '9999') ? -1 : 1; });   // no start date yet = newest
 
   addQueueDetails_(queue);
   var pr = reps[PARTNER_REP_ID];
@@ -377,7 +393,7 @@ function assign_(b, by) {
   // Only firms that would show in the queue can be assigned from here.
   var qcf = acct.Cf || {};
   if (!acct.IsActive || qcf.OnboardingStatus !== 'Pre-Kickoff' || qcf.AgencyFirm || qcf.AgencyClientFirm ||
-      String(acct.StartDate || '') < sinceIso_(QUEUE_DAYS)) {
+      (acct.StartDate && String(acct.StartDate) < sinceIso_(QUEUE_DAYS))) {
     throw new Error(acct.Name + ' isn’t in the new-firm queue (it must be active, Pre-Kickoff, non-agency, and new). Reload to refresh.');
   }
   if (acct.UserAccountId && acct.UserAccountId !== Number(b.userId)) {

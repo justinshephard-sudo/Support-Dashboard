@@ -50,6 +50,7 @@ async function loadAssign(force) {
 }
 
 const faDaysAgo = (d) => {
+  if (!d) return 'just now (no start date in ChurnZero yet)';
   const n = Math.round((Date.now() - new Date(d + 'T12:00:00')) / 864e5);
   return n <= 0 ? 'today' : n === 1 ? 'yesterday' : n + ' days ago';
 };
