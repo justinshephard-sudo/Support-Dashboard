@@ -98,7 +98,7 @@ function openExcludeDialog(id, name, area) {
     try {
       await exclSave({ action: 'exclude', firmId: id, firm: name, scope, reason: form.reason.value.trim() });
       wrap.remove();
-      document.getElementById('mrrDrill')?.remove();
+      if (document.getElementById('mrrDrill')) { mrrBack = null; mrrCloseModal(); }   // all the way out, not back to a parent pop-up
       if (typeof closeImplDrill === 'function') closeImplDrill();
       document.body.style.overflow = '';
       exclToast(`${name || 'Firm ' + id} is excluded from ${scope === 'Both' ? 'IM and CSM' : scope}.`

@@ -569,8 +569,11 @@ function mrrInsights(el) {
 }
 
 /* ---------- pop-ups ---------- */
-function mrrModal(title, sub, bodyHtml) {
+// opts.back: a pop-up opened from another one (e.g. a cohort cell); closing it returns there.
+let mrrBack = null;
+function mrrModal(title, sub, bodyHtml, opts) {
   document.getElementById('mrrDrill')?.remove();
+  mrrBack = (opts && opts.back) || null;
   const wrap = document.createElement('div');
   wrap.id = 'mrrDrill';
   wrap.className = 'drill-backdrop';
@@ -595,10 +598,13 @@ function mrrModal(title, sub, bodyHtml) {
 }
 function mrrModalKey(e) { if (e.key === 'Escape') mrrCloseModal(); }
 function mrrCloseModal() {
+  const back = mrrBack;
+  mrrBack = null;
   document.getElementById('mrrDrill')?.remove();
   document.body.style.overflow = '';
   document.removeEventListener('keydown', mrrModalKey);
   MRR.drill = null;
+  if (back) back();
 }
 
 const MRR_CAT_LABEL = { u: 'Upgrade', r: 'Reactivation', d: 'Downgrade', c: 'Cancellation' };

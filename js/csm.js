@@ -331,8 +331,8 @@ function csmCohortDrill(k, age) {
     `<div class="coh-back"><button type="button" class="csm-cohort-btn" data-coh-back>‹ Back to cohort analysis</button></div>
     <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${o.rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR at ${p}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
       ${rows.map((f) => { const d = at(f) - f[3]; return `<tr><td>${esc(f[0])}${at(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${o.rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(f[3])}</td><td>${mrrMoney(at(f))}</td><td><b class="${d >= 0 ? 'pos' : 'neg'}">${mrrMoney(d, true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
-    </tbody></table></div>`);
-  document.getElementById('mrrDrill').addEventListener('click', (e) => { if (e.target.closest('[data-coh-back]')) csmCohortOpen(o.rep); });
+    </tbody></table></div>`, { back: () => csmCohortOpen(o.rep) });
+  document.getElementById('mrrDrill').addEventListener('click', (e) => { if (e.target.closest('[data-coh-back]')) mrrCloseModal(); });
 }
 
 function csmCohortBody() {
