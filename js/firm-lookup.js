@@ -276,6 +276,7 @@ function openFirm(firmId, name) {
         <span class="pf-badge ${badgeCls}">${h[0]}</span>
         ${dangerBadge}
         ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
+        ${typeof spButtonHtml === 'function' ? spButtonHtml() : ''}
       </div>
     </div>
     <div class="pf-grid">
@@ -310,5 +311,6 @@ function openFirm(firmId, name) {
   document.getElementById('profile').querySelectorAll('[data-contract]').forEach((b) => {
     b.addEventListener('click', () => openContract(b.dataset.contract, b));
   });
+  document.getElementById('profile').querySelector('[data-sp-open]')?.addEventListener('click', () => openServicePortal(f));
   document.getElementById('profile').classList.add('show');
 }

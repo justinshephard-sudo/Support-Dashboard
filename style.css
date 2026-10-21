@@ -888,3 +888,38 @@ button.mrr-stat span{color:var(--lm-blue)}
 .excl-actions{display:flex;justify-content:flex-end;gap:8px}
 .excl-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:1100;background:#233043;color:#fff;padding:11px 18px;border-radius:999px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100vw - 32px)}
 .excl-entry,.excl-actions .loop-btn:not(.primary){color:var(--text-1);background:var(--surface-2);border:1px solid var(--border)}
+
+/* Service Portal (Firm Lookup, SP_USERS only) */
+.sp-open{font:600 12.5px var(--font);color:#fff;background:var(--grad-orange);border:none;border-radius:999px;padding:6px 14px;cursor:pointer}
+.sp-open:hover{filter:brightness(1.08)}
+.sp-backdrop{z-index:950}
+.sp-dialog{max-width:860px}
+.sp-body{padding:14px 22px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.sp-firm{display:flex;gap:8px;align-items:flex-end}
+.sp-firm label,.sp-note,.sp-pick{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:700;color:var(--text-2)}
+.sp-firm input,.sp-note input,.sp-pick select,.sp-add select,.sp-qty{font:inherit;font-weight:400;padding:8px 10px;border:1px solid var(--border-str);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-1)}
+.sp-firm input{width:140px}
+.sp-ghost{color:var(--text-1);background:var(--surface-2);border:1px solid var(--border)}
+.loop-btn:disabled{opacity:.5;cursor:default;filter:none}
+#spMain{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0}
+.sp-dialog .table-wrap{overflow-x:auto}
+.sp-env{background:color-mix(in srgb,var(--st-warn) 16%,transparent);color:var(--text-1);border:1px solid var(--st-warn);border-radius:var(--radius-sm);padding:7px 12px;font-weight:700;font-size:13px}
+.sp-who,.sp-facts{font-size:13.5px;color:var(--text-2)}
+.sp-who a{color:var(--lm-blue)}
+.sp-warn{font-size:13px;color:var(--text-1);background:color-mix(in srgb,var(--st-warn) 12%,transparent);border-radius:var(--radius-sm);padding:7px 12px}
+.sp-table td.num,.sp-table th.num{text-align:right}
+.sp-table td{vertical-align:middle}
+.sp-qty{width:110px;padding:6px 8px}
+tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
+.sp-tag{font-size:10px;font-weight:700;color:#fff;background:var(--st-warn);border-radius:4px;padding:1px 5px;margin-left:4px}
+.sp-x{border:none;background:transparent;color:var(--st-critical);font-size:18px;cursor:pointer;margin-left:4px}
+.sp-add select{max-width:100%}
+.sp-mode{font-size:13.5px;color:var(--text-2);background:var(--surface-2);border-radius:var(--radius-sm);padding:9px 12px}
+.sp-actions{display:flex;justify-content:flex-end;gap:8px}
+.sp-preview{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;display:grid;gap:8px}
+.sp-preview h4{margin:6px 0 0;font-size:14px}
+.sp-mail{font-size:13px}
+.sp-done{font-size:14px;background:color-mix(in srgb,var(--st-good) 12%,transparent);border-radius:var(--radius-sm);padding:10px 12px}
+.sp-done a{color:var(--lm-blue)}
+.sp-history summary{cursor:pointer;font-weight:700;font-size:13.5px;color:var(--text-2);margin-bottom:6px}
+@media (max-width:640px){.sp-body{padding:12px}.sp-qty{width:84px}.sp-actions{flex-direction:column}}
