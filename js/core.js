@@ -134,6 +134,25 @@ function setUserChip(info) {
   chip.classList.remove('hidden');
 }
 
+// The sign-in is kept for this browser tab (sessionStorage), so a reload or hard refresh
+// doesn't ask again while Google's token still has time left. Closing the tab forgets it.
+const AUTH_STORE = 'cs-auth';
+function saveAuth(info) {
+  try { sessionStorage.setItem(AUTH_STORE, JSON.stringify({ token: AUTH.token, expiresAt: AUTH.expiresAt, email: AUTH.email, name: info && info.name || '' })); } catch (e) { /* private mode */ }
+}
+function readSavedAuth() {
+  try { return JSON.parse(sessionStorage.getItem(AUTH_STORE) || 'null'); } catch (e) { return null; }
+}
+function forgetAuth() { try { sessionStorage.removeItem(AUTH_STORE); } catch (e) { /* private mode */ } }
+
+function enterApp(info, onReady) {
+  gateError('');
+  document.getElementById('gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  setUserChip(info);
+  onReady();
+}
+
 function initAuth(onReady) {
   AUTH.tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID,
@@ -143,7 +162,7 @@ function initAuth(onReady) {
       AUTH.token = resp.access_token;
       AUTH.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
       // Renewing an expired session: keep the page as it is, just swap the token.
-      if (AUTH.email) { hideSessionBanner(); return; }
+      if (AUTH.email) { hideSessionBanner(); saveAuth(readSavedAuth() || {}); return; }
       let info;
       try {
         info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -157,15 +176,21 @@ function initAuth(onReady) {
         return;
       }
       AUTH.email = email;
-      gateError('');
-      document.getElementById('gate').classList.add('hidden');
-      document.getElementById('app').classList.remove('hidden');
-      setUserChip(info);
-      onReady();
+      saveAuth(info);
+      enterApp(info, onReady);
     },
   });
   const btn = document.getElementById('gateBtn');
   if (btn) btn.addEventListener('click', () => AUTH.tokenClient.requestAccessToken({ prompt: '' }));
+
+  // Same tab, token still good for 2+ minutes: skip the sign-in screen.
+  const saved = readSavedAuth();
+  if (saved && saved.token && /@lawmatics\.com$/.test(saved.email || '') && saved.expiresAt - Date.now() > 2 * 60000) {
+    Object.assign(AUTH, { token: saved.token, expiresAt: saved.expiresAt, email: saved.email });
+    enterApp({ email: saved.email, name: saved.name }, onReady);
+  } else {
+    forgetAuth();
+  }
 }
 
 /* Google access tokens last an hour. Near the end (or after a request comes back
@@ -202,7 +227,7 @@ async function sheetsApi(path, sheetId = SHEET_ID) {
   const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + path, {
     headers: { Authorization: 'Bearer ' + AUTH.token },
   });
-  if (res.status === 401) { showSessionBanner(true); throw new Error('session expired (Sheets API HTTP 401)'); }
+  if (res.status === 401) { forgetAuth(); showSessionBanner(true); throw new Error('session expired (Sheets API HTTP 401)'); }
   if (!res.ok) throw new Error('Sheets API HTTP ' + res.status);
   return res.json();
 }

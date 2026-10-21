@@ -42,8 +42,14 @@ function dashAuth_(token) {
     email = String(info.email || '').toLowerCase();
     var good = res.getResponseCode() === 200 && (info.aud === DASH_CLIENT_ID || info.azp === DASH_CLIENT_ID) &&
       String(info.email_verified) === 'true' && /@lawmatics\.com$/.test(email);
-    if (res.getResponseCode() >= 500) return { ok: false, error: 'Google sign-in check failed — try again' };
-    if (!good) { cache.put(key, '!', 600); return { ok: false, error: 'session expired — reload the dashboard' }; }
+    var code = res.getResponseCode();
+    // Only a token Google calls invalid (400) is remembered as bad; a hiccup (429, 5xx) isn't,
+    // so one failed check can't sign someone out for 10 minutes.
+    if (code !== 200 && code !== 400) return { ok: false, error: 'Google sign-in check failed — try again' };
+    if (!good) {
+      if (code === 400) cache.put(key, '!', 600);
+      return { ok: false, error: 'session expired — reload the dashboard' };
+    }
     cache.put(key, email, 300);
   }
   return { ok: true, email: email, manager: dashManagers_().indexOf(email) > -1 };
