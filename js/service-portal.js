@@ -11,6 +11,15 @@
    ========================================================================== */
 const SP_URL = 'https://script.google.com/macros/s/AKfycbywDzVuKaiwpSdun9tA1H2FEbnARC9Qvd0ml4T0BVUgQNgxSGaGzM9_qhDhevbNc8c5Sg/exec';
 const SP_USERS = ['justin.shephard@lawmatics.com'];
+// Sandbox test firm (Chargebee TEST customer AzqNfpVYhdhNN1TMI, lmtest Account "Justin Shephard Test").
+// Shown in Firm Lookup to SP_USERS only, so the portal can be tried without touching a real firm.
+const SP_TEST_FIRM = {
+  name: 'Justin Shephard Test', firmId: '999002', area: 'Test firm · sandbox only', am: 'Justin Shephard',
+  mrr: '336', cb: 'Active', plan: 'premium-2024-USD-Monthly', lic: '3', addons: 'SMS Add-On (1,500)', onb: 'Complete', score: '0', freq: 'Daily',
+};
+function spAddTestFirm(list) {
+  return canUsePortal() && !list.some((f) => f.firmId === SP_TEST_FIRM.firmId) ? [SP_TEST_FIRM, ...list] : list;
+}
 const SP = { firm: null, data: null, subId: null, qty: {}, adds: [], preview: null, requestId: null, busy: false };
 
 function canUsePortal() {
