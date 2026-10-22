@@ -9,7 +9,8 @@
    preview → prorated amount due today + new recurring amount (Chargebee estimates)
    apply   → quantity increases: Chargebee updated now (prorated), amendment PDF
              saved to the Salesforce Account and emailed to the billing contact
-   quote   → new add-ons: Chargebee quote on the existing subscription → MattSign
+   quote   → new add-ons: Chargebee quote on the existing subscription, attached to a
+             new Opportunity on the firm's Account → MattSign emails the picked contact
 
    Who can use it: PORTAL_USERS (Script Property, comma-separated emails).
    Default = Justin only while it's being tested.
@@ -59,7 +60,9 @@ function doPost(e) {
       requestId: b.requestId ? String(b.requestId).slice(0, 64) : null,
       note: b.note ? String(b.note).slice(0, 255) : null,
       repEmail: who.email,
-      repName: b.repName ? String(b.repName).slice(0, 80) : null
+      repName: b.repName ? String(b.repName).slice(0, 80) : null,
+      primaryContactId: spSfId_(b.primaryContactId),
+      ccContactIds: (Array.isArray(b.ccContactIds) ? b.ccContactIds : []).slice(0, 10).map(spSfId_).filter(Boolean)
     };
     if (b.action === 'apply' || b.action === 'quote') {
       // One write at a time, so two quick clicks can't race each other into Chargebee.
@@ -77,6 +80,11 @@ function spUsers_() {
   var raw = PropertiesService.getScriptProperties().getProperty('PORTAL_USERS');
   if (!raw) return SP_DEFAULT_USERS;
   return raw.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(function (s) { return /@lawmatics\.com$/.test(s); });
+}
+
+function spSfId_(v) {
+  v = String(v || '').trim();
+  return /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(v) ? v : null;
 }
 
 function spLines_(list) {

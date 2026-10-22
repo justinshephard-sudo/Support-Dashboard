@@ -20,7 +20,7 @@ const SP_TEST_FIRM = {
 function spAddTestFirm(list) {
   return canUsePortal() && !list.some((f) => f.firmId === SP_TEST_FIRM.firmId) ? [SP_TEST_FIRM, ...list] : list;
 }
-const SP = { firm: null, data: null, subId: null, qty: {}, adds: [], preview: null, requestId: null, busy: false };
+const SP = { firm: null, data: null, subId: null, qty: {}, adds: [], preview: null, requestId: null, busy: false, primary: null, cc: new Set() };
 
 function canUsePortal() {
   return !!AUTH.email && SP_USERS.includes(AUTH.email.toLowerCase());
@@ -88,7 +88,7 @@ async function spLoad(firmId) {
   main.innerHTML = '<div class="res-loading">Loading the subscription from Chargebee…</div>';
   try {
     const data = await spCall({ action: 'load', firmId });
-    Object.assign(SP, { data, firmId, qty: {}, adds: [], preview: null, requestId: null });
+    Object.assign(SP, { data, firmId, qty: {}, adds: [], preview: null, requestId: null, primary: data.defaultContactId || null, cc: new Set() });
     SP.subId = (data.subscriptions[0] || {}).id || null;
     spRender();
   } catch (e) {
@@ -122,7 +122,7 @@ function spRender() {
     sub.nextBilling ? `next billing ${sub.nextBilling}` : ''].filter(Boolean).map(esc).join(' · ');
   const notes = [...(sub.blockers || []).map((t) => `<div class="error-banner">${esc(t)}</div>`),
     ...(sub.warnings || []).map((t) => `<div class="sp-warn">⚠ ${esc(t)}</div>`),
-    ...(sub.openQuotes || []).map((q) => `<div class="sp-warn">⚠ Open quote #${esc(q.id)} (${esc(q.date)}, ${spMoney(q.total)}) is already waiting on this firm.</div>`)].join('');
+    ...(sub.openQuotes || []).map((q) => `<div class="sp-warn">⚠ Open quote #${esc(q.id)} (${esc(q.date)}, ${spMoney(q.total)}) is already waiting on this firm. Chargebee allows one quote per subscription, so new items can't be quoted until it's closed.</div>`)].join('');
   const blocked = (sub.blockers || []).length > 0;
 
   const rows = sub.items.map((it) => {
@@ -156,16 +156,37 @@ function spRender() {
     <tbody>${rows}${addRows}</tbody></table></div>
     ${addPicker}
     <label class="sp-note">Note (optional, goes on the record) <input data-sp-note maxlength="200" placeholder="e.g. Intercom conversation link" value="${esc(SP.note || '')}"></label>
+    ${mode === 'quote' ? spRecipientsHtml() : ''}
     <div class="sp-mode">${mode === 'quote'
-      ? '📝 <b>New items → quote.</b> A Chargebee quote is created on this subscription; MattSign sends it to the firm to sign and pay. Nothing changes until they do.'
+      ? '📝 <b>New items → quote.</b> A Chargebee quote is created on this subscription and attached to a new Opportunity on this account; MattSign sends it to the contact above to sign and pay. Nothing changes until they do.'
       : '⚡ <b>Quantity increase → applied now.</b> Chargebee is updated immediately, the prorated amount is invoiced today, and the updated contract is saved to Salesforce and emailed to the billing contact.'}</div>
     <div class="sp-actions">
       <button type="button" class="loop-btn sp-ghost" data-sp-preview ${blocked || !spHasChanges() ? 'disabled' : ''}>Preview cost</button>
-      <button type="button" class="loop-btn primary" data-sp-confirm ${!SP.preview || blocked ? 'disabled' : ''}>${mode === 'quote' ? 'Send quote' : 'Apply change'}</button>
+      <button type="button" class="loop-btn primary" data-sp-confirm ${!SP.preview || blocked || (mode === 'quote' && !SP.primary) ? 'disabled' : ''}>${mode === 'quote' ? 'Send quote' : 'Apply change'}</button>
     </div>
     <div id="spPreview">${SP.preview ? spPreviewHtml(SP.preview) : ''}</div>
     <div id="spResult"></div>
     ${spHistoryHtml()}`;
+}
+
+// Quote mode: who MattSign emails (contacts on the firm's Salesforce account) and who it comes from.
+function spRecipientsHtml() {
+  const d = SP.data;
+  const contacts = d.contacts || [];
+  if (!contacts.length) {
+    return '<div class="error-banner">No contacts with an email on this firm\'s Salesforce account. Add one in Salesforce, then reload.</div>';
+  }
+  const opt = (c) => `${esc(c.name)} · ${esc(c.email)}${c.title ? ' · ' + esc(c.title) : ''}`;
+  const sender = d.quoteSender || {};
+  return `<div class="sp-recipients">
+    <label class="sp-pick">MattSign sends the quote to
+      <select data-sp-primary><option value="">Choose a contact…</option>
+      ${contacts.map((c) => `<option value="${esc(c.id)}" ${c.id === SP.primary ? 'selected' : ''}>${opt(c)}</option>`).join('')}</select></label>
+    ${contacts.length > 1 ? `<div class="sp-cc"><span>CC</span>${contacts.filter((c) => c.id !== SP.primary).map((c) =>
+      `<label><input type="checkbox" data-sp-cc="${esc(c.id)}" ${SP.cc.has(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</div>` : ''}
+    <div class="muted sp-mail">Sent from ${esc(sender.name || 'the account owner')}${sender.email ? ` (${esc(sender.email)})` : ''}${sender.isRep ? '' : ', the account owner, because you don\'t have a Salesforce user'}.
+      ${d.sendViaMattSign ? '' : '<b>MattSign sending is switched off</b>: the Opportunity and quote are created, but nothing is emailed.'}</div>
+  </div>`;
 }
 
 function spPreviewHtml(p) {
@@ -189,7 +210,9 @@ function spHistoryHtml() {
   return `<details class="sp-history"><summary>Recent portal changes (${h.length})</summary>
     <table class="drill-table sp-table"><thead><tr><th>When</th><th>Change</th><th>Status</th><th>By</th><th></th></tr></thead><tbody>
     ${h.map((r) => `<tr><td>${esc(r.when)}</td><td>${esc(r.summary || '')}</td><td>${esc(r.status)}${r.error ? ` <span class="sp-warn-inline" title="${esc(r.error)}">⚠</span>` : ''}</td><td>${esc(r.by || '')}</td>
-      <td>${r.fileId ? `<a href="${esc(sf)}/lightning/r/ContentDocument/${esc(r.fileId)}/view" target="_blank" rel="noopener">Amendment ${esc(r.amendment || '')}</a>` : r.quoteId ? `Quote #${esc(r.quoteId)}` : ''}</td></tr>`).join('')}
+      <td>${r.fileId ? `<a href="${esc(sf)}/lightning/r/ContentDocument/${esc(r.fileId)}/view" target="_blank" rel="noopener">Amendment ${esc(r.amendment || '')}</a>`
+        : r.opportunityId ? `<a href="${esc(sf)}/lightning/r/Opportunity/${esc(r.opportunityId)}/view" target="_blank" rel="noopener">Quote #${esc(r.quoteId)}</a>${r.mattSignStatus ? ` <span class="muted" title="${esc(r.mattSignStatus)}">· ${esc(r.mattSignStatus.split(':')[0])}</span>` : ''}`
+        : r.quoteId ? `Quote #${esc(r.quoteId)}` : ''}</td></tr>`).join('')}
     </tbody></table></details>`;
 }
 
@@ -206,7 +229,9 @@ function spPayload(action) {
   const sub = spSub();
   const changes = sub.items.filter((it) => it.editable && SP.qty[it.itemPriceId] != null && Number(SP.qty[it.itemPriceId]) !== Number(it.quantity))
     .map((it) => ({ itemPriceId: it.itemPriceId, quantity: Number(SP.qty[it.itemPriceId]) }));
-  return { action, firmId: SP.firmId, subscriptionId: SP.subId, changes, adds: SP.adds.map((a) => ({ itemPriceId: a.itemPriceId, quantity: Number(a.quantity) })), note: SP.note || '' };
+  const out = { action, firmId: SP.firmId, subscriptionId: SP.subId, changes, adds: SP.adds.map((a) => ({ itemPriceId: a.itemPriceId, quantity: Number(a.quantity) })), note: SP.note || '' };
+  if (SP.adds.length) Object.assign(out, { primaryContactId: SP.primary, ccContactIds: [...SP.cc].filter((id) => id !== SP.primary) });
+  return out;
 }
 
 // Any edit throws away the preview, so what gets confirmed is always what was previewed.
@@ -248,6 +273,12 @@ document.addEventListener('change', (e) => {
     SP.adds.push({ itemPriceId: e.target.value, quantity: Math.max(1, (item && item.minQuantity) || 1) });
     SP.preview = null;
     spRender();
+  } else if (e.target.matches('[data-sp-primary]')) {
+    SP.primary = e.target.value || null;
+    SP.cc.delete(SP.primary);
+    spRender();
+  } else if (e.target.matches('[data-sp-cc]')) {
+    if (e.target.checked) SP.cc.add(e.target.dataset.spCc); else SP.cc.delete(e.target.dataset.spCc);
   } else if (e.target.matches('[data-sp-sub]')) {
     Object.assign(SP, { subId: e.target.value, qty: {}, adds: [], preview: null });
     spRender();
@@ -274,7 +305,7 @@ async function spDoPreview() {
   } finally {
     spSetBusy(false);
     document.getElementById('spPreview').innerHTML = SP.preview ? spPreviewHtml(SP.preview) : '';
-    document.querySelector('[data-sp-confirm]').disabled = !SP.preview;
+    document.querySelector('[data-sp-confirm]').disabled = !SP.preview || (SP.preview.mode === 'quote' && !SP.primary);
   }
 }
 
@@ -283,8 +314,9 @@ async function spDoConfirm() {
   if (!p || !SP.requestId) return;
   const quote = p.mode === 'quote';
   const lines = p.changes.map((c) => c.isNew ? `+ ${c.name}${c.to ? ' × ' + c.to : ''}` : `${c.name}: ${c.from} → ${c.to}`).join('\n');
+  const primary = (SP.data.contacts || []).find((c) => c.id === SP.primary);
   const msg = quote
-    ? `Create a Chargebee quote for ${SP.data.account.name}?\n\n${lines}\n\nDue on acceptance: ${spMoney(p.dueNowTotal)}\nMattSign will send it for signature.`
+    ? `Send a quote to ${SP.data.account.name}?\n\n${lines}\n\nDue on acceptance: ${spMoney(p.dueNowTotal)}\nCreates an Opportunity on the account${SP.data.sendViaMattSign ? `; MattSign emails it to ${primary ? primary.name + ' (' + primary.email + ')' : 'the chosen contact'}` : ' (MattSign sending is off, so nothing is emailed)'}.`
     : `Apply this change to ${SP.data.account.name} now?\n\n${lines}\n\nCharged today: ${spMoney(p.dueNowTotal)}\nNew recurring: ${spMoney(p.recurringTotal)}\nThe updated contract is emailed to the billing contact.`;
   if (!window.confirm(msg)) return;
   const r = document.getElementById('spResult');
@@ -294,18 +326,21 @@ async function spDoConfirm() {
     out = await spCall(Object.assign(spPayload(quote ? 'quote' : 'apply'), { requestId: SP.requestId }));
   } catch (e) {
     spSetBusy(false);
-    // The request id stays, so trying again can't apply the change twice.
+    // Chargebee refused it, so nothing happened: a fresh request id lets a retry actually run (Chargebee replays
+    // its answer for a repeated id). Any other error keeps the id, so a retry can never apply the change twice.
+    if (/^Chargebee:/.test(e.message)) SP.requestId = spNewId();
     r.innerHTML = `<div class="error-banner">${esc(e.message)} — nothing was changed unless Chargebee shows otherwise. You can try again safely.</div>`;
     return;
   }
   spSetBusy(false);
   const sf = SP.data.salesforceUrl;
   const done = quote
-    ? `✅ Quote <b>#${esc(out.quoteId)}</b> created (${spMoney(out.dueNowTotal)} due on acceptance). MattSign takes it from here.`
+    ? `✅ Quote <b>#${esc(out.quoteId)}</b> created (${spMoney(out.dueNowTotal)} due on acceptance)${out.opportunityId ? ` and attached to a new <a href="${esc(sf)}/lightning/r/Opportunity/${esc(out.opportunityId)}/view" target="_blank" rel="noopener">Opportunity</a>` : ''}.
+       ${/^Queued/.test(out.mattSignStatus || '') ? `MattSign is emailing it to ${esc(out.emailedTo)}.` : esc(out.mattSignStatus || '')}`
     : `✅ Applied. ${spMoney(out.dueNowTotal)} invoiced${out.invoiceId ? ` (invoice #${esc(out.invoiceId)})` : ''}. New recurring ${spMoney(out.recurringTotal)}.
        ${out.fileId ? `<a href="${esc(sf)}/lightning/r/ContentDocument/${esc(out.fileId)}/view" target="_blank" rel="noopener">Amendment ${esc(out.amendmentNumber)}</a> saved to Salesforce` : ''}
        ${out.emailedTo ? ` · emailed to ${esc(out.emailedTo)}` : ''}`;
-  const problems = out.problems ? `<div class="sp-warn">⚠ The change went through, but: ${esc(out.problems)}</div>` : '';
+  const problems = out.problems ? `<div class="sp-warn">⚠ ${quote ? '' : 'The change went through, but: '}${esc(out.problems)}</div>` : '';
   const again = out.alreadyDone ? '<div class="muted">This change had already gone through; nothing was done twice.</div>' : '';
   // Reload so the table shows the new quantities, then show the outcome on top.
   await spLoad(SP.firmId);
