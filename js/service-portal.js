@@ -178,7 +178,8 @@ function spRecipientsHtml() {
   }
   const opt = (c) => `${esc(c.name)} · ${esc(c.email)}${c.title ? ' · ' + esc(c.title) : ''}`;
   const sender = d.quoteSender || {};
-  return `<div class="sp-recipients">
+  const warn = (d.quoteWarnings || []).map((t) => `<div class="sp-warn">⚠ ${esc(t)}</div>`).join('');
+  return `${warn}<div class="sp-recipients">
     <label class="sp-pick">MattSign sends the quote to
       <select data-sp-primary><option value="">Choose a contact…</option>
       ${contacts.map((c) => `<option value="${esc(c.id)}" ${c.id === SP.primary ? 'selected' : ''}>${opt(c)}</option>`).join('')}</select></label>
