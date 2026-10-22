@@ -187,7 +187,7 @@ function spRecipientsHtml() {
     ${contacts.length > 1 ? `<div class="sp-cc"><span>CC</span>${contacts.filter((c) => c.id !== SP.primary).map((c) =>
       `<label><input type="checkbox" data-sp-cc="${esc(c.id)}" ${SP.cc.has(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</div>` : ''}
     <div class="muted sp-mail">Sent from ${esc(sender.name || 'the account owner')}${sender.email ? ` (${esc(sender.email)})` : ''}${sender.isRep ? '' : ', the default owner, because you don\'t have a Salesforce user'}.
-      ${d.sendViaMattSign ? '' : '<b>MattSign sending is switched off</b>: the Opportunity and quote are created, but nothing is emailed.'}</div>
+      ${d.sendViaMattSign ? (d.noPaymentNeeded ? 'No payment step: the customer only signs.' : '') : '<b>MattSign sending is switched off</b>: the Opportunity and quote are created, but nothing is emailed.'}</div>
   </div>`;
 }
 
