@@ -1684,10 +1684,10 @@ function celebrate() {
   layer.title = 'Click anywhere to close';
   document.body.appendChild(layer);
 
-  // center stage: confetti Merlin + rotating headline
+  // center stage: the Woo-Hoo video (muted, looping) + rotating headline
   const stage = document.createElement('div');
   stage.className = 'cb-stage';
-  stage.innerHTML = '<img class="cb-star" src="assets/merlin-confetti.webp" alt="">'
+  stage.innerHTML = `<video class="cb-star cb-star-video" src="assets/merlin-woohoo.mp4" poster="assets/merlin-woohoo.jpg" muted playsinline loop${reduced ? '' : ' autoplay'} aria-hidden="true"></video>`
     + '<div class="eyebrow cb-eyebrow">CS Support Team</div>'
     + '<div class="cb-headline"></div>'
     + '<div class="cb-sub">Merlin and friends are celebrating with you.</div>';
