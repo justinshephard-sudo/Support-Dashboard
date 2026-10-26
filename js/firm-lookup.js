@@ -210,8 +210,9 @@ function healthOf(f) {
   if (f.danger || f.cancel) return 'bad';
   const s = toNumber(f.score);
   if (s == null) return 'warn';
-  if (s < 25) return 'good';
-  if (s < 50) return 'warn';
+  // Same cut-offs as the CSM tab's account health (lower churn score is healthier).
+  if (s < 33) return 'good';
+  if (s < 67) return 'warn';
   return 'bad';
 }
 function firmInitials(n) {
