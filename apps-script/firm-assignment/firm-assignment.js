@@ -35,7 +35,9 @@ var CZ_BASE = 'https://lawmatics.us1app.churnzero.net/public/v1';
 var CZ_WRITE = 'https://lawmatics.us1app.churnzero.net/i';
 var LOG_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc'; // Support Team Report 2026
 var LOG_TAB = 'Firm Assignment Log';
-var LOG_HEADERS = ['When', 'By', 'Firm', 'Firm ID', 'CZ Account', 'MRR', 'Suggested', 'Assigned', 'Took suggestion', 'Confirmed in ChurnZero', 'Note'];
+// Assigned = the IM. CSM and Owner were added for the IM/CSM split (older rows leave them blank).
+var LOG_HEADERS = ['When', 'By', 'Firm', 'Firm ID', 'CZ Account', 'MRR', 'Suggested', 'Assigned', 'Took suggestion', 'Confirmed in ChurnZero', 'Note',
+  'Suggested CSM', 'CSM', 'Owner'];
 var QUEUE_DAYS = 60;
 var OPEN_STATUSES = ['Pre-Kickoff', 'Open'];
 var MIN_START = '2025-01-01';
@@ -46,7 +48,23 @@ var WEIGHTS = { open: 40, since: 30, book: 15, value: 15 };
 // firms go only to them. Both are editable on the page (stored in TIER).
 // Partner-sourced firms (closed-won opp Lead Source starts with "Partner") always go to Kennedy.
 var PARTNER_REP_ID = 11; // Kennedy Wickham's ChurnZero user (not the duplicate #120)
-var TIER_DEFAULT = { reps: { 7: true, 71: true }, min: 1000 }; // Elliott Jones, Julio Ortiz
+var TIER_DEFAULT = { reps: {}, min: 1000 };
+
+/* IM/CSM split. Every new firm gets an Implementation Manager; firms over CSM_MIN also get a CSM,
+   who is the Owner. Under that the IM is the Owner (Support takes over when onboarding completes).
+   The IM and CSM go into two text fields that sync with Salesforce; a ChurnZero play sets the
+   roles from them (the roles themselves can't be written through the API). Partner-sourced firms
+   get Kennedy for both. Names as they appear in ChurnZero. */
+var IM_ROSTER = ['Callie Burns', 'Admir Karamovic', 'Andy Galindo', 'Swetha Devakumar'];
+var CSM_ROSTER = ['Elliott Jones', 'Julio Ortiz', 'Jessie Hobbs'];   // biggest firms first
+var CSM_MIN = 400;                        // a CSM only when MRR is over this
+var CSM_BANDS_DEFAULT = { top: 850, mid: 550 };   // ≈ thirds of 2026's new firms over $400
+var CSM_WEIGHTS = { fit: 50, book: 25, since: 25 };
+var IM_FIELD = 'ImplementationManager', CSM_FIELD = 'CustomerSuccessManager';
+// The live page runs from this same project and shares its Script Properties. Until the split goes
+// live, this version keeps its rotation / tier / band settings under their own names so trying it
+// out can't change the live page's suggestions. Set to '' at go-live.
+var SPLIT_PROP = 'SPLIT_';
 
 function authorize() {
   SpreadsheetApp.openById(LOG_SHEET_ID);
@@ -68,6 +86,7 @@ function doPost(e) {
     if (b.action === 'assign') return json_(assign_(b, who.email));
     if (b.action === 'setRotation') return json_(setRotation_(b));
     if (b.action === 'setTier') return json_(setTier_(b));
+    if (b.action === 'setCsmBands') return json_(setCsmBands_(b));
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String((err && err.message) || err) });
@@ -165,22 +184,22 @@ var LOAD_CACHE_SECONDS = 60;
 function load_(force) {
   var cache = CacheService.getScriptCache();
   if (!force) {
-    var hit = cache.get('load');
+    var hit = cache.get(SPLIT_PROP + 'load');
     if (hit) return JSON.parse(hit);
   }
   var out = buildLoad_();
-  try { cache.put('load', JSON.stringify(out), LOAD_CACHE_SECONDS); } catch (e) { /* over 100KB: skip caching */ }
+  try { cache.put(SPLIT_PROP + 'load', JSON.stringify(out), LOAD_CACHE_SECONDS); } catch (e) { /* over 100KB: skip caching */ }
   return out;
 }
 
-function clearLoadCache_() { CacheService.getScriptCache().remove('load'); }
+function clearLoadCache_() { CacheService.getScriptCache().remove(SPLIT_PROP + 'load'); }
 
 function buildLoad_() {
   // Only the fields we use: pulling every custom field made each 100-row page ~600 KB.
   var got = czGetMany_([
     { path: '/UserAccount', params: { $select: 'Id,FirstName,LastName,Email,IsActive' } },
     { path: '/Account', params: { $filter: 'IsActive eq true and UserAccountId ne null',
-      $select: 'Id,ExternalId,StartDate,TotalContractAmount,UserAccountId,Cf/AccountManager,Cf/OnboardingStatus' } },
+      $select: 'Id,ExternalId,StartDate,TotalContractAmount,UserAccountId,Cf/AccountManager,Cf/OnboardingStatus,Cf/' + IM_FIELD + ',Cf/' + CSM_FIELD } },
     { path: '/Account', params: {
       // A brand-new firm can reach ChurnZero before its start date does, so a blank start counts as new.
       $filter: "IsActive eq true and UserAccountId eq null and Cf/OnboardingStatus eq 'Pre-Kickoff' and (StartDate ge " + sinceIso_(QUEUE_DAYS) + ' or StartDate eq null)',
@@ -197,42 +216,48 @@ function buildLoad_() {
   var newFrom = recent.length ? recent[Math.floor(recent.length * 0.2)] : Infinity;
   queueRaw = queueRaw.filter(function (a) { return a.StartDate || firmNum_(a.ExternalId) >= newFrom; });
 
-  // Per-owner load. The rotation = owners with an AM name who have an open onboarding.
-  var reps = {};
-  owned.forEach(function (a) {
-    var cf = a.Cf || {}, id = a.UserAccountId;
-    var r = reps[id] || (reps[id] = { id: id, name: (users[id] && users[id].name) || cf.AccountManager || ('User ' + id),
-      am: false, firms: 0, mrr: 0, open: 0, openMrr: 0, lastStart: '' });
-    if (cf.AccountManager) r.am = true;
+  // Load per rep. IMs: the firms they're onboarding (the IM field on new firms, the owner on older
+  // ones). CSMs: the firms they own, plus new firms already handed to them in the CSM field.
+  var byName = usersByName_(users);
+  var blank = function () { return { firms: 0, mrr: 0, open: 0, openMrr: 0, lastStart: '' }; };
+  var imStat = {}, csmStat = {};
+  var add = function (map, id, a, cf) {
+    if (!id) return;
+    var r = map[id] || (map[id] = blank());
+    var start = String(a.StartDate || '').slice(0, 10), mrr = Number(a.TotalContractAmount) || 0;
     r.firms++;
-    r.mrr += Number(a.TotalContractAmount) || 0;
-    var start = String(a.StartDate || '').slice(0, 10);
-    if (OPEN_STATUSES.indexOf(cf.OnboardingStatus) > -1 && start >= MIN_START) {
-      r.open++;
-      r.openMrr += Number(a.TotalContractAmount) || 0;
-    }
+    r.mrr += mrr;
+    if (OPEN_STATUSES.indexOf(cf.OnboardingStatus) > -1 && start >= MIN_START) { r.open++; r.openMrr += mrr; }
     if (start > r.lastStart) r.lastStart = start;
+  };
+  owned.forEach(function (a) {
+    var cf = a.Cf || {};
+    var im = cfGet_(cf, IM_FIELD), csm = cfGet_(cf, CSM_FIELD);
+    add(imStat, im ? byName[im] : a.UserAccountId, a, cf);
+    add(csmStat, csm ? byName[csm] : a.UserAccountId, a, cf);
   });
 
   // Assignments made from this page count as the rep's most recent assignment too.
   var log = readLog_(200);
   log.forEach(function (l) {
-    var r = reps[l.userId];
-    if (r && l.when.slice(0, 10) > r.lastStart) r.lastStart = l.when.slice(0, 10);
+    var day = l.when.slice(0, 10);
+    if (imStat[l.userId] && day > imStat[l.userId].lastStart) imStat[l.userId].lastStart = day;
+    if (csmStat[l.csmId] && day > csmStat[l.csmId].lastStart) csmStat[l.csmId].lastStart = day;
   });
 
   var skipped = rotationSkips_();
   var tier = tier_();
-  var rotation = Object.keys(reps).map(function (k) { return reps[k]; })
-    .filter(function (r) { return r.am && r.open > 0; })
-    .map(function (r) {
-      r.email = users[r.id] ? users[r.id].email : '';
-      r.included = !skipped[r.id];
-      r.high = !!tier.reps[r.id];
-      r.mrr = Math.round(r.mrr); r.openMrr = Math.round(r.openMrr);
-      return r;
-    })
-    .sort(function (a, b) { return a.name.localeCompare(b.name); });
+  var roster = function (names, stats, role) {
+    return names.map(function (n) {
+      var id = byName[n];
+      if (!id) return null;
+      var r = stats[id] || blank();
+      return { id: id, name: users[id].name, email: users[id].email, role: role, included: !skipped[id], high: role === 'IM' && !!tier.reps[id],
+        firms: r.firms, mrr: Math.round(r.mrr), open: r.open, openMrr: Math.round(r.openMrr), lastStart: r.lastStart };
+    }).filter(Boolean);
+  };
+  var rotation = roster(IM_ROSTER, imStat, 'IM');
+  var csms = roster(CSM_ROSTER, csmStat, 'CSM');
 
   // Agency and agency-client firms aren't assigned through this rotation.
   var queue = queueRaw.filter(function (a) { var cf = a.Cf || {}; return !cf.AgencyFirm && !cf.AgencyClientFirm; }).map(function (a) {
@@ -256,13 +281,18 @@ function buildLoad_() {
   }).sort(function (a, b) { return (a.start || '9999') < (b.start || '9999') ? -1 : 1; });   // no start date yet = newest
 
   addQueueDetails_(queue);
-  var pr = reps[PARTNER_REP_ID];
-  var partnerRep = { id: PARTNER_REP_ID, name: (users[PARTNER_REP_ID] && users[PARTNER_REP_ID].name) || 'Kennedy Wickham',
-    open: pr ? pr.open : 0, firms: pr ? pr.firms : 0, openMrr: pr ? Math.round(pr.openMrr) : 0, lastStart: pr ? pr.lastStart : '' };
-  suggest_(queue, rotation, tier.min, partnerRep);
+  var partner = function (stats) {
+    var pr = stats[PARTNER_REP_ID];
+    return { id: PARTNER_REP_ID, name: (users[PARTNER_REP_ID] && users[PARTNER_REP_ID].name) || 'Kennedy Wickham',
+      open: pr ? pr.open : 0, firms: pr ? pr.firms : 0, openMrr: pr ? Math.round(pr.openMrr) : 0, lastStart: pr ? pr.lastStart : '' };
+  };
+  var bands = csmBands_();
+  suggest_(queue, rotation, tier.min, partner(imStat));
+  suggestCsm_(queue, csms, bands, partner(csmStat));
   var props = PropertiesService.getScriptProperties();
   return {
-    ok: true, queue: queue, reps: rotation, weights: WEIGHTS, highMin: tier.min, recent: log.slice(0, 10),
+    ok: true, queue: queue, reps: rotation, csms: csms, weights: WEIGHTS, csmWeights: CSM_WEIGHTS, highMin: tier.min,
+    csmMin: CSM_MIN, bands: bands, recent: log.slice(0, 10),
     stats: { judged: log.filter(function (l) { return l.took; }).length, took: log.filter(function (l) { return /^true$/i.test(l.took); }).length },
     canWrite: !!props.getProperty('CZ_APP_KEY'), generated: new Date().toISOString(),
   };
@@ -321,6 +351,74 @@ function suggest_(queue, reps, highMin, partnerRep) {
     if (!top) return;
     top.open++; top.firms++; top.openMrr += f.mrr; top.lastStart = Utilities.formatDate(today, 'America/Los_Angeles', 'yyyy-MM-dd');
   });
+}
+
+/* CSM suggestion, for firms over CSM_MIN. Each CSM covers a size band, biggest firms first
+   (CSM_ROSTER order): the band's CSM gets full fit points, the next band over half. Book size
+   (fewest firms) and time since their last new firm make up the rest. Partner firms go to Kennedy. */
+function suggestCsm_(queue, csms, bands, partnerRep) {
+  var all = csms.filter(function (r) { return r.included; })
+    .map(function (r) { return { r: r, firms: r.firms, lastStart: r.lastStart, idx: CSM_ROSTER.indexOf(r.name) }; });
+  var today = new Date();
+  var days = function (d) { return d ? Math.max(0, Math.round((today - new Date(d + 'T12:00:00')) / 864e5)) : 365; };
+  queue.forEach(function (f) {
+    f.needsCsm = f.mrr > CSM_MIN;
+    f.csmRanking = [];
+    if (!f.needsCsm) return;
+    f.band = f.mrr >= bands.top ? 0 : f.mrr >= bands.mid ? 1 : 2;
+    var norm = function (vals, higherIsBetter) {
+      var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+      return vals.map(function (v) { return mx === mn ? 1 : (higherIsBetter ? (v - mn) / (mx - mn) : (mx - v) / (mx - mn)); });
+    };
+    var b = norm(all.map(function (s) { return s.firms; }), false);
+    var d = norm(all.map(function (s) { return days(s.lastStart); }), true);
+    var ranked = all.map(function (s, i) {
+      var fit = Math.max(0, 1 - Math.abs(s.idx - f.band) / 2);
+      var parts = { fit: Math.round(fit * CSM_WEIGHTS.fit), book: Math.round(b[i] * CSM_WEIGHTS.book), since: Math.round(d[i] * CSM_WEIGHTS.since) };
+      return { userId: s.r.id, name: s.r.name, score: parts.fit + parts.book + parts.since, parts: parts,
+        firms: s.firms, daysSince: days(s.lastStart), bandFit: s.idx === f.band };
+    }).sort(function (x, y) { return y.score - x.score || x.firms - y.firms; });
+    if (f.partner) {
+      ranked = ranked.filter(function (x) { return x.userId !== partnerRep.id; });
+      ranked.unshift({ userId: partnerRep.id, name: partnerRep.name, score: null, partnerRule: true,
+        firms: partnerRep.firms, daysSince: days(partnerRep.lastStart) });
+      partnerRep.firms++;
+    }
+    f.csmRanking = ranked;
+    var top = all.filter(function (s) { return ranked[0] && s.r.id === ranked[0].userId; })[0];
+    if (top) { top.firms++; top.lastStart = Utilities.formatDate(today, 'America/Los_Angeles', 'yyyy-MM-dd'); }
+  });
+}
+
+function csmBands_() {
+  try {
+    var b = JSON.parse(PropertiesService.getScriptProperties().getProperty(SPLIT_PROP + 'CSM_BANDS') || 'null');
+    return b && b.top > b.mid ? b : CSM_BANDS_DEFAULT;
+  } catch (e) { return CSM_BANDS_DEFAULT; }
+}
+
+function setCsmBands_(b) {
+  var top = Number(b.top), mid = Number(b.mid);
+  if (!(mid > CSM_MIN && top > mid)) throw new Error('the top band must start above the middle one, and both above $' + CSM_MIN);
+  PropertiesService.getScriptProperties().setProperty(SPLIT_PROP + 'CSM_BANDS', JSON.stringify({ top: top, mid: mid }));
+  return load_(true);
+}
+
+// Active ChurnZero users by full name (Kennedy has a duplicate user; the partner rep wins).
+function usersByName_(users) {
+  var by = {};
+  Object.keys(users).forEach(function (id) {
+    var u = users[id];
+    if (u.active && u.name && (!by[u.name] || Number(id) === PARTNER_REP_ID)) by[u.name] = Number(id);
+  });
+  return by;
+}
+
+// ChurnZero hands custom field keys back in whatever case they were first created in.
+function cfGet_(cf, name) {
+  var want = name.toLowerCase();
+  for (var k in cf) if (k.toLowerCase() === want) return cf[k] == null ? '' : String(cf[k]).trim();
+  return '';
 }
 
 function addQueueDetails_(queue) {
@@ -403,31 +501,41 @@ function assign_(b, by) {
   if (!cs.some(function (c) { return c.onboarding; })) {
     throw new Error(acct.Name + ' has no contact with “Include in Onboarding” turned on. Turn it on for at least one contact in ChurnZero, then refresh.');
   }
-  var users = users_(), rep = users[b.userId];
-  if (!rep || !rep.active) throw new Error('unknown or inactive ChurnZero user');
+  var users = users_(), im = users[b.userId], csm = b.csmId ? users[b.csmId] : null;
+  if (!im || !im.active) throw new Error('unknown or inactive ChurnZero user for the IM');
+  var mrr = Number(acct.TotalContractAmount) || 0, needsCsm = mrr > CSM_MIN;
+  if (needsCsm && (!csm || !csm.active)) throw new Error(acct.Name + ' is over $' + CSM_MIN + '/mo, so it needs a CSM too.');
+  if (!needsCsm) csm = null;
+  var owner = csm || im;
+  if (acct.UserAccountId && acct.UserAccountId !== owner.id) {
+    throw new Error(acct.Name + ' was already assigned in ChurnZero. Reload to refresh the queue.');
+  }
 
   var ownerAttr = props.getProperty('CZ_OWNER_ATTR') || 'OwnerUserAccount';
   var typeAttr = props.getProperty('CZ_TYPE_ATTR') || 'ImplementationType';
-  czSet_(appKey, acct.ExternalId, ownerAttr, rep.email);
+  czSet_(appKey, acct.ExternalId, ownerAttr, owner.email);
   czSet_(appKey, acct.ExternalId, typeAttr, PREMIUM);
+  czSet_(appKey, acct.ExternalId, IM_FIELD, im.name);
+  if (csm) czSet_(appKey, acct.ExternalId, CSM_FIELD, csm.name);
 
   // ChurnZero applies writes asynchronously; check back a few times.
   var confirmed = false, after = null;
   for (var i = 0; i < 4 && !confirmed; i++) {
     Utilities.sleep(2500);
-    after = czGet_('/Account', { $filter: 'Id eq ' + Number(b.czId), $select: 'Id,UserAccountId,Cf' })[0];
-    confirmed = !!after && after.UserAccountId === Number(b.userId) && (after.Cf || {}).ImplementationType === PREMIUM;
+    after = czGet_('/Account', { $filter: 'Id eq ' + Number(b.czId), $select: 'Id,UserAccountId,Cf/ImplementationType,Cf/' + IM_FIELD + ',Cf/' + CSM_FIELD })[0];
+    var cf = (after && after.Cf) || {};
+    confirmed = !!after && after.UserAccountId === owner.id && cf.ImplementationType === PREMIUM &&
+      cfGet_(cf, IM_FIELD) === im.name && (!csm || cfGet_(cf, CSM_FIELD) === csm.name);
   }
   clearLoadCache_();
   appendLog_({
     by: by, firm: acct.Name, firmId: String((acct.Cf || {}).FirmId || acct.ExternalId), czId: acct.Id,
-    mrr: acct.TotalContractAmount, suggested: b.suggestedName || '', assigned: rep.name, userId: rep.id,
-    took: b.suggestedId ? String(Number(b.suggestedId) === Number(b.userId)) : '', confirmed: confirmed, note: b.note || '',
+    mrr: acct.TotalContractAmount, suggested: b.suggestedName || '', assigned: im.name, userId: im.id,
+    took: b.suggestedId ? String(Number(b.suggestedId) === im.id && (!csm || !b.suggestedCsmId || Number(b.suggestedCsmId) === csm.id)) : '',
+    confirmed: confirmed, note: b.note || '',
+    suggestedCsm: b.suggestedCsmName || '', csm: csm ? csm.name + ' #' + csm.id : '', owner: owner.name,
   });
-  return {
-    ok: true, confirmed: confirmed,
-    owner: after ? after.UserAccountId : null, type: after ? (after.Cf || {}).ImplementationType : null,
-  };
+  return { ok: true, confirmed: confirmed, owner: owner.name, im: im.name, csm: csm ? csm.name : '' };
 }
 
 function czSet_(appKey, externalId, name, value) {
@@ -437,7 +545,7 @@ function czSet_(appKey, externalId, name, value) {
 }
 
 function rotationSkips_() {
-  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('ROTATION_SKIP') || '{}'); } catch (e) { return {}; }
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty(SPLIT_PROP + 'ROTATION_SKIP') || '{}'); } catch (e) { return {}; }
 }
 
 // Rotation settings only take ChurnZero users who are active.
@@ -450,13 +558,13 @@ function setRotation_(b) {
   if (b.userId != null && !validRep_(b.userId)) throw new Error('unknown rep');
   var skip = rotationSkips_();
   if (b.included) delete skip[b.userId]; else skip[b.userId] = true;
-  PropertiesService.getScriptProperties().setProperty('ROTATION_SKIP', JSON.stringify(skip));
+  PropertiesService.getScriptProperties().setProperty(SPLIT_PROP + 'ROTATION_SKIP', JSON.stringify(skip));
   return load_(true);
 }
 
 function tier_() {
   try {
-    var t = JSON.parse(PropertiesService.getScriptProperties().getProperty('TIER') || 'null');
+    var t = JSON.parse(PropertiesService.getScriptProperties().getProperty(SPLIT_PROP + 'TIER') || 'null');
     return t && t.reps ? t : TIER_DEFAULT;
   } catch (e) { return TIER_DEFAULT; }
 }
@@ -470,7 +578,7 @@ function setTier_(b) {
     if (!(m >= 0)) throw new Error('enter a dollar amount');
     t.min = m;
   }
-  PropertiesService.getScriptProperties().setProperty('TIER', JSON.stringify(t));
+  PropertiesService.getScriptProperties().setProperty(SPLIT_PROP + 'TIER', JSON.stringify(t));
   return load_(true);
 }
 
@@ -529,6 +637,20 @@ function testAssignWrite() {
   Logger.log('RESULT owner=' + (ownerAttr || 'none worked') + ' type=' + (typeAttr || 'none worked'));
 }
 
+/* ---------- IM/CSM split check (run from the editor; read-only) ---------- */
+function checkSplitLoad() {
+  var d = buildLoad_();
+  var rep = function (r) { return r.name + (r.included ? '' : ' (out)') + ': ' + r.firms + ' firms, ' + r.open + ' open, last new firm ' + (r.lastStart || '—'); };
+  Logger.log('IMs\n  ' + d.reps.map(rep).join('\n  '));
+  Logger.log('CSMs (bands: $' + d.bands.top + '+ / $' + d.bands.mid + '+ / over $' + d.csmMin + ')\n  ' + d.csms.map(rep).join('\n  '));
+  Logger.log(d.queue.length + ' firms in the queue');
+  d.queue.forEach(function (f) {
+    var im = f.ranking && f.ranking[0], csm = f.csmRanking[0];
+    Logger.log(f.name + ' · $' + f.mrr + (f.partner ? ' · partner' : '') + ' → IM ' + (im ? im.name + ' (' + (im.partnerRule ? 'partner' : im.score) + ')' : '—') +
+      (f.needsCsm ? ', CSM ' + (csm ? csm.name + ' (' + (csm.partnerRule ? 'partner' : csm.score) + ')' : '—') + ', Owner = CSM' : ', no CSM, Owner = IM'));
+  });
+}
+
 /* ---------- one-off role write test (IM/CSM split; run from the editor) ----------
    Writing an unknown name makes ChurnZero create a new custom field, so this only uses
    CustomerSuccessManager, which ChurnZero already recognises (it didn't create a field for
@@ -558,6 +680,8 @@ function logSheet_() {
     sh = ss.insertSheet(LOG_TAB);
     sh.getRange(1, 1, 1, LOG_HEADERS.length).setValues([LOG_HEADERS]).setFontWeight('bold');
     sh.setFrozenRows(1);
+  } else if (sh.getLastColumn() < LOG_HEADERS.length) {
+    sh.getRange(1, 1, 1, LOG_HEADERS.length).setValues([LOG_HEADERS]).setFontWeight('bold');   // the split's new columns
   }
   return sh;
 }
@@ -568,6 +692,7 @@ function appendLog_(x) {
   sh.getRange(2, 1, 1, LOG_HEADERS.length).setValues([[
     Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd HH:mm'), x.by, x.firm, x.firmId, x.czId,
     x.mrr || '', x.suggested, x.assigned + ' #' + x.userId, x.took, x.confirmed ? 'yes' : 'pending', x.note,
+    x.suggestedCsm || '', x.csm || '', x.owner || '',
   ].map(dashSafe_)]);
 }
 
@@ -575,10 +700,12 @@ function readLog_(max) {
   var ss = SpreadsheetApp.openById(LOG_SHEET_ID), sh = ss.getSheetByName(LOG_TAB);
   if (!sh || sh.getLastRow() < 2) return [];
   var n = Math.min(max, sh.getLastRow() - 1);
-  return sh.getRange(2, 1, n, LOG_HEADERS.length).getDisplayValues().map(function (r) {
-    var m = /#(\d+)$/.exec(r[7]);
+  var w = Math.min(LOG_HEADERS.length, sh.getLastColumn());
+  return sh.getRange(2, 1, n, w).getDisplayValues().map(function (r) {
+    var m = /#(\d+)$/.exec(r[7]), c = /#(\d+)$/.exec(r[12] || '');
     return { when: r[0], by: r[1], firm: r[2], firmId: r[3], mrr: r[5], suggested: r[6],
-      assigned: r[7].replace(/\s*#\d+$/, ''), userId: m ? Number(m[1]) : null, took: r[8], confirmed: r[9] };
+      assigned: r[7].replace(/\s*#\d+$/, ''), userId: m ? Number(m[1]) : null, took: r[8], confirmed: r[9],
+      csm: String(r[12] || '').replace(/\s*#\d+$/, ''), csmId: c ? Number(c[1]) : null, owner: r[13] || '' };
   });
 }
 

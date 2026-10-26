@@ -579,6 +579,9 @@ body.drill-open{overflow:hidden}
 .fa-why{font-size:13px;color:var(--text-2)}
 .fa-why[hidden]{display:none}
 .fa-why-alt{color:#b86400}
+.fa-pick-sep{height:1px;background:var(--border);margin:12px 0}
+.fa-owner{font-size:12.5px;color:var(--text-2);background:var(--surface-2);border-radius:var(--radius-sm);padding:7px 10px;margin-top:10px}
+.fa-sub-head{margin-top:20px}
 .fa-change{display:flex;flex-direction:column;gap:4px;font-size:12.5px;font-weight:600;color:var(--text-3);margin-top:6px}
 .fa-select{font:500 14px var(--font);color:var(--text-1);background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:7px 10px}
 .fa-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}

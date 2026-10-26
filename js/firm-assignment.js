@@ -2,11 +2,14 @@
    New Firm Assignment (managers; shows with Manager mode on).
    Live from ChurnZero through apps-script/firm-assignment: new firms nobody
    owns yet, a suggested AM for each (with the reasons), and Approve / change.
-   Assign writes the owner + Onboarding Type = Premium in ChurnZero and logs
-   suggested vs chosen, so we can see how often the suggestion is trusted
-   before switching to auto-assign.
+   IM/CSM split: every firm gets an Implementation Manager; firms over $400/mo also
+   get a CSM, who becomes the Owner (otherwise the IM is). Assign writes the Owner,
+   Onboarding Type = Premium and the IM / CSM fields in ChurnZero, and logs suggested
+   vs chosen.
    ========================================================================== */
-const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbxkDLI7ldy0AtXq4iUjDB0b4MAdzkzJ0QSditt1sxFReXnoo5JPg8HzrC4feE1-flXyvg/exec';
+// IM/CSM split branch: the script's test deployment (always the latest pushed code). At go-live,
+// switch back to the live deployment (AKfycbxkDLI7…) and redeploy it.
+const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbzS-NAurLZT5b2pHWcVIlYdLK2ApNbsSiV5BxXZw2kH/exec';
 const ASSIGN_EMAILS = MANAGER_EMAILS;
 // ChurnZero account page; {id} = the ChurnZero account Id.
 const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/account/{id}/details';
@@ -84,6 +87,53 @@ function faWhy(r) {
   return `${r.open} open onboarding${r.open === 1 ? '' : 's'} · last new firm ${r.daysSince === 0 ? 'today' : r.daysSince + 'd ago'} · ${r.firms} firms · ${fmtMoney(r.openMrr)} onboarding MRR`;
 }
 
+function faCsmWhy(r) {
+  return `${r.firms} firms · last new firm ${r.daysSince === 0 ? 'today' : r.daysSince + 'd ago'}${r.bandFit ? ' · this firm’s size band' : ''}`;
+}
+
+function faCsmTip(r, f) {
+  const p = r.parts;
+  const row = (label, pts, max) => `<span class="fa-tip-row"><span>${label}</span><b>${pts} / ${max}</b></span>`;
+  return `<b class="fa-tip-head">Fit score: ${r.score} out of 100</b>
+    How strongly ${esc(r.name.split(' ')[0])} fits this firm compared with the other CSMs. Highest score is suggested.
+    ${row('Firm size matches their band', p.fit, 50)}
+    ${row('Smallest book of firms', p.book, 25)}
+    ${row('Longest since last new firm', p.since, 25)}
+    <span class="fa-tip-foot">Bands: ${faBandText()}.</span>`;
+}
+
+function faBandText() {
+  const b = FA.data.bands, names = (FA.data.csms || []).map((r) => r.name.split(' ')[0]);
+  return `${esc(names[0] || 'Elliott')} ${fmtMoney(b.top)}+, ${esc(names[1] || 'Julio')} ${fmtMoney(b.mid)}–${fmtMoney(b.top - 1)}, ${esc(names[2] || 'Jessie')} over ${fmtMoney(FA.data.csmMin)}`;
+}
+
+// One "Suggested … / Assign to" block, for the IM or the CSM.
+function faPicker(f, kind) {
+  const list = kind === 'csm' ? f.csmRanking : f.ranking;
+  const top = list[0];
+  if (!top) return `<div class="fa-why">No ${kind === 'csm' ? 'CSM' : 'IM'} is in the rotation. Add someone below.</div>`;
+  const why = kind === 'csm' ? faCsmWhy : faWhy;
+  const tip = kind === 'csm' ? faCsmTip : faScoreTip;
+  const label = (r) => (r.partnerRule ? 'partner rule' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score);
+  return `<div class="fa-sugg-lbl">Suggested ${kind === 'csm' ? 'CSM' : 'IM'}</div>
+    <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span>${top.partnerRule
+      ? '<span class="fa-score fa-partner-rule">Partner rule</span>'
+      : `<span class="fa-score" tabindex="0" aria-describedby="fa-tip-${kind}-${f.czId}">${top.score}<span class="fa-tip" role="tooltip" id="fa-tip-${kind}-${f.czId}">${tip(top, f)}</span></span>`}</div>
+    <div class="fa-why">${top.partnerRule ? `Partner-sourced firm${f.leadSourceDetail ? ' (' + esc(f.leadSourceDetail) + ')' : ''}: partner firms always go to ${esc(top.name.split(' ')[0])}. ` : ''}${esc(why(top))}</div>
+    <label class="fa-change">${kind === 'csm' ? 'CSM' : 'IM'}
+      <select class="fa-select" data-kind="${kind}" data-cz="${f.czId}">
+        ${list.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${label(r)}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
+      </select>
+    </label>
+    <div class="fa-why fa-why-alt" data-kind="${kind}" hidden></div>`;
+}
+
+function faOwnerLine(f) {
+  return f.needsCsm
+    ? `<div class="fa-owner">Owner: <b>the CSM</b> (over ${fmtMoney(FA.data.csmMin)}/mo)</div>`
+    : `<div class="fa-owner">Owner: <b>the IM</b> · no CSM at ${fmtMoney(FA.data.csmMin)}/mo or under. Support takes over when onboarding is complete.</div>`;
+}
+
 function faScoreTip(r, f) {
   const p = r.parts;
   const row = (label, pts, max) => `<span class="fa-tip-row"><span>${label}</span><b>${p ? pts : '—'} / ${max}</b></span>`;
@@ -104,26 +154,18 @@ function faFirmCard(f) {
   let right;
   if (done) {
     right = `<div class="fa-done">
-        <div class="fa-done-head">${done.confirmed ? '✓ Assigned to' : '⏳ Sent to ChurnZero for'} <b>${esc(done.name)}</b></div>
-        <p>${done.confirmed ? 'Owner and Premium Onboarding are set.' : 'ChurnZero hasn’t shown the change yet — it can take a minute. Refresh to check.'}
+        <div class="fa-done-head">${done.confirmed ? '✓ Assigned' : '⏳ Sent to ChurnZero'}: IM <b>${esc(done.im)}</b>${done.csm ? `, CSM <b>${esc(done.csm)}</b>` : ''}</div>
+        <p>${done.confirmed ? `Owner (${esc(done.owner)}), the IM / CSM fields and Premium Onboarding are set.` : 'ChurnZero hasn’t shown the change yet — it can take a minute. Refresh to check.'}
           Next: start <b>${esc(ASSIGN_PLAY)}</b>.</p>
         <a class="mgr-btn fa-go" href="${esc(faCzLink(f.czId))}" target="_blank" rel="noopener">Start play in ChurnZero ↗</a>
       </div>`;
-  } else if (!top) {
-    right = '<div class="fa-done"><p>No one is in the rotation. Add someone below.</p></div>';
+  } else if (!top || (f.needsCsm && !f.csmRanking.length)) {
+    right = `<div class="fa-done"><p>No ${!top ? 'IM' : 'CSM'} is in the rotation. Add someone below.</p></div>`;
   } else {
     right = `<div class="fa-pick">
-        <div class="fa-sugg-lbl">Suggested</div>
-        <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span>${top.partnerRule
-          ? '<span class="fa-score fa-partner-rule">Partner rule</span>'
-          : `<span class="fa-score" tabindex="0" aria-describedby="fa-tip-${f.czId}">${top.score}<span class="fa-tip" role="tooltip" id="fa-tip-${f.czId}">${faScoreTip(top, f)}</span></span>`}</div>
-        <div class="fa-why">${top.partnerRule ? `Partner-sourced firm${f.leadSourceDetail ? ' (' + esc(f.leadSourceDetail) + ')' : ''}: partner firms always go to ${esc(top.name.split(' ')[0])}. ` : ''}${esc(faWhy(top))}</div>
-        <label class="fa-change">Assign to
-          <select class="fa-select" data-cz="${f.czId}">
-            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.partnerRule ? 'partner rule' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
-          </select>
-        </label>
-        <div class="fa-why fa-why-alt" hidden></div>
+        ${faPicker(f, 'im')}
+        ${f.needsCsm ? `<div class="fa-pick-sep"></div>${faPicker(f, 'csm')}` : ''}
+        ${faOwnerLine(f)}
         <div class="fa-actions">
           <button type="button" class="mgr-btn on fa-assign" data-cz="${f.czId}"${!write ? ' disabled title="ChurnZero write access isn’t set up yet"' : noContact ? ' disabled title="Needs a contact with Include in Onboarding on"' : ''}>Approve &amp; assign</button>
           <a class="mgr-btn" href="${esc(faCzLink(f.czId))}" target="_blank" rel="noopener">Open in ChurnZero ↗</a>
@@ -136,7 +178,7 @@ function faFirmCard(f) {
         <div class="fa-firm-head">
           <h3>${esc(f.name)}</h3>
           ${f.partner ? `<span class="fa-flag fa-partner">Partner: ${esc(f.leadSourceDetail || 'not named in Salesforce')}</span>` : ''}
-          ${f.high ? `<span class="fa-flag fa-high">High MRR${f.tierFallback ? ' · no high-MRR AM in rotation' : ''}</span>` : ''}
+          ${f.high ? `<span class="fa-flag fa-high">High MRR${f.tierFallback ? ' · no high-MRR IM in rotation' : ''}</span>` : ''}
           ${f.flags.map((x) => `<span class="fa-flag">${esc(x)}</span>`).join('')}
         </div>
         <div class="fa-facts">
@@ -156,6 +198,20 @@ function faFirmCard(f) {
     </article>`;
 }
 
+function faRepCard(r, maxOpen, im) {
+  return `<div class="fa-rep${r.included ? '' : ' off'}">
+      <div class="fa-rep-head"><span class="fa-av">${esc(r.name.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span>
+        <span class="fa-rep-name">${esc(r.name)}${r.high ? '<span class="fa-flag fa-high">High MRR</span>' : ''}</span></div>
+      ${im ? `<div class="fa-rep-open"><b>${r.open}</b> open onboardings</div>
+      <div class="fa-bar"><span style="width:${Math.round((r.open / maxOpen) * 100)}%"></span></div>` : `<div class="fa-rep-open"><b>${r.firms}</b> firms · ${fmtMoney(r.mrr)}/mo</div>`}
+      <div class="fa-rep-facts"><span>Last new firm <b>${r.lastStart ? esc(faDaysAgo(r.lastStart)) : '—'}</b></span>${im ? `<span><b>${r.firms}</b> firms</span><span><b>${fmtMoney(r.openMrr)}</b> in onboarding</span>` : ''}</div>
+      <div class="fa-rep-toggles">
+        <label><input type="checkbox" class="fa-rot" data-user="${r.id}"${r.included ? ' checked' : ''}> In rotation</label>
+        ${im ? `<label><input type="checkbox" class="fa-tierrep" data-user="${r.id}"${r.high ? ' checked' : ''}> High MRR</label>` : ''}
+      </div>
+    </div>`;
+}
+
 function renderAssign() {
   const d = FA.data;
   const body = document.getElementById('faBody');
@@ -170,7 +226,7 @@ function renderAssign() {
     <div class="fa-hero-text">
       <div class="loop-eyebrow">Manager mode · Onboarding</div>
       <h2>New Firm <span>Assignment</span></h2>
-      <p>${open.length ? 'Suggestions balance open onboardings, time since each AM’s last new firm, book size and onboarding MRR.' : 'All caught up — every new firm has an owner.'}</p>
+      <p>${open.length ? `Every firm gets an IM; firms over ${fmtMoney(d.csmMin)}/mo also get a CSM, who becomes the Owner. Suggestions balance each rep’s load, time since their last new firm and book size.` : 'All caught up — every new firm has an owner.'}</p>
       <div class="loop-stats">
         <div class="loop-stat"><b>${open.length}</b><span>Waiting for an owner</span></div>
         <div class="loop-stat s-closed"><b>${ready}</b><span>Ready to assign</span></div>
@@ -193,27 +249,23 @@ function renderAssign() {
 
     <div class="fa-lower">
       <section class="fa-panel">
-        <div class="fa-panel-head"><h3>Rotation</h3><span class="fa-panel-note">AMs with an open onboarding. Untick anyone who’s out.</span></div>
+        <div class="fa-panel-head"><h3>IM rotation</h3><span class="fa-panel-note">Implementation Managers. Untick anyone who’s out.</span></div>
         <form class="fa-tier" id="faTierForm">High-MRR tier: firms at
-          <label>$<input type="number" min="0" step="50" id="faTierMin" value="${esc(d.highMin)}">/mo</label>+ go only to High-MRR AMs.
+          <label>$<input type="number" min="0" step="50" id="faTierMin" value="${esc(d.highMin)}">/mo</label>+ go only to High-MRR IMs.
           <button type="submit" class="mgr-btn">Save</button></form>
-        <div class="fa-reps">${(d.reps || []).map((r) => `<div class="fa-rep${r.included ? '' : ' off'}">
-            <div class="fa-rep-head"><span class="fa-av">${esc(r.name.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span>
-              <span class="fa-rep-name">${esc(r.name)}${r.high ? '<span class="fa-flag fa-high">High MRR</span>' : ''}</span></div>
-            <div class="fa-rep-open"><b>${r.open}</b> open onboardings</div>
-            <div class="fa-bar"><span style="width:${Math.round((r.open / maxOpen) * 100)}%"></span></div>
-            <div class="fa-rep-facts"><span>Last new firm <b>${r.lastStart ? esc(faDaysAgo(r.lastStart)) : '—'}</b></span><span><b>${r.firms}</b> firms</span><span><b>${fmtMoney(r.openMrr)}</b> in onboarding</span></div>
-            <div class="fa-rep-toggles">
-              <label><input type="checkbox" class="fa-rot" data-user="${r.id}"${r.included ? ' checked' : ''}> In rotation</label>
-              <label><input type="checkbox" class="fa-tierrep" data-user="${r.id}"${r.high ? ' checked' : ''}> High MRR</label>
-            </div>
-          </div>`).join('')}</div>
+        <div class="fa-reps">${(d.reps || []).map((r) => faRepCard(r, maxOpen, true)).join('')}</div>
+        <div class="fa-panel-head fa-sub-head"><h3>CSM rotation</h3><span class="fa-panel-note">Only for firms over ${fmtMoney(d.csmMin)}/mo.</span></div>
+        <form class="fa-tier" id="faBandForm">Size bands: ${esc((d.csms[0] || {}).name || 'Top CSM')} gets
+          <label>$<input type="number" min="${d.csmMin + 1}" step="25" id="faBandTop" value="${esc(d.bands.top)}">/mo</label>+, ${esc((d.csms[1] || {}).name || 'the next')} from
+          <label>$<input type="number" min="${d.csmMin + 1}" step="25" id="faBandMid" value="${esc(d.bands.mid)}">/mo</label>, ${esc((d.csms[2] || {}).name || 'the last')} the rest.
+          <button type="submit" class="mgr-btn">Save</button></form>
+        <div class="fa-reps">${(d.csms || []).map((r) => faRepCard(r, 1, false)).join('')}</div>
       </section>
 
       <section class="fa-panel">
         <div class="fa-panel-head"><h3>Last 10 assignments</h3>${judged ? `<span class="fa-panel-note">Suggestion taken ${took} of ${judged}</span>` : ''}</div>
         ${(d.recent || []).length ? `<ul class="fa-recent">${d.recent.slice(0, 10).map((l) => `<li>
-            <div><b>${esc(l.firm)}</b> → ${esc(l.assigned)}${l.took === 'false' || l.took === 'FALSE' ? ` <span class="fa-flag">changed from ${esc(l.suggested || '—')}</span>` : l.took ? ' <span class="fa-chk ok">✓ suggested</span>' : ''}</div>
+            <div><b>${esc(l.firm)}</b> → ${esc(l.assigned)}${l.csm ? ` · CSM ${esc(l.csm)}` : ''}${l.took === 'false' || l.took === 'FALSE' ? ` <span class="fa-flag">changed from ${esc(l.suggested || '—')}</span>` : l.took ? ' <span class="fa-chk ok">✓ suggested</span>' : ''}</div>
             <span>${esc(l.when)} · ${esc(String(l.by).split('@')[0])}${l.confirmed && l.confirmed !== 'yes' ? ' · ' + esc(l.confirmed) : ''}</span>
           </li>`).join('')}</ul>` : '<p class="fa-panel-note fa-pad">Assignments made here will show up here.</p>'}
       </section>
@@ -225,19 +277,19 @@ async function faAssign(btn) {
   const czId = Number(btn.dataset.cz);
   const f = FA.data.queue.find((x) => x.czId === czId);
   const card = btn.closest('.fa-firm');
-  const sel = card.querySelector('.fa-select');
-  const userId = Number(sel.value);
-  const pick = f.ranking.find((r) => r.userId === userId);
+  const pick = (kind) => { const sel = card.querySelector(`.fa-select[data-kind="${kind}"]`); return sel ? (kind === 'csm' ? f.csmRanking : f.ranking).find((r) => r.userId === Number(sel.value)) : null; };
+  const im = pick('im'), csm = f.needsCsm ? pick('csm') : null;
   const msg = card.querySelector('.fa-msg');
   card.querySelectorAll('button,select').forEach((x) => { x.disabled = true; });
   msg.className = 'fa-msg';
-  msg.textContent = `Assigning to ${pick.name}…`;
+  msg.textContent = `Assigning ${im.name}${csm ? ` and ${csm.name}` : ''}…`;
   try {
     const res = await faCall({
-      action: 'assign', czId, externalId: f.externalId, userId,
+      action: 'assign', czId, externalId: f.externalId, userId: im.userId, csmId: csm ? csm.userId : null,
       suggestedId: f.ranking[0].userId, suggestedName: f.ranking[0].name,
+      suggestedCsmId: csm ? f.csmRanking[0].userId : null, suggestedCsmName: csm ? f.csmRanking[0].name : '',
     });
-    FA.done[czId] = { name: pick.name, confirmed: res.confirmed };
+    FA.done[czId] = { im: res.im, csm: res.csm, owner: res.owner, confirmed: res.confirmed };
     renderAssign();
   } catch (e) {
     msg.className = 'fa-msg err';
@@ -271,12 +323,14 @@ function setupAssign() {
     if (btn) faAssign(btn);
   });
   body.addEventListener('submit', async (e) => {
-    if (e.target.id !== 'faTierForm') return;
+    if (e.target.id !== 'faTierForm' && e.target.id !== 'faBandForm') return;
     e.preventDefault();
     const btn = e.target.querySelector('button');
     btn.disabled = true;
     try {
-      FA.data = await faCall({ action: 'setTier', min: Number(document.getElementById('faTierMin').value) });
+      FA.data = await faCall(e.target.id === 'faBandForm'
+        ? { action: 'setCsmBands', top: Number(document.getElementById('faBandTop').value), mid: Number(document.getElementById('faBandMid').value) }
+        : { action: 'setTier', min: Number(document.getElementById('faTierMin').value) });
       renderAssign();
     } catch (err) {
       btn.disabled = false;
@@ -289,13 +343,16 @@ function setupAssign() {
     const sel = e.target.closest('.fa-select');
     if (sel) {
       const f = FA.data.queue.find((x) => x.czId === Number(sel.dataset.cz));
-      const r = f.ranking.find((x) => x.userId === Number(sel.value));
+      const kind = sel.dataset.kind;
+      const list = kind === 'csm' ? f.csmRanking : f.ranking;
+      const r = list.find((x) => x.userId === Number(sel.value));
       const card = sel.closest('.fa-firm');
-      const alt = card.querySelector('.fa-why-alt');
-      const changed = r.userId !== f.ranking[0].userId;
+      const alt = card.querySelector(`.fa-why-alt[data-kind="${kind}"]`);
+      const changed = r.userId !== list[0].userId;
       alt.hidden = !changed;
-      alt.textContent = changed ? r.name + ': ' + faWhy(r) : '';
-      card.querySelector('.fa-assign').textContent = changed ? `Assign to ${r.name.split(' ')[0]}` : 'Approve & assign';
+      alt.textContent = changed ? r.name + ': ' + (kind === 'csm' ? faCsmWhy(r) : faWhy(r)) : '';
+      const any = [...card.querySelectorAll('.fa-select')].some((x) => x.selectedIndex > 0);
+      card.querySelector('.fa-assign').textContent = any ? 'Assign' : 'Approve & assign';
       return;
     }
     const rot = e.target.closest('.fa-rot, .fa-tierrep');
