@@ -84,6 +84,8 @@ h1,h2,h3,h4{font-family:var(--font);color:var(--text-1)}
 .meta-line{max-width:1280px;margin:0 auto;padding:18px 24px 0;display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--text-3)}
 .meta-line b{color:var(--text-1);font-weight:700}
 .meta-sel{margin-left:auto;display:flex;align-items:center;gap:10px}
+.meta-sel[hidden]{display:none}
+.meta-sel:not([hidden]) + .meta-sel{margin-left:14px}
 .meta-sel label{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
 .fb-select{font:600 14px var(--font);color:var(--text-1);cursor:pointer;background-color:var(--surface-2);border:none;border-radius:999px;padding:9px 16px}
 .fb-select:focus{outline:2px solid var(--lm-blue);outline-offset:2px}
@@ -836,6 +838,7 @@ button.mrr-stat span{color:var(--lm-blue)}
 .csm-kpis .mrr-kpi b{font-size:26px}
 .mrr-kpi:not(.up):not(.down) b{color:#fff}
 .csm-head{margin:20px 0 12px}
+.csm-rep-pick{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--text-2)}
 .csm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
 .csm-card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:16px;display:flex;flex-direction:column;gap:10px}
 .csm-card header{display:flex;align-items:center;gap:10px}

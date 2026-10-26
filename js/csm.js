@@ -8,7 +8,9 @@
    Implementation tab.
    ========================================================================== */
 const CSM_AI_TARGET = 500;
-const CSM = { data: null, loading: null, ym: '', error: '' };
+// rep: whose book is shown. Reps see only their own; managers see the whole team or pick a rep.
+const CSM = { data: null, loading: null, ym: '', error: '', rep: null };
+const CSM_NONE = '\u0000none';   // signed in, but not matched to a rep
 
 // Same reps as the Implementation tab's per-rep table (its latest month), else anyone with an open onboarding.
 function csmReps() {
@@ -30,7 +32,7 @@ async function loadCsm(force) {
     try {
       // One small download: retention, health and per-rep monthly totals. The full MRR
       // event list (only needed inside pop-ups) loads separately in the background.
-      const [csm] = await Promise.all([mrrCall({ action: 'csm', force: !!force }), ensureTabData('impl'), loadExclusions()]);
+      const [csm] = await Promise.all([mrrCall({ action: 'csm', force: !!force }), ensureTabData('impl'), loadExclusions(), loadManagerList()]);
       if (force) loadMrr(true); else prefetchMrr();
       const changed = !CSM.data || csm.built !== CSM.data.built || force;
       CSM.data = Object.assign({ history: {}, health: { accounts: [] } }, csm);
@@ -63,7 +65,7 @@ function openCsm() {
   if (!root.innerHTML) root.innerHTML = '<div class="mrr-hero" id="csmHero"></div><div id="csmError" class="error-banner" hidden></div><div id="csmBody"><div class="res-loading">Pulling each rep’s book…</div></div>';
   if (!CSM.data) prefetchCsm();
   // Draw straight away from the saved copy (once Implementation's reps are in), then refresh behind it.
-  if (CSM.data) ensureTabData('impl').then(renderCsm);
+  if (CSM.data) Promise.all([ensureTabData('impl'), loadManagerList()]).then(renderCsm);
 }
 
 /* ---------- calculations ---------- */
@@ -141,6 +143,12 @@ function csmHealthBar(h, noneLabel) {
 const csmPct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
 const csmTone = (v, good, ok) => (v == null ? '' : v >= good ? 'up' : v >= ok ? '' : 'down');
 
+// Whose book to show: managers start on the whole team; anyone else gets their own (or none).
+function csmViewRep(reps) {
+  if (isManager()) return CSM.rep && reps.includes(CSM.rep) ? CSM.rep : '';
+  return myRepName(reps.concat((CSM.data.history.firms || []).map((f) => f[1]))) || CSM_NONE;
+}
+
 /* ---------- render ---------- */
 function renderCsm() {
   const err = document.getElementById('csmError');
@@ -151,9 +159,19 @@ function renderCsm() {
   const cur = mrrCur();
   if (!CSM.ym) CSM.ym = cur;
   const hist = CSM.data.history || {};
-  const reps = csmReps();
-  const team = { 6: csmRetention(6), 13: csmRetention(13), bob: csmRetention('bob') };
-  const tile = (metric, kind, label) => `<button type="button" class="mrr-kpi ${csmTo(metric, kind, team[kind][metric])}" data-csm-ret="${metric}" data-kind="${kind}"><span>${label} ${metric.toUpperCase()}</span><b>${csmPct(team[kind][metric])}</b><small>Team · ${mrrPlural(team[kind].book.length, 'firm')} · how ⓘ</small></button>`;
+  const allReps = csmReps();
+  const view = csmViewRep(allReps);
+  CSM.rep = view;
+  if (view === CSM_NONE) {
+    document.getElementById('csmHero').innerHTML = `<div class="fa-hero-text"><div class="loop-eyebrow">Customer Success Managers</div><h2>CSM <span>Scorecard</span></h2>
+      <p>This tab shows your own book. We couldn’t match your sign-in to an account manager in ChurnZero yet. Ask a manager to add you.</p></div>`;
+    document.getElementById('csmBody').innerHTML = '';
+    return;
+  }
+  const reps = view ? [view] : allReps;
+  const who = view || null;
+  const team = { 6: csmRetention(6, who), 13: csmRetention(13, who), bob: csmRetention('bob', who) };
+  const tile = (metric, kind, label) => `<button type="button" class="mrr-kpi ${csmTo(metric, kind, team[kind][metric])}" data-csm-ret="${metric}" data-kind="${kind}"${who ? ` data-rep="${esc(who)}"` : ''}><span>${label} ${metric.toUpperCase()}</span><b>${csmPct(team[kind][metric])}</b><small>${who ? esc(who.split(' ')[0]) : 'Team'} · ${mrrPlural(team[kind].book.length, 'firm')} · how ⓘ</small></button>`;
 
   document.getElementById('csmHero').innerHTML = `
     <div class="fa-hero-text">
@@ -163,7 +181,7 @@ function renderCsm() {
       <div class="mrr-kpis csm-kpis">
         ${tile('nrr', 6, '6-month')}${tile('nrr', 13, '13-month')}${tile('nrr', 'bob', 'All-time')}${tile('grr', 6, '6-month')}${tile('grr', 13, '13-month')}${tile('grr', 'bob', 'All-time')}
       </div>
-      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="">Team cohort analysis</button>
+      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="${esc(who || '')}">${who ? 'Cohort analysis' : 'Team cohort analysis'}</button>
         <span class="mrr-sync">${hist.checkpoint ? `6- and 13-month: firms that signed up in ${esc(mrrYmLabel(hist.cohort6))} and ${esc(mrrYmLabel(hist.cohort13))}, as of the end of ${esc(mrrYmLabel(hist.checkpoint))} · All-time: every firm since ${esc(mrrYmLabel(hist.first))}, as of now` : esc(hist.error || '')}</span></div>
     </div>
     <div class="fa-hero-art">
@@ -206,7 +224,8 @@ function renderCsm() {
   }).join('');
 
   document.getElementById('csmBody').innerHTML = `
-    <div class="mrr-panel-head csm-head"><h3>By rep <span id="csmExcl">${exclEntry()}</span></h3>
+    <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry()}</span></h3>
+      ${isManager() ? `<label class="csm-rep-pick">Rep <select class="fb-select" id="csmRep"><option value="">Whole team</option>${allReps.map((r) => `<option value="${esc(r)}"${r === view ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>` : ''}
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
     <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
@@ -382,6 +401,7 @@ function csmCohortOpen(rep) {
 function setupCsm() {
   const root = document.getElementById('csm');
   if (!root) return;
+  root.addEventListener('change', (e) => { if (e.target.id === 'csmRep') { CSM.rep = e.target.value; renderCsm(); } });
   root.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('#csmRefresh')) { loadCsm(true); return; }

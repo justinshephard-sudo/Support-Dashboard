@@ -2,7 +2,7 @@
    Implementation tab — onboarding metrics from ChurnZero, written daily by
    apps-script/implementation-sync.gs into "Impl - Monthly" / "Impl - Open Firms".
    ========================================================================== */
-const IMPL = { months: [], byLabel: new Map(), open: [], events: [], loaded: false, chartsDrawn: false, current: null };
+const IMPL = { months: [], byLabel: new Map(), open: [], events: [], loaded: false, chartsDrawn: false, current: null, rep: '' };
 const IMPL_STAGE_ORDER = ['Needs to Schedule', 'First Onboarding', 'Second Onboarding', 'Third Onboarding',
   'Fourth Onboarding', 'Fifth Onboarding', 'Sixth Onboarding', 'Additional Onboarding'];
 
@@ -24,6 +24,7 @@ async function initImplementation() {
       fetchSheetByTitle('Impl - Open Firms').catch(() => []),
       fetchSheetByTitle('Impl - Firm Events').catch(() => []),
       loadExclusions(),
+      loadManagerList(),
     ]);
     IMPL.events = sheetObjects(events);
     IMPL.months = sheetObjects(monthly).filter((m) => m.Month).map((m) => ({ ...m, Month: implMonthLabel(m.Month) }));
@@ -48,9 +49,63 @@ async function initImplementation() {
   const updated = latest && latest.UpdatedAt ? new Date(latest.UpdatedAt) : null;
   document.getElementById('impl-updated').textContent = updated && !Number.isNaN(updated.getTime())
     ? `ChurnZero data synced ${updated.toLocaleString()}` : 'ChurnZero data';
+  implSetupRep();
   if (latest) renderImplMonth(latest.Month);
   renderImplOverList();
   if (document.getElementById('view-impl').classList.contains('active')) drawImplCharts();
+}
+
+/* ---- Whose numbers: reps see only their own; managers see the team or pick a rep. ---- */
+const IMPL_NONE = '\u0000none';   // a signed-in person we couldn't match to a rep
+function implRepNames() {
+  const set = new Set();
+  IMPL.months.forEach((m) => { try { Object.keys(JSON.parse(m.RepStats || '{}')).forEach((r) => set.add(r)); } catch (e) { /* bad row */ } });
+  IMPL.open.forEach((f) => set.add(f.AccountManager));
+  set.delete('Unassigned'); set.delete('');
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+function implSetupRep() {
+  const sel = document.getElementById('impl-rep');
+  const wrap = document.getElementById('impl-rep-sel');
+  if (isManager()) {
+    IMPL.rep = '';
+    populateSelect('impl-rep', [{ k: '', l: 'Whole team' }].concat(implRepNames().map((r) => ({ k: r, l: r }))), '', 'k', 'l');
+    wrap.hidden = false;
+    if (!sel.dataset.wired) {
+      sel.dataset.wired = '1';
+      sel.addEventListener('change', () => {
+        IMPL.rep = sel.value;
+        IMPL.chartsDrawn = false;
+        renderImplMonth(IMPL.current);
+        renderImplOverList();
+        if (document.getElementById('view-impl').classList.contains('active')) drawImplCharts();
+      });
+    }
+  } else {
+    IMPL.rep = implMyRepName() || IMPL_NONE;
+    wrap.hidden = true;
+  }
+}
+
+// Rows for the rep being viewed (all rows for the whole team).
+const implMine = (rows) => (IMPL.rep ? rows.filter((r) => r.AccountManager === IMPL.rep) : rows);
+
+// A month row with the viewed rep's numbers in the team columns (RepStats holds the same metrics per rep).
+function implRepMonth(m) {
+  if (!m || !IMPL.rep) return m;
+  let s = {};
+  try { s = (JSON.parse(m.RepStats || '{}'))[IMPL.rep] || {}; } catch (e) { s = {}; }
+  const v = (x) => (x == null ? '' : String(x));
+  const snap = m.OpenOnboardings !== '';   // months before the daily snapshots began have no open-firm numbers
+  return {
+    ...m,
+    OpenOnboardings: snap ? v(s.open || 0) : '', PreKickoff: snap ? v(s.preKick || 0) : '', OpenStatus: snap ? v((s.open || 0) - (s.preKick || 0)) : '',
+    NeedsScheduling: snap ? v(s.needsSched || 0) : '', Over70: snap ? v(s.over70 || 0) : '',
+    ClosedOnboardings: v(s.closed || 0), MedianDays: v(s.medianDays), CsatPct: v(s.csatPct), CsatResponses: v(s.csatN || 0),
+    StageCounts: JSON.stringify(s.stages || {}),
+    RepStats: JSON.stringify(s && Object.keys(s).length ? { [IMPL.rep]: s } : {}),
+  };
 }
 
 // "October 2026", or a date Sheets auto-converted it to (e.g. "10/1/2026") → "October 2026".
@@ -79,9 +134,13 @@ const IMPL_TILES = [
 ];
 
 function renderImplMonth(label) {
-  const m = IMPL.byLabel.get(label);
+  const none = IMPL.rep === IMPL_NONE;
+  document.getElementById('impl-mine').hidden = !none;
+  document.getElementById('impl-body').hidden = none;
+  if (none) return;
+  const m = implRepMonth(IMPL.byLabel.get(label));
   if (!m) return;
-  const prev = IMPL.byLabel.get(implPrevLabel(label)) || null;
+  const prev = implRepMonth(IMPL.byLabel.get(implPrevLabel(label))) || null;
   const isCurrent = label === IMPL.months[IMPL.months.length - 1].Month;
   const tiles = IMPL_TILES.map((d) => {
     const cur = toNumber(m[d.col]);
@@ -203,21 +262,23 @@ function implDrillSpec(col, label) {
     ? { title, note, cols: IMPL_FIRM_COLS, rows: rows.sort((a, b) => toNumber(b.DaysInOnboarding) - toNumber(a.DaysInOnboarding)) }
     : { title, empty: `Firm-level detail for this number is only kept for today — switch the month to ${latest}.` });
   const days = (f) => toNumber(f.DaysInOnboarding) || 0;
-  const evs = (type) => IMPL.events.filter((e) => e.Type === type && e.Month === label);
+  const evs = (type) => implMine(IMPL.events.filter((e) => e.Type === type && e.Month === label));
+  const open = implMine(IMPL.open);
+  const who = IMPL.rep ? ` · ${IMPL.rep}` : '';
   switch (col) {
     case 'OpenOnboardings':
-      return snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today', [...IMPL.open]);
+      return snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today' + who, [...open]);
     case 'NeedsScheduling':
-      return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today', IMPL.open.filter((f) => !f.NextMeeting));
+      return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today' + who, open.filter((f) => !f.NextMeeting));
     case 'Over70':
-      return snapshot('70+ Days, Still Open', 'Open onboardings at 70 or more days since start, as of today', IMPL.open.filter((f) => days(f) >= 70));
+      return snapshot('70+ Days, Still Open', 'Open onboardings at 70 or more days since start, as of today' + who, open.filter((f) => days(f) >= 70));
     case 'ClosedOnboardings':
     case 'MedianDays': {
       const rows = evs('closed').sort((a, b) => (toNumber(a.Days) ?? 1e9) - (toNumber(b.Days) ?? 1e9));
-      const m = IMPL.byLabel.get(label);
+      const m = implRepMonth(IMPL.byLabel.get(label));
       return {
         title: col === 'MedianDays' ? 'Median Time in Onboarding' : 'Onboardings Closed',
-        note: `Completed in ${label}` + (m && m.MedianDays !== '' ? ` · median ${fmtNum(toNumber(m.MedianDays))} days` : ''),
+        note: `Completed in ${label}${who}` + (m && m.MedianDays !== '' ? ` · median ${fmtNum(toNumber(m.MedianDays))} days` : ''),
         cols: [['Name', 'Firm'], ['Date', 'Completed'], ['Days', 'Days in onboarding'], ['AccountManager', 'Account Manager'], ['Specialist', 'Specialist']],
         rows, median: col === 'MedianDays' && m ? toNumber(m.MedianDays) : null,
         empty: IMPL.events.length ? 'No onboardings completed this month.' : 'Firm detail appears after the next ChurnZero sync.',
@@ -226,16 +287,11 @@ function implDrillSpec(col, label) {
     case 'CsatPct': {
       let rows = evs('csat').sort((a, b) => toNumber(a.Score) - toNumber(b.Score) || a.Date.localeCompare(b.Date));
       const noData = 'Firm detail appears after the next ChurnZero sync.';
-      // The tile shows the team score; the list behind it is each rep's own (managers see everyone's).
-      if (!isManager()) {
-        const me = implMyRepName();
-        if (!me) {
-          return { title: 'Your Onboarding CSAT', empty: 'Your ratings show here once you’re the account manager on firms in ChurnZero.' };
-        }
-        rows = rows.filter((r) => r.AccountManager === me);
+      if (IMPL.rep) {
+        const me = IMPL.rep;
         const pos = rows.filter((r) => toNumber(r.Score) >= 4).length;
         return {
-          title: 'Your Onboarding CSAT',
+          title: isManager() ? `${me} — Onboarding CSAT` : 'Your Onboarding CSAT',
           note: `${me} · ${label}` + (rows.length ? ` · ${fmtPct((pos / rows.length) * 100)} satisfied (4–5)` : ''),
           cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['Comment', 'Comment']],
           rows, empty: IMPL.events.length ? 'No survey responses for your firms this month.' : noData,
@@ -258,20 +314,9 @@ function implFmtDate(v) {
   return new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Signed-in email → their ChurnZero "Account Manager" name. Emails here are mostly first@ or
-// first.last@; add an entry to IMPL_REP_EMAILS for anyone who doesn't follow that pattern.
-const IMPL_REP_EMAILS = {};   // e.g. 'kwickham@lawmatics.com': 'Kennedy Wickham'
+// Signed-in person → their ChurnZero "Account Manager" name (matching lives in core.js: myRepName).
 function implMyRepName() {
-  const email = (AUTH.email || '').toLowerCase();
-  if (IMPL_REP_EMAILS[email]) return IMPL_REP_EMAILS[email];
-  const local = email.split('@')[0];
-  const reps = [...new Set(IMPL.events.map((e) => e.AccountManager).concat(IMPL.open.map((f) => f.AccountManager)))]
-    .filter((r) => r && r !== 'Unassigned');
-  return reps.find((rep) => {
-    const parts = rep.toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
-    const first = parts[0], last = parts[parts.length - 1];
-    return [first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local);
-  }) || null;
+  return myRepName([...new Set(IMPL.events.map((e) => e.AccountManager).concat(IMPL.open.map((f) => f.AccountManager)))]);
 }
 
 function implDrillCell(key, row, median) {
@@ -339,14 +384,14 @@ function implStageRank(label) {
 // Per-rep stage counts for a month: saved in RepStats by the sync; for the current
 // month, fall back to today's open-firm list (rows written before stages were tracked).
 function implRepStageCounts(label) {
-  const m = IMPL.byLabel.get(label);
+  const m = implRepMonth(IMPL.byLabel.get(label));
   let stats = {};
   try { stats = m && m.RepStats ? JSON.parse(m.RepStats) : {}; } catch (e) { stats = {}; }
   const out = {};
   Object.entries(stats).forEach(([rep, st]) => { if (st.stages) out[rep] = st.stages; });
   const isCurrent = IMPL.months.length && label === IMPL.months[IMPL.months.length - 1].Month;
   if (!Object.keys(out).length && isCurrent) {
-    IMPL.open.forEach((f) => {
+    implMine(IMPL.open).forEach((f) => {
       const rep = f.AccountManager || 'Unassigned';
       const stage = f.Stage || 'No stage set';
       out[rep] = out[rep] || {};
@@ -407,7 +452,7 @@ function renderImplRepStages(label) {
 
 function renderImplOverList() {
   // Lowest days first: firms that just crossed 70 days are the easiest to rescue.
-  const over = IMPL.open.filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70)
+  const over = implMine(IMPL.open).filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70)
     .sort((a, b) => toNumber(a.DaysInOnboarding) - toNumber(b.DaysInOnboarding) || a.Name.localeCompare(b.Name));
   document.getElementById('impl-over-note').textContent = `As of today · ${over.length} firm${over.length === 1 ? '' : 's'}`;
   const cols = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
@@ -441,7 +486,7 @@ function drawImplCharts() {
   IMPL.chartsDrawn = true;
   const done = IMPL.months.slice(-13, -1);   // last 12 completed months
   const labels = done.map((m) => m.Month.replace(/ (\d{4})$/, (y, yr) => ` ’${yr.slice(2)}`).replace(/^(\w{3})\w*/, '$1'));
-  const series = (col) => done.map((m) => toNumber(m[col]));
+  const series = (col) => done.map((m) => toNumber(implRepMonth(m)[col]));
   drawLineChart('chart-impl-closed', labels, [{ label: 'Onboardings Closed', data: series('ClosedOnboardings'), borderColor: cssVar('--slot-3') }]);
   drawLineChart('chart-impl-median', labels, [{ label: 'Median days', data: series('MedianDays'), borderColor: cssVar('--slot-4') }]);
   drawLineChart('chart-impl-csat', labels, [{ label: 'Onboarding CSAT %', data: series('CsatPct'), borderColor: cssVar('--slot-6') }], { max: 100 });

@@ -215,12 +215,30 @@ setInterval(() => {
 }, 30000);
 const isSessionError = (e) => /session expired|not signed in/i.test(String(e && e.message));
 
-async function loadManagerList() {
-  try {
-    const rows = await fetchTitleFrom(SHEET_ID, 'Dashboard Config');
-    const list = rows.slice(1).map((r) => String(r[0] || '').trim().toLowerCase()).filter((e) => /@lawmatics\.com$/.test(e));
-    if (list.length) MANAGER_EMAILS.splice(0, MANAGER_EMAILS.length, ...list);
-  } catch (e) { /* keep the built-in list */ }
+// Signed-in email → which of these rep names is theirs. Emails are mostly first@ or first.last@;
+// add an entry to REP_EMAILS for anyone who doesn't follow that pattern.
+const REP_EMAILS = {};   // e.g. 'kwickham@lawmatics.com': 'Kennedy Wickham'
+function myRepName(names) {
+  const email = (AUTH.email || '').toLowerCase();
+  if (REP_EMAILS[email]) return REP_EMAILS[email];
+  const local = email.split('@')[0];
+  return names.filter((r) => r && r !== 'Unassigned').find((rep) => {
+    const parts = rep.toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
+    const first = parts[0], last = parts[parts.length - 1];
+    return [first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local);
+  }) || null;
+}
+
+// Loads once; the Implementation and CSM tabs wait on it to decide whose numbers to show.
+let managerListLoad = null;
+function loadManagerList() {
+  return managerListLoad || (managerListLoad = (async () => {
+    try {
+      const rows = await fetchTitleFrom(SHEET_ID, 'Dashboard Config');
+      const list = rows.slice(1).map((r) => String(r[0] || '').trim().toLowerCase()).filter((e) => /@lawmatics\.com$/.test(e));
+      if (list.length) MANAGER_EMAILS.splice(0, MANAGER_EMAILS.length, ...list);
+    } catch (e) { /* keep the built-in list */ }
+  })());
 }
 
 async function sheetsApi(path, sheetId = SHEET_ID) {
