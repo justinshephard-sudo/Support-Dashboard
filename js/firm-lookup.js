@@ -269,7 +269,7 @@ function openFirm(firmId, name) {
   const badgeCls = hk === 'good' ? 'good' : hk === 'bad' ? 'bad' : 'warn';
   const dangerBadge = (f.danger || f.cancel) ? '<span class="pf-badge warn">⚠ Cancellation flagged</span>' : '';
   const scoreN = toNumber(f.score);
-  const scoreCls = scoreN == null ? '' : scoreN < 25 ? 'good' : scoreN < 50 ? 'warn' : 'bad';
+  const scoreCls = scoreN == null ? '' : scoreN < 33 ? 'good' : scoreN < 67 ? 'warn' : 'bad';
   document.getElementById('profile').innerHTML = `
     <div class="pf-hero">
       <div class="pf-logo">${esc(firmInitials(f.name))}</div>
