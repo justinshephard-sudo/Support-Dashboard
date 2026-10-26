@@ -134,3 +134,24 @@ function handoffLog_(x) {
     x.acct.Id, x.mrr, x.im, x.outcome, x.owner, JSON.stringify(x.answers), x.confirmed ? 'yes' : 'pending',
   ].map(dashSafe_)]);
 }
+
+/* One-off check (run from the editor): on VIP Law (OLD), sets Onboarding Status and Completed
+   Date the way closeOnboarding does, reads them back, then puts both back the way they were.
+   Both fields already exist, so this can't create stray fields. */
+function testCloseWrite() {
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  var read = function () { return czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId,Cf/OnboardingStatus,Cf/OnboardingCompletedDate' })[0]; };
+  var before = read(), bcf = before.Cf || {};
+  Logger.log('Before: status "%s", completed "%s"', bcf.OnboardingStatus || '', bcf.OnboardingCompletedDate || '');
+  var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
+  czSet_(appKey, before.ExternalId, 'OnboardingStatus', 'Complete');
+  czSet_(appKey, before.ExternalId, 'OnboardingCompletedDate', today);
+  var ok = false, a;
+  for (var i = 0; i < 6 && !ok; i++) { Utilities.sleep(4000); a = read(); ok = (a.Cf || {}).OnboardingStatus === 'Complete' && String((a.Cf || {}).OnboardingCompletedDate || '').slice(0, 10) === today; }
+  Logger.log('Write: %s (status "%s", completed "%s")', ok ? 'WORKS' : 'no change', (a.Cf || {}).OnboardingStatus, (a.Cf || {}).OnboardingCompletedDate);
+  czSet_(appKey, before.ExternalId, 'OnboardingStatus', bcf.OnboardingStatus || '');
+  czSet_(appKey, before.ExternalId, 'OnboardingCompletedDate', bcf.OnboardingCompletedDate || '');
+  Utilities.sleep(8000);
+  a = read();
+  Logger.log('After restore: status "%s", completed "%s"', (a.Cf || {}).OnboardingStatus || '', (a.Cf || {}).OnboardingCompletedDate || '');
+}
