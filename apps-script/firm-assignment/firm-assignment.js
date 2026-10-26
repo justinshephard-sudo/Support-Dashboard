@@ -529,6 +529,41 @@ function testAssignWrite() {
   Logger.log('RESULT owner=' + (ownerAttr || 'none worked') + ' type=' + (typeAttr || 'none worked'));
 }
 
+/* ---------- one-off role write test (IM/CSM split; run from the editor) ----------
+   The Implementation Manager and Customer Success Manager roles can't be read back through
+   ChurnZero's read API, so this can't check itself. On VIP Law (OLD) it tries each likely
+   attribute name with a DIFFERENT rep, then logs which rep goes with which name: open the
+   account in ChurnZero, see who's in each role, and that tells us the name that works. */
+var ROLE_CANDIDATES = {
+  'Implementation Manager': [
+    ['ImplementationManager', 'Callie Burns'], ['Implementation Manager', 'Admir Karamovic'],
+    ['ImplementationManagerUserAccount', 'Swetha Devakumar'], ['ImplementationManagerEmail', 'Andy Galindo']],
+  'Customer Success Manager': [
+    ['CustomerSuccessManager', 'Julio Ortiz'], ['Customer Success Manager', 'Elliott Jones'],
+    ['CustomerSuccessManagerUserAccount', 'Jessie Hobbs'], ['CustomerSuccessManagerEmail', 'Kennedy Wickham']],
+};
+
+function testRoleWrite() {
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  if (!appKey) throw new Error('CZ_APP_KEY is not set.');
+  var acct = czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId' })[0];
+  var byName = {};
+  var users = users_();
+  // Kennedy has a duplicate user (#120); use the real one.
+  Object.keys(users).forEach(function (id) { var u = users[id]; if (u.active && (!byName[u.name] || +id === PARTNER_REP_ID)) byName[u.name] = u; });
+  Logger.log('Writing to ' + acct.Name + ' (ChurnZero #' + acct.Id + ')');
+  Object.keys(ROLE_CANDIDATES).forEach(function (role) {
+    ROLE_CANDIDATES[role].forEach(function (c) {
+      var u = byName[c[1]];
+      if (!u) { Logger.log('  skip ' + c[0] + ': no active user named ' + c[1]); return; }
+      czSet_(appKey, acct.ExternalId, c[0], u.email);
+      Logger.log(role + ': tried "' + c[0] + '" with ' + c[1]);
+      Utilities.sleep(1500);
+    });
+  });
+  Logger.log('Done. In a minute, open VIP Law (OLD) in ChurnZero and note who is in Implementation Manager and Customer Success Manager — the names above tell us which attribute worked. Then clear both roles by hand.');
+}
+
 /* ---------- log ---------- */
 
 function logSheet_() {
