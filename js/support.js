@@ -1689,7 +1689,7 @@ function celebrate() {
   stage.className = 'cb-stage';
   // Transparent clips: HEVC with alpha for Safari, VP9 with alpha for everyone else.
   stage.innerHTML = `<video class="cb-star cb-star-video" muted playsinline loop preload="auto"${reduced ? '' : ' autoplay'} aria-hidden="true">`
-    + '<source src="assets/merlin-woohoo.mov?v=4" type=\'video/quicktime; codecs="hvc1"\'><source src="assets/merlin-woohoo.webm?v=4" type="video/webm"></video>'
+    + '<source src="assets/merlin-woohoo.mov?v=5" type=\'video/quicktime; codecs="hvc1"\'><source src="assets/merlin-woohoo.webm?v=5" type="video/webm"></video>'
     + '<div class="eyebrow cb-eyebrow">CS Support Team</div>'
     + '<div class="cb-headline"></div>'
     + '<div class="cb-sub">Merlin and friends are celebrating with you.</div>';
