@@ -33,7 +33,7 @@ async function loadCsm(force) {
       const [csm] = await Promise.all([mrrCall({ action: 'csm', force: !!force }), ensureTabData('impl'), loadExclusions()]);
       if (force) loadMrr(true); else prefetchMrr();
       const changed = !CSM.data || csm.built !== CSM.data.built || force;
-      CSM.data = Object.assign({ history: {}, health: { accounts: [], bad: 33, good: 67 } }, csm);
+      CSM.data = Object.assign({ history: {}, health: { accounts: [] } }, csm);
       try { sessionStorage.setItem(CSM_STORE, JSON.stringify(csm)); } catch (e) { /* full or private */ }
       CSM.error = '';
       if (!changed && !force) return;
@@ -53,7 +53,7 @@ function prefetchCsm() {
   if (CSM.data || CSM.loading) return;
   try {
     const saved = JSON.parse(sessionStorage.getItem(CSM_STORE) || 'null');
-    if (saved && saved.months && saved.history) CSM.data = Object.assign({ history: {}, health: { accounts: [], bad: 33, good: 67 } }, saved);
+    if (saved && saved.months && saved.history) CSM.data = Object.assign({ history: {}, health: { accounts: [] } }, saved);
   } catch (e) { /* private mode */ }
   loadCsm(false);
 }
@@ -110,10 +110,12 @@ async function csmWithEvents(fn) {
   fn();
 }
 
+// ChurnZero churn scores run the other way: the lower the score, the healthier the account.
+const CSM_HEALTH = { good: 33, bad: 67 };   // good under 33, okay 33–67, bad 67+
 function csmHealth(rep) {
-  const h = CSM.data.health;
-  const accts = (h.accounts || []).filter((a) => rep == null || a[1] === rep);
-  const grade = (a) => (a[2] == null ? 'none' : a[2] >= h.good ? 'good' : a[2] >= h.bad ? 'okay' : 'bad');
+  const h = CSM_HEALTH;
+  const accts = (CSM.data.health.accounts || []).filter((a) => rep == null || a[1] === rep);
+  const grade = (a) => (a[2] == null ? 'none' : a[2] < h.good ? 'good' : a[2] < h.bad ? 'okay' : 'bad');
   const by = { good: [], okay: [], bad: [], none: [] };
   accts.forEach((a) => by[grade(a)].push(a));
   return by;
@@ -207,7 +209,7 @@ function renderCsm() {
     <div class="mrr-panel-head csm-head"><h3>By rep <span id="csmExcl">${exclEntry()}</span></h3>
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
-    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score: good is ${CSM.data.health.good}+, okay ${CSM.data.health.bad}–${CSM.data.health.good}, bad under ${CSM.data.health.bad}. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
+    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
 }
 
 /* ---------- pop-ups ---------- */
@@ -236,7 +238,7 @@ function csmRetentionDrill(kind, rep) {
 function csmHealthDrill(rep) {
   const h = csmHealth(rep);
   const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', 'Unscored']];
-  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (a[2] ?? 999) - (b[2] ?? 999)).map((a) => ({ a, k, l })));
+  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (b[2] ?? -1) - (a[2] ?? -1)).map((a) => ({ a, k, l })));   // highest (worst) score first
   MRR.drill = null;
   mrrModal(`${rep} — account health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} unscored` : ''} · worst first`,
     `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th><th>Health</th><th>Churn score</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>

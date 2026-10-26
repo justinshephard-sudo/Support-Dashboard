@@ -502,7 +502,7 @@ var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
 var CSM_CACHE = 'csm8_';
-var HEALTH = { bad: 33, good: 67 };      // ChurnZero's own grading for every churn score
+var HEALTH = { good: 33, bad: 67 };      // churn score: lower is healthier — good under 33, bad 67+
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
 var AI_ADDON_TAB = 'AI Add-on Firms';
