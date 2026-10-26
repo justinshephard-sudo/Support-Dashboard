@@ -218,6 +218,10 @@
     <div class="meta-line">
       <span id="impl-updated" class="muted">Loading…</span> <span id="implExcl"></span>
       <span class="sync-note" id="implSync" hidden></span>
+      <span class="meta-sel" id="impl-rep-sel" hidden>
+        <label for="impl-rep">Rep</label>
+        <select id="impl-rep" class="fb-select"></select>
+      </span>
       <span class="meta-sel">
         <label for="impl-month">Month</label>
         <select id="impl-month" class="fb-select"></select>
@@ -225,6 +229,8 @@
     </div>
     <div class="wrap">
       <div id="impl-error" class="error-banner" hidden></div>
+      <div id="impl-mine" class="empty-note" hidden>This tab shows your own onboardings. We couldn’t match your sign-in to an account manager in ChurnZero yet. Ask a manager to add you.</div>
+      <div id="impl-body">
       <section class="section"><div id="impl-tiles" class="tiles"></div><p class="impl-note" id="impl-note" hidden></p></section>
 
       <section class="section">
@@ -259,6 +265,7 @@
           <div class="chart-card"><h3>Onboarding CSAT %</h3><canvas id="chart-impl-csat"></canvas></div>
         </div>
       </section>
+      </div>
     </div>
   </div>
 
