@@ -958,3 +958,21 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .sp-cc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--text-2)}
 .sp-cc span{font-weight:700}
 .sp-cc label{display:flex;align-items:center;gap:5px}
+/* Close onboarding + handoff form */
+.ho-backdrop{z-index:1001}
+.drill.ho{width:min(640px,100%)}
+.ho-form{display:flex;flex-direction:column;gap:14px}
+.ho-facts{font-size:13.5px;color:var(--text-2);line-height:1.5;margin:0}
+.ho-outcome{border:0;padding:0;margin:0}
+.ho-outcome legend,.ho-field>label{font-size:13px;font-weight:700;color:var(--text-1);margin-bottom:6px;display:block}
+.ho-seg{display:flex;flex-wrap:wrap;gap:6px}
+.ho-seg label{font-size:13px;font-weight:600;color:var(--text-2);background:var(--surface-2);border-radius:999px;padding:6px 12px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.ho-seg label:has(input:checked){background:var(--lm-blue);color:#fff}
+.ho-field[hidden]{display:none}
+.ho-field textarea,.ho-field input[type=text],.ho-field input[type=date],.ho-field input[type=number]{width:100%;font:inherit;font-size:14px;color:var(--text-1);background:var(--surface-2);border:1px solid var(--border-str);border-radius:var(--radius-sm);padding:8px 10px}
+.ho-field select{width:100%}
+.ho-yesno{display:flex;gap:14px;font-size:14px}
+.ho-req{color:var(--st-critical)}
+.ho-ph{font-size:11px;font-weight:600;color:var(--text-3);background:var(--surface-2);border-radius:999px;padding:1px 7px;margin-left:6px}
+.ho-actions{display:flex;gap:8px}
+.ho-open{white-space:nowrap;font-size:12.5px;padding:5px 11px}

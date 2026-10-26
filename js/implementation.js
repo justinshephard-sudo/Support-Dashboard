@@ -267,7 +267,7 @@ function implDrillSpec(col, label) {
   const who = IMPL.rep ? ` · ${IMPL.rep}` : '';
   switch (col) {
     case 'OpenOnboardings':
-      return snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today' + who, [...open]);
+      return Object.assign(snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today' + who, [...open]), { close: true });
     case 'NeedsScheduling':
       return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today' + who, open.filter((f) => !f.NextMeeting));
     case 'Over70':
@@ -339,9 +339,12 @@ function openImplDrill(col, label) {
   back.className = 'drill-backdrop';
   back.id = 'impl-drill';
   const count = spec.rows ? spec.rows.length : 0;
+  // Open onboardings can be closed (with the handoff form) by the firm's IM or a manager.
+  const closeCol = spec.close && spec.rows && spec.rows.some(canCloseOnboarding);
+  const closeCell = (r) => (closeCol ? `<td>${canCloseOnboarding(r) && r.FirmId ? `<button type="button" class="mgr-btn ho-open" data-close-firm="${esc(r.FirmId)}" data-name="${esc(r.Name)}">Close onboarding</button>` : ''}</td>` : '');
   const body = spec.rows && spec.rows.length
-    ? `<div class="table-wrap"><table class="drill-table"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}</tr></thead>`
-      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
+    ? `<div class="table-wrap"><table class="drill-table"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${closeCol ? '<th></th>' : ''}${overridesUnlocked ? '<th></th>' : ''}</tr></thead>`
+      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}</td>`).join('')}${closeCell(r)}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
   back.innerHTML = `<div class="drill" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
@@ -351,14 +354,18 @@ function openImplDrill(col, label) {
       </div>
       <div class="drill-body">${body}</div>
     </div>`;
-  back.addEventListener('click', (e) => { if (e.target === back) closeImplDrill(); });
+  back.addEventListener('click', (e) => {
+    if (e.target === back) { closeImplDrill(); return; }
+    const c = e.target.closest('[data-close-firm]');
+    if (c) openHandoff(c.dataset.closeFirm, c.dataset.name);
+  });
   back.querySelector('.drill-close').addEventListener('click', closeImplDrill);
   document.addEventListener('keydown', implDrillKey);
   document.body.appendChild(back);
   document.body.classList.add('drill-open');
   back.querySelector('.drill-close').focus();
 }
-function implDrillKey(e) { if (e.key === 'Escape') closeImplDrill(); }
+function implDrillKey(e) { if (e.key === 'Escape' && !document.getElementById('handoff')) closeImplDrill(); }
 function closeImplDrill() {
   const el = document.getElementById('impl-drill');
   if (!el) return;

@@ -80,6 +80,12 @@ function doPost(e) {
   var b;
   try { b = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'bad request' }); }
   try {
+    // Closing an onboarding is open to the firm's IM too (handoff.js checks the firm).
+    if (b.action === 'handoffStart' || b.action === 'closeOnboarding') {
+      var anyone = handoffAuth_(b.token);
+      if (!anyone.ok) return json_(anyone);
+      return json_(b.action === 'handoffStart' ? handoffStart_(b, anyone) : closeOnboarding_(b, anyone));
+    }
     var who = verify_(b.token);
     if (!who.ok) return json_(who);
     if (b.action === 'load') return json_(load_(!!b.force));
