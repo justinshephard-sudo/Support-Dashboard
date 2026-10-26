@@ -564,6 +564,33 @@ function testRoleWrite() {
   Logger.log('Done. In a minute, open VIP Law (OLD) in ChurnZero and note who is in Implementation Manager and Customer Success Manager — the names above tell us which attribute worked. Then clear both roles by hand.');
 }
 
+// Round 2: the first names didn't take with an email. Each try goes to a different rep so the
+// person who shows up names the [attribute, value format] that worked.
+var ROLE_CANDIDATES_2 = [
+  ['ImplementationManagerUserAccountId', 'id'], ['ImplementationManagerId', 'id'], ['ImplementationManagerUserAccount', 'id'],
+  ['ImplementationManager', 'id'], ['ImplementationManager', 'name'], ['Implementation Manager', 'name'],
+  ['ImplementationManagerUserAccount', 'name'], ['Role_ImplementationManager', 'email'],
+];
+var ROLE_TEST_USERS = ['Callie Burns', 'Admir Karamovic', 'Swetha Devakumar', 'Andy Galindo', 'Julio Ortiz', 'Elliott Jones', 'Jessie Hobbs', 'Clare Struzzi'];
+
+function testRoleWrite2() {
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  if (!appKey) throw new Error('CZ_APP_KEY is not set.');
+  var acct = czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId' })[0];
+  var byName = {}, users = users_();
+  Object.keys(users).forEach(function (id) { var u = users[id]; if (u.active && !byName[u.name]) byName[u.name] = u; });
+  Logger.log('Writing to ' + acct.Name + ' (ChurnZero #' + acct.Id + ') — Implementation Manager role only');
+  ROLE_CANDIDATES_2.forEach(function (c, i) {
+    var u = byName[ROLE_TEST_USERS[i]];
+    if (!u) { Logger.log('  skip: no active user named ' + ROLE_TEST_USERS[i]); return; }
+    var value = c[1] === 'id' ? String(u.id) : c[1] === 'name' ? u.name : u.email;
+    czSet_(appKey, acct.ExternalId, c[0], value);
+    Logger.log(u.name + ' ← "' + c[0] + '" = ' + c[1]);
+    Utilities.sleep(1500);
+  });
+  Logger.log('Done. In a minute, check who is in Implementation Manager on VIP Law (OLD).');
+}
+
 /* ---------- log ---------- */
 
 function logSheet_() {
