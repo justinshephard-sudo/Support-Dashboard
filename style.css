@@ -302,7 +302,7 @@ body.drill-open{overflow:hidden}
 .cb-layer.out{animation:cbOut .45s ease-in forwards}
 @keyframes cbIn{from{opacity:0}to{opacity:1}}
 @keyframes cbOut{to{opacity:0}}
-.cb-stage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;width:min(720px,92vw);z-index:3;mix-blend-mode:lighten}   /* the Woo-Hoo clip's black background melts into the dark backdrop */
+.cb-stage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;width:min(720px,92vw);z-index:3}
 .cb-star{width:clamp(130px,19vh,210px);height:auto;display:block;margin:0 auto 6px;filter:drop-shadow(0 16px 28px rgba(0,0,0,.45));animation:cbStar 1.2s cubic-bezier(.2,1.6,.4,1) both,cbBob 1.6s ease-in-out 1.2s infinite}
 @keyframes cbStar{from{transform:scale(0) rotate(-20deg)}to{transform:scale(1) rotate(0)}}
 @keyframes cbBob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-10px) rotate(2deg)}}
@@ -323,8 +323,7 @@ body.drill-open{overflow:hidden}
 @keyframes cbHopFlip{from{transform:scaleX(-1) translateY(0) rotate(2deg)}to{transform:scaleX(-1) translateY(-14px) rotate(-2deg)}}
 .cb-static-row{position:absolute;left:0;right:0;bottom:4vh;display:flex;justify-content:center;flex-wrap:wrap;gap:12px}
 .cb-static-row img{height:clamp(80px,14vh,140px);width:auto}
-.cb-star-video{width:auto;height:clamp(150px,32vh,320px);max-width:88vw;object-fit:contain;filter:none;
-  -webkit-mask-image:radial-gradient(closest-side,#000 78%,transparent);mask-image:radial-gradient(closest-side,#000 78%,transparent)}
+.cb-star-video{width:auto;height:clamp(150px,32vh,320px);max-width:88vw;object-fit:contain;filter:drop-shadow(0 14px 24px rgba(0,0,0,.35))}
 @media(max-height:620px){.cb-sub{display:none}.cb-star{width:110px}.cb-star-video{width:auto;height:140px}}
 .pf-link{font:700 13.5px var(--font);color:#fff;background:var(--grad-blue);border:none;border-radius:999px;padding:5px 14px;cursor:pointer;white-space:nowrap}
 .pf-link:hover{filter:brightness(1.06)}
