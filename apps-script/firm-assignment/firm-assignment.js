@@ -530,65 +530,23 @@ function testAssignWrite() {
 }
 
 /* ---------- one-off role write test (IM/CSM split; run from the editor) ----------
-   The Implementation Manager and Customer Success Manager roles can't be read back through
-   ChurnZero's read API, so this can't check itself. On VIP Law (OLD) it tries each likely
-   attribute name with a DIFFERENT rep, then logs which rep goes with which name: open the
-   account in ChurnZero, see who's in each role, and that tells us the name that works. */
-var ROLE_CANDIDATES = {
-  'Implementation Manager': [
-    ['ImplementationManager', 'Callie Burns'], ['Implementation Manager', 'Admir Karamovic'],
-    ['ImplementationManagerUserAccount', 'Swetha Devakumar'], ['ImplementationManagerEmail', 'Andy Galindo']],
-  'Customer Success Manager': [
-    ['CustomerSuccessManager', 'Julio Ortiz'], ['Customer Success Manager', 'Elliott Jones'],
-    ['CustomerSuccessManagerUserAccount', 'Jessie Hobbs'], ['CustomerSuccessManagerEmail', 'Kennedy Wickham']],
-};
-
-function testRoleWrite() {
-  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
-  if (!appKey) throw new Error('CZ_APP_KEY is not set.');
-  var acct = czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId' })[0];
-  var byName = {};
-  var users = users_();
-  // Kennedy has a duplicate user (#120); use the real one.
-  Object.keys(users).forEach(function (id) { var u = users[id]; if (u.active && (!byName[u.name] || +id === PARTNER_REP_ID)) byName[u.name] = u; });
-  Logger.log('Writing to ' + acct.Name + ' (ChurnZero #' + acct.Id + ')');
-  Object.keys(ROLE_CANDIDATES).forEach(function (role) {
-    ROLE_CANDIDATES[role].forEach(function (c) {
-      var u = byName[c[1]];
-      if (!u) { Logger.log('  skip ' + c[0] + ': no active user named ' + c[1]); return; }
-      czSet_(appKey, acct.ExternalId, c[0], u.email);
-      Logger.log(role + ': tried "' + c[0] + '" with ' + c[1]);
-      Utilities.sleep(1500);
-    });
-  });
-  Logger.log('Done. In a minute, open VIP Law (OLD) in ChurnZero and note who is in Implementation Manager and Customer Success Manager — the names above tell us which attribute worked. Then clear both roles by hand.');
-}
-
-// Round 2: the first names didn't take with an email. Each try goes to a different rep so the
-// person who shows up names the [attribute, value format] that worked.
-var ROLE_CANDIDATES_2 = [
-  ['ImplementationManagerUserAccountId', 'id'], ['ImplementationManagerId', 'id'], ['ImplementationManagerUserAccount', 'id'],
-  ['ImplementationManager', 'id'], ['ImplementationManager', 'name'], ['Implementation Manager', 'name'],
-  ['ImplementationManagerUserAccount', 'name'], ['Role_ImplementationManager', 'email'],
-];
-var ROLE_TEST_USERS = ['Callie Burns', 'Admir Karamovic', 'Swetha Devakumar', 'Andy Galindo', 'Julio Ortiz', 'Elliott Jones', 'Jessie Hobbs', 'Clare Struzzi'];
-
-function testRoleWrite2() {
+   Writing an unknown name makes ChurnZero create a new custom field, so this only uses
+   CustomerSuccessManager, which ChurnZero already recognises (it didn't create a field for
+   it). The value format is the open question: the ChurnZero user ID goes in with one rep and
+   the full name with another, so whoever shows up in the role names the format that works. */
+function testRoleWrite3() {
   var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
   if (!appKey) throw new Error('CZ_APP_KEY is not set.');
   var acct = czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId' })[0];
   var byName = {}, users = users_();
   Object.keys(users).forEach(function (id) { var u = users[id]; if (u.active && !byName[u.name]) byName[u.name] = u; });
-  Logger.log('Writing to ' + acct.Name + ' (ChurnZero #' + acct.Id + ') — Implementation Manager role only');
-  ROLE_CANDIDATES_2.forEach(function (c, i) {
-    var u = byName[ROLE_TEST_USERS[i]];
-    if (!u) { Logger.log('  skip: no active user named ' + ROLE_TEST_USERS[i]); return; }
-    var value = c[1] === 'id' ? String(u.id) : c[1] === 'name' ? u.name : u.email;
-    czSet_(appKey, acct.ExternalId, c[0], value);
-    Logger.log(u.name + ' ← "' + c[0] + '" = ' + c[1]);
-    Utilities.sleep(1500);
+  [['Julio Ortiz', 'id'], ['Elliott Jones', 'name']].forEach(function (t) {
+    var u = byName[t[0]];
+    czSet_(appKey, acct.ExternalId, 'CustomerSuccessManager', t[1] === 'id' ? String(u.id) : u.name);
+    Logger.log(u.name + ' ← CustomerSuccessManager = ' + t[1] + ' (' + (t[1] === 'id' ? u.id : u.name) + ')');
+    Utilities.sleep(2000);
   });
-  Logger.log('Done. In a minute, check who is in Implementation Manager on VIP Law (OLD).');
+  Logger.log('Done. In a minute, check who is in Customer Success Manager on ' + acct.Name + '.');
 }
 
 /* ---------- log ---------- */
