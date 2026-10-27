@@ -137,6 +137,8 @@ function renderImplMonth(label) {
   const none = IMPL.rep === IMPL_NONE;
   document.getElementById('impl-mine').hidden = !none;
   document.getElementById('impl-body').hidden = none;
+  renderImplTeam(label);
+  IMPL.current = label;
   if (none) return;
   const m = implRepMonth(IMPL.byLabel.get(label));
   if (!m) return;
@@ -156,7 +158,6 @@ function renderImplMonth(label) {
     return { label: d.label, slot: d.slot, value, delta, sub: d.sub ? d.sub(m) : null, onClick: () => openImplDrill(d.col, label) };
   });
   renderTiles('impl-tiles', tiles);
-  renderImplTeam(label);
   const note = document.getElementById('impl-note');
   const snapshotMissing = m.OpenOnboardings === '';
   note.hidden = !snapshotMissing;
@@ -170,21 +171,27 @@ function renderImplMonth(label) {
   if (document.getElementById('view-impl').classList.contains('active')) renderImplRepStages(label);
 }
 
-// Team stats strip above a rep's own tiles, so everyone sees how the whole team is doing.
+// Dark header with the whole team's numbers, shown to everyone (reps see their own tiles below it).
 function renderImplTeam(label) {
-  const box = document.getElementById('impl-team');
-  const title = document.getElementById('impl-tiles-title');
-  box.hidden = !IMPL.rep;
-  title.textContent = !IMPL.rep ? 'Team stats' : isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
-  if (!IMPL.rep) return;
+  const head = document.getElementById('impl-tiles-head');
+  head.hidden = !IMPL.rep || IMPL.rep === IMPL_NONE;
+  document.getElementById('impl-tiles-title').textContent = isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
   const m = IMPL.byLabel.get(label);
-  const v = (col, kind) => {
-    const n = toNumber(m[col]);
-    return n == null ? '–' : kind === 'pct' ? fmtPct(n) : kind === 'days' ? `${fmtNum(n)} days` : fmtNum(n);
+  if (!m) return;
+  const v = (d) => {
+    const n = toNumber(m[d.col]);
+    return n == null ? '–' : d.kind === 'pct' ? fmtPct(n) : d.kind === 'days' ? `${fmtNum(n)} days` : fmtNum(n);
   };
-  document.getElementById('impl-team-note').textContent = label;
-  document.getElementById('impl-team-strip').innerHTML = IMPL_TILES.map((d) =>
-    `<div class="impl-team-stat"><span>${esc(d.label)}</span><b>${v(d.col, d.kind)}</b></div>`).join('');
+  const order = [...IMPL_TILES].sort((a, b) => a.slot - b.slot);
+  document.getElementById('implHero').innerHTML = `
+    <div class="fa-hero-text">
+      <div class="loop-eyebrow">Team stats · ${esc(label)}</div>
+      <h2>Implementation <span>Scorecard</span></h2>
+      <p>${IMPL.rep && IMPL.rep !== IMPL_NONE ? `How the whole onboarding team is doing this month. ${isManager() ? esc(IMPL.rep) + '’s' : 'Your'} own numbers are below.` : 'How the whole onboarding team is doing this month. Click any tile below for the firms behind it.'}</p>
+      <div class="mrr-kpis impl-kpis">${order.map((d) => `<div class="mrr-kpi impl-kpi"><span>${esc(d.label)}</span><b>${v(d)}</b>${d.sub && d.sub(m) ? `<small>${esc(d.sub(m))}</small>` : ''}</div>`).join('')}</div>
+    </div>
+    <div class="fa-hero-art"><div class="loop-bubble">Building great onboardings, one firm at a time.</div>
+      <img src="assets/merlin-construction.webp" alt="Merlin in a hard hat" loading="lazy"></div>`;
 }
 
 // Per-rep table for the selected month (RepStats JSON written by the sync).
