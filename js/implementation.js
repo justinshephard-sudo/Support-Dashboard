@@ -50,6 +50,10 @@ async function initImplementation() {
   document.getElementById('impl-updated').textContent = updated && !Number.isNaN(updated.getTime())
     ? `ChurnZero data synced ${updated.toLocaleString()}` : 'ChurnZero data';
   implSetupRep();
+  document.getElementById('implHero').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-impl-col]');
+    if (t) openImplDrill(t.dataset.implCol, IMPL.current);
+  });
   if (latest) renderImplMonth(latest.Month);
   renderImplOverList();
   if (document.getElementById('view-impl').classList.contains('active')) drawImplCharts();
@@ -173,8 +177,10 @@ function renderImplMonth(label) {
 
 // Dark header with the whole team's numbers, shown to everyone (reps see their own tiles below it).
 function renderImplTeam(label) {
-  const head = document.getElementById('impl-tiles-head');
-  head.hidden = !IMPL.rep || IMPL.rep === IMPL_NONE;
+  // Whole team: the header IS the team's numbers, so the tiles below it (same numbers) are hidden and
+  // the header tiles open the firm lists instead. One rep: header = team, tiles below = theirs.
+  const mine = !!IMPL.rep && IMPL.rep !== IMPL_NONE;
+  document.getElementById('impl-tiles-section').hidden = !mine;
   document.getElementById('impl-tiles-title').textContent = isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
   const m = IMPL.byLabel.get(label);
   if (!m) return;
@@ -183,12 +189,25 @@ function renderImplTeam(label) {
     return n == null ? '–' : d.kind === 'pct' ? fmtPct(n) : d.kind === 'days' ? `${fmtNum(n)} days` : fmtNum(n);
   };
   const order = [...IMPL_TILES].sort((a, b) => a.slot - b.slot);
+  const prev = IMPL.byLabel.get(implPrevLabel(label));
+  const trend = (d) => {
+    const cur = toNumber(m[d.col]), p = prev ? toNumber(prev[d.col]) : null;
+    if (!d.goodDir || cur == null || p == null || p === 0 || (d.col === 'ClosedOnboardings' && label === IMPL.months[IMPL.months.length - 1].Month)) return '';
+    const pct = ((cur - p) / Math.abs(p)) * 100;
+    const good = d.goodDir === 'down' ? pct < 0 : pct > 0;
+    return ` <em class="${good ? 'up' : 'down'}">${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}% vs last mo</em>`;
+  };
+  const tile = (d) => {
+    const sub = d.sub && d.sub(m);
+    const inner = `<span>${esc(d.label)}</span><b>${v(d)}</b>${sub || trend(d) ? `<small>${sub ? esc(sub) : ''}${trend(d)}</small>` : ''}`;
+    return mine ? `<div class="mrr-kpi impl-kpi">${inner}</div>` : `<button type="button" class="mrr-kpi" data-impl-col="${d.col}">${inner}</button>`;
+  };
   document.getElementById('implHero').innerHTML = `
     <div class="fa-hero-text">
       <div class="loop-eyebrow">Team stats · ${esc(label)}</div>
       <h2>Implementation <span>Scorecard</span></h2>
-      <p>${IMPL.rep && IMPL.rep !== IMPL_NONE ? `How the whole onboarding team is doing this month. ${isManager() ? esc(IMPL.rep) + '’s' : 'Your'} own numbers are below.` : 'How the whole onboarding team is doing this month. Click any tile below for the firms behind it.'}</p>
-      <div class="mrr-kpis impl-kpis">${order.map((d) => `<div class="mrr-kpi impl-kpi"><span>${esc(d.label)}</span><b>${v(d)}</b>${d.sub && d.sub(m) ? `<small>${esc(d.sub(m))}</small>` : ''}</div>`).join('')}</div>
+      <p>${IMPL.rep && IMPL.rep !== IMPL_NONE ? `How the whole onboarding team is doing this month. ${isManager() ? esc(IMPL.rep) + '’s' : 'Your'} own numbers are below.` : 'How the whole onboarding team is doing this month. Click any number for the firms behind it.'}</p>
+      <div class="mrr-kpis impl-kpis">${order.map(tile).join('')}</div>
     </div>
     <div class="fa-hero-art"><div class="loop-bubble">Building great onboardings, one firm at a time.</div>
       <img src="assets/merlin-construction.webp" alt="Merlin in a hard hat" loading="lazy"></div>`;
