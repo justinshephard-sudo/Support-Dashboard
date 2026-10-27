@@ -839,6 +839,18 @@ button.mrr-stat span{color:var(--lm-blue)}
 .mrr-kpi:not(.up):not(.down) b{color:#fff}
 .csm-head{margin:20px 0 12px}
 .csm-rep-pick{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--text-2)}
+.csm-grid-solo{grid-template-columns:1fr}
+.csm-card.csm-solo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:24px}
+.csm-solo>header,.csm-solo>.csm-ret{grid-column:1/-1}
+.csm-solo h3{font-size:22px}
+.csm-solo .csm-ret{gap:10px;max-width:760px}
+.csm-solo .csm-ret button{padding:14px 10px}
+.csm-solo .csm-ret b{font-size:26px}
+.csm-solo .csm-ret-l{font-size:14px}
+.csm-solo .csm-row{padding:16px 18px;gap:8px 12px}
+.csm-solo .csm-row>b{font-size:26px}
+.csm-solo .csm-meter{height:10px}.csm-solo .csm-health{height:14px}
+@media(max-width:700px){.csm-card.csm-solo{grid-template-columns:1fr}}
 .csm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
 .csm-card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:16px;display:flex;flex-direction:column;gap:10px}
 .csm-card header{display:flex;align-items:center;gap:10px}
@@ -956,3 +968,8 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .sp-cc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--text-2)}
 .sp-cc span{font-weight:700}
 .sp-cc label{display:flex;align-items:center;gap:5px}
+/* Implementation: team stats above a rep's own numbers */
+.impl-team-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.impl-team-stat{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.impl-team-stat span{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3)}
+.impl-team-stat b{font-size:22px;font-variant-numeric:tabular-nums;color:var(--text-1)}

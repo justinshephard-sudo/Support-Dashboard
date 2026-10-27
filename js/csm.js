@@ -170,18 +170,19 @@ function renderCsm() {
   }
   const reps = view ? [view] : allReps;
   const who = view || null;
-  const team = { 6: csmRetention(6, who), 13: csmRetention(13, who), bob: csmRetention('bob', who) };
-  const tile = (metric, kind, label) => `<button type="button" class="mrr-kpi ${csmTo(metric, kind, team[kind][metric])}" data-csm-ret="${metric}" data-kind="${kind}"${who ? ` data-rep="${esc(who)}"` : ''}><span>${label} ${metric.toUpperCase()}</span><b>${csmPct(team[kind][metric])}</b><small>${who ? esc(who.split(' ')[0]) : 'Team'} · ${mrrPlural(team[kind].book.length, 'firm')} · how ⓘ</small></button>`;
+  // The hero always shows the whole team, so everyone sees the team's goals; the cards below are the rep's own.
+  const team = { 6: csmRetention(6), 13: csmRetention(13), bob: csmRetention('bob') };
+  const tile = (metric, kind, label) => `<button type="button" class="mrr-kpi ${csmTo(metric, kind, team[kind][metric])}" data-csm-ret="${metric}" data-kind="${kind}"><span>${label} ${metric.toUpperCase()}</span><b>${csmPct(team[kind][metric])}</b><small>Team · ${mrrPlural(team[kind].book.length, 'firm')} · how ⓘ</small></button>`;
 
   document.getElementById('csmHero').innerHTML = `
     <div class="fa-hero-text">
-      <div class="loop-eyebrow">Customer Success Managers · ${esc(mrrYmLabel(cur))}</div>
+      <div class="loop-eyebrow">Team stats · ${esc(mrrYmLabel(cur))}</div>
       <h2>CSM <span>Scorecard</span></h2>
       <p>Retention, growth, AI upsells and account health for each rep’s book. Click any number for the firms behind it.</p>
       <div class="mrr-kpis csm-kpis">
         ${tile('nrr', 6, '6-month')}${tile('nrr', 13, '13-month')}${tile('nrr', 'bob', 'All-time')}${tile('grr', 6, '6-month')}${tile('grr', 13, '13-month')}${tile('grr', 'bob', 'All-time')}
       </div>
-      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="${esc(who || '')}">${who ? 'Cohort analysis' : 'Team cohort analysis'}</button>
+      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="">Team cohort analysis</button>
         <span class="mrr-sync">${hist.checkpoint ? `6- and 13-month: firms that signed up in ${esc(mrrYmLabel(hist.cohort6))} and ${esc(mrrYmLabel(hist.cohort13))}, as of the end of ${esc(mrrYmLabel(hist.checkpoint))} · All-time: every firm since ${esc(mrrYmLabel(hist.first))}, as of now` : esc(hist.error || '')}</span></div>
     </div>
     <div class="fa-hero-art">
@@ -190,6 +191,7 @@ function renderCsm() {
     </div>`;
 
   const min = mrrAddYm(cur, -12);
+  const solo = !!who;   // one rep's book fills the page instead of sitting as one small card
   const cards = reps.map((rep) => {
     const r = { 6: csmRetention(6, rep), 13: csmRetention(13, rep), bob: csmRetention('bob', rep) };
     const cell = (metric, kind) => `<button type="button" data-csm-ret="${metric}" data-kind="${kind}" data-rep="${esc(rep)}" aria-label="${CSM_WINDOWS[kind]} ${metric.toUpperCase()}"><b class="${csmTo(metric, kind, r[kind][metric])}">${csmPct(r[kind][metric])}</b></button>`;
@@ -199,7 +201,7 @@ function renderCsm() {
     const pct = Math.min(100, (m.aiAdded / CSM_AI_TARGET) * 100);
     const ai = csmAiHealth(rep);
     const aiTotal = ai.good.length + ai.okay.length + ai.bad.length + ai.none.length;
-    return `<article class="csm-card">
+    return `<article class="csm-card${solo ? ' csm-solo' : ''}">
       <header><span class="fa-av">${esc(rep.split(' ').map((w) => w[0]).slice(0, 2).join(''))}</span><h3>${esc(rep)}</h3>
         <button type="button" class="csm-cohort-btn" data-csm-cohort="${esc(rep)}">Cohort analysis</button></header>
       <div class="csm-ret">
@@ -227,7 +229,7 @@ function renderCsm() {
     <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry()}</span></h3>
       ${isManager() ? `<label class="csm-rep-pick">Rep <select class="fb-select" id="csmRep"><option value="">Whole team</option>${allReps.map((r) => `<option value="${esc(r)}"${r === view ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>` : ''}
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
-    ${reps.length ? `<div class="csm-grid">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
+    ${reps.length ? `<div class="csm-grid${solo ? ' csm-grid-solo' : ''}">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
     <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
 }
 
