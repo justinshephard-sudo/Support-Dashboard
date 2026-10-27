@@ -156,6 +156,7 @@ function renderImplMonth(label) {
     return { label: d.label, slot: d.slot, value, delta, sub: d.sub ? d.sub(m) : null, onClick: () => openImplDrill(d.col, label) };
   });
   renderTiles('impl-tiles', tiles);
+  renderImplTeam(label);
   const note = document.getElementById('impl-note');
   const snapshotMissing = m.OpenOnboardings === '';
   note.hidden = !snapshotMissing;
@@ -167,6 +168,23 @@ function renderImplMonth(label) {
   IMPL.current = label;
   // Chart.js can't size a canvas inside a hidden tab; drawImplCharts() catches up on open.
   if (document.getElementById('view-impl').classList.contains('active')) renderImplRepStages(label);
+}
+
+// Team stats strip above a rep's own tiles, so everyone sees how the whole team is doing.
+function renderImplTeam(label) {
+  const box = document.getElementById('impl-team');
+  const title = document.getElementById('impl-tiles-title');
+  box.hidden = !IMPL.rep;
+  title.textContent = !IMPL.rep ? 'Team stats' : isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
+  if (!IMPL.rep) return;
+  const m = IMPL.byLabel.get(label);
+  const v = (col, kind) => {
+    const n = toNumber(m[col]);
+    return n == null ? '–' : kind === 'pct' ? fmtPct(n) : kind === 'days' ? `${fmtNum(n)} days` : fmtNum(n);
+  };
+  document.getElementById('impl-team-note').textContent = label;
+  document.getElementById('impl-team-strip').innerHTML = IMPL_TILES.map((d) =>
+    `<div class="impl-team-stat"><span>${esc(d.label)}</span><b>${v(d.col, d.kind)}</b></div>`).join('');
 }
 
 // Per-rep table for the selected month (RepStats JSON written by the sync).
