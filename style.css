@@ -996,3 +996,6 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .impl-kpi{cursor:default}
 .impl-kpi:hover{transform:none;background:rgba(255,255,255,.08)}
 .impl-hero:empty{display:none}
+#impl-tiles-section[hidden]{display:none}
+.impl-kpis .mrr-kpi small em{font-style:normal;font-weight:600}
+.impl-kpis .mrr-kpi small em.up{color:#5fe0a0}.impl-kpis .mrr-kpi small em.down{color:#ff8a7a}
