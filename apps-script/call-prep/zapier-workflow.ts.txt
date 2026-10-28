@@ -20,11 +20,15 @@ type Input = z.infer<typeof InputSchema>;
 // The trigger is a raw catch hook (Zapier's parsed hook once dropped a long transcript's body), so
 // the request body arrives as a string under content/body; parse it here.
 function normalizeInput(raw: unknown): unknown {
-  if (typeof raw === "string") return JSON.parse(raw);
-  const r = (raw ?? {}) as Record<string, unknown>;
-  if (typeof r.requestId === "string") return r;
-  const body = [r.content, r.body, r.raw_body].find((v) => typeof v === "string" && v.trim().startsWith("{"));
-  return body ? JSON.parse(body as string) : r;
+  try {
+    if (typeof raw === "string") return JSON.parse(raw);
+    const r = (raw ?? {}) as Record<string, unknown>;
+    if (typeof r.requestId === "string") return r;
+    const body = [r.content, r.body, r.raw_body].find((v) => typeof v === "string" && v.trim().startsWith("{"));
+    return body ? JSON.parse(body as string) : r;
+  } catch {
+    return {};
+  }
 }
 
 // The model wraps JSON in a code fence now and then; take the outermost object.
@@ -35,7 +39,10 @@ function parsePrep(text: string): unknown {
 }
 
 export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ctx, rawInput) => {
-  const input = InputSchema.parse(normalizeInput(rawInput));
+  // The hook URL also gets empty pings (no body) from outside checks; skip those quietly instead of failing.
+  const parsed = InputSchema.safeParse(normalizeInput(rawInput));
+  if (!parsed.success) return { skipped: true, reason: "not a call-prep request" };
+  const input = parsed.data;
 
   const completion = await ctx.step("write-call-prep", async () =>
     sdk.runAction({
