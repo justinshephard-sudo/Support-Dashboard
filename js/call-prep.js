@@ -180,9 +180,9 @@ function obDanceParty(firm, d) {
   layer.innerHTML = `<div class="cb-stage">
       <video class="cb-star cb-star-video" muted playsinline loop autoplay aria-hidden="true">
         <source src="assets/merlin-woohoo.mov?v=5" type='video/quicktime; codecs="hvc1"'><source src="assets/merlin-woohoo.webm?v=5" type="video/webm"></video>
-      <div class="eyebrow cb-eyebrow">Onboarding complete${d.dryRun ? ' · dry run' : ''}</div>
+      <div class="eyebrow cb-eyebrow">Onboarding complete${d.preview ? ' · preview' : d.dryRun ? ' · dry run' : ''}</div>
       <div class="cb-headline pop">${esc(firm)}</div>
-      <div class="cb-sub">${d.dryRun ? 'Local test — nothing was written to ChurnZero.' : d.confirmed ? 'Marked Complete in ChurnZero. Nice work!' : 'Sent to ChurnZero — it can take a minute to show.'}</div>
+      <div class="cb-sub">${d.preview ? 'Just a preview — no firm was touched.' : d.dryRun ? 'Local test — nothing was written to ChurnZero.' : d.confirmed ? 'Marked Complete in ChurnZero. Nice work!' : 'Sent to ChurnZero — it can take a minute to show.'}</div>
     </div>`;
   document.body.appendChild(layer);
   cbRain(layer, 120, 8);

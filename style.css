@@ -1028,8 +1028,11 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 @media(max-width:700px){.cp-grid{grid-template-columns:1fr}.cp-merlin{display:none}}
 /* Onboarding complete */
 .ob-done-cell{text-align:right!important;white-space:nowrap!important}
-.ob-done-btn{font:700 12.5px var(--font);color:#fff;background:linear-gradient(90deg,#0ca35a,#13c27a);border:none;border-radius:999px;padding:6px 12px;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(12,163,90,.25)}
-.ob-done-btn:hover{filter:brightness(1.06)}
+.ob-done-btn{font:600 11.5px var(--font);color:var(--st-good);background:rgba(12,163,90,.1);border:1px solid rgba(12,163,90,.25);border-radius:999px;padding:3px 9px;cursor:pointer;white-space:nowrap}
+.ob-done-btn:hover{background:rgba(12,163,90,.18)}
+.ob-actions .ob-go{color:#fff;background:linear-gradient(90deg,#0ca35a,#13c27a);border:none;box-shadow:0 2px 8px rgba(12,163,90,.25)}
+.ob-actions .ob-go:hover{filter:brightness(1.06)}
+.ob-preview{font:600 12px var(--font);color:var(--lm-blue);background:none;border:none;padding:0;margin-left:8px;cursor:pointer;text-decoration:underline}
 .ob-done-btn:disabled{opacity:.6;cursor:progress}
 .ob-done-tag{font-size:12.5px;font-weight:700;color:var(--st-good)}
 .drill.ob-confirm{width:min(460px,100%)}
