@@ -981,3 +981,22 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 /* Local test environment banner */
 .local-banner{position:relative;z-index:60;background:#ffd23f;color:#3a2a00;font:700 13px var(--font);text-align:center;padding:5px 10px;letter-spacing:.02em}
 .local-banner.live{background:#ff4f4f;color:#fff}
+/* Call prep */
+.cp-btn{font:600 12px var(--font);color:var(--lm-blue);background:var(--surface-2);border:1px solid transparent;border-radius:999px;padding:3px 10px;margin-left:8px;cursor:pointer;white-space:nowrap;vertical-align:middle}
+.cp-btn:hover{border-color:var(--border-str)}
+.cp-backdrop{z-index:1001}
+.drill.cp{width:min(860px,100%)}
+.cp-head{background:var(--surface-2);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:16px}
+.cp-next{font-size:18px;font-weight:700;color:var(--text-1)}
+.cp-one{font-size:14px;color:var(--text-1);margin:6px 0 0}
+.cp-meta{font-size:12.5px;color:var(--text-3);margin:8px 0 0;line-height:1.5}
+.cp-meta a{color:var(--lm-blue)}
+.cp-sec h4{font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);margin:0 0 6px}
+.cp-sec ul,.cp-sec ol{margin:0;padding-left:18px;font-size:13.5px;color:var(--text-1);line-height:1.5}
+.cp-agenda{margin-bottom:16px}
+.cp-agenda li{margin-bottom:4px}
+.cp-agenda li span{display:block;font-size:12.5px;color:var(--text-3)}
+.cp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px}
+.cp-none{font-size:13px;color:var(--text-3);margin:0}
+.cp-foot{font-size:12px;color:var(--text-3);margin-top:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+@media(max-width:700px){.cp-grid{grid-template-columns:1fr}}
