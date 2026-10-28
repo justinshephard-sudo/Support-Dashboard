@@ -31,6 +31,9 @@ var CLAUDE_MODEL = 'claude-opus-5-5';
 var GONG_LOOKBACK_DAYS = 150;
 var CACHE_HOURS = 12;
 // Catch hook of the Zapier workflow "CS Dashboard – Call Prep" (ZAPIER_HOOK_URL overrides it).
+// Where Zapier posts the finished prep: this web app's public /exec address. (ScriptApp.getService().getUrl()
+// can give a lawmatics.com-only or /dev address, which Zapier can't reach.)
+var CALLBACK_URL = 'https://script.google.com/macros/s/AKfycbwltwhfY4-dLO6F5uyfzxIXIMcb_N0_zrk-2q0atrk_c8fMj4USTTcEJK4QsChbmAVR/exec';
 var ZAPIER_HOOK_DEFAULT = 'https://hooks.zapier.com/hooks/catch/14095940/UmLNkN2lGE4oKLuI/';
 
 // What each call normally covers (CS Onboarding Roadmap deck). Call numbers follow the
@@ -124,7 +127,7 @@ function prep_(b, who) {
   var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
   cache.put('req_' + requestId, JSON.stringify({ secret: secret, key: key, shell: out, at: Date.now() }), 3600);
   var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ requestId: requestId, token: secret, callbackUrl: ScriptApp.getService().getUrl(),
+    payload: JSON.stringify({ requestId: requestId, token: secret, callbackUrl: CALLBACK_URL,
       instructions: prompt.system + '\n\n' + prompt.task + '\n\nReturn ONLY a JSON object (no code fence) with exactly these keys: ' +
         JSON.stringify(PREP_SCHEMA.properties, null, 0),
       context: prompt.context, transcript: transcript || '' }) });
@@ -164,7 +167,7 @@ var PREP_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['nextCall', 'oneLiner', 'lastCallRecap', 'firmCommitments', 'ourCommitments', 'openItems', 'agenda', 'attendees', 'watchFor'],
   properties: {
-    nextCall: { type: 'string', description: 'Which call is next, e.g. "Call 2 — Forms/documents review + initial automation review"' },
+    nextCall: { type: 'string', description: 'Which call is next, short, e.g. "Call 2 — Forms & documents review" (no date)' },
     oneLiner: { type: 'string', description: 'One sentence on where this onboarding stands' },
     lastCallRecap: { type: 'array', items: { type: 'string' }, description: 'What was covered and decided on the last call' },
     firmCommitments: { type: 'array', items: { type: 'string' }, description: 'What the firm said they would do or send' },
@@ -182,7 +185,9 @@ var PREP_SCHEMA = {
 function prepPrompt_(firm, last, calls) {
   var system = 'You prepare Lawmatics implementation managers for their next onboarding call with a law firm. ' +
     'Be specific and practical: names, dates, documents and automations from the transcript, not generic advice. ' +
-    'Keep every bullet short (one line). Leave a list empty rather than guessing. Never invent what was said.\n\n' +
+    'This is read in the minute before a call, so be brief: at most 5 bullets per list and at most 6 agenda items, ' +
+    'each bullet under 15 words, the agenda "why" under 12 words, the one-liner under 30 words. Keep only what matters for the next call. ' +
+    'Leave a list empty rather than guessing. Never invent what was said.\n\n' +
     'Our standard onboarding plan:\n' + CALL_PLAN;
   var context = 'Firm: ' + JSON.stringify(firm) + '\n\n' +
     (last ? 'Most recent Gong call with this firm: "' + last.title + '" on ' + last.started + ' (' + Math.round((last.duration || 0) / 60) + ' min). ' +
@@ -341,7 +346,9 @@ function checkKeys() {
   Logger.log('Gong: ' + ((g && g.users) || []).length + ' users on the first page');
   var p = PropertiesService.getScriptProperties();
   Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
-  Logger.log('Web app URL (Zapier posts results here): ' + ScriptApp.getService().getUrl());
+  Logger.log('Zapier posts results to: ' + CALLBACK_URL);
+  var ping = UrlFetchApp.fetch(CALLBACK_URL, { muteHttpExceptions: true, followRedirects: true });
+  Logger.log('That address answers: HTTP ' + ping.getResponseCode() + ' ' + ping.getContentText().slice(0, 120));
 }
 
 // Starts a real prep for one firm (as a manager) and logs the request — e.g. checkPrep('5447').
