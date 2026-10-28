@@ -999,3 +999,6 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 #impl-tiles-section[hidden]{display:none}
 .impl-kpis .mrr-kpi small em{font-style:normal;font-weight:600}
 .impl-kpis .mrr-kpi small em.up{color:#5fe0a0}.impl-kpis .mrr-kpi small em.down{color:#ff8a7a}
+/* Local test environment banner */
+.local-banner{position:relative;z-index:60;background:#ffd23f;color:#3a2a00;font:700 13px var(--font);text-align:center;padding:5px 10px;letter-spacing:.02em}
+.local-banner.live{background:#ff4f4f;color:#fff}

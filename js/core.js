@@ -23,6 +23,40 @@ const SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
 const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
 // Web app that writes manager cell-corrections to the NEW sheet's Overrides tab.
 // Deploy apps-script/data-overrides.gs on CS Report Master and paste its /exec URL here.
+/* ---- Local test environment (http://localhost:8197 on Justin's Mac) ----
+   Same data and sign-in as the live site, but nothing that writes goes out: any backend call
+   that isn't a read is answered with a "dry run" error instead of being sent. A backend that
+   supports dry runs itself (DRY_RUN_OK) gets the call with dryRun: true, so it can show what it
+   would have written. To really write from local, run in the console:
+   localStorage.setItem('cs-live-writes', 'on')   (and remove it after). */
+const LOCAL_ENV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const DRY_RUN = LOCAL_ENV && (() => { try { return localStorage.getItem('cs-live-writes') !== 'on'; } catch (e) { return true; } })();
+const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart'];
+const DRY_RUN_OK = {};   // backend URL → actions it accepts with dryRun: true (filled in by the tabs that have them)
+if (DRY_RUN) {
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (!/^https:\/\/script\.google\.com\//.test(u) || !opts.body || (opts.method || 'GET').toUpperCase() !== 'POST') return realFetch(url, opts);
+    let body = {};
+    try { body = JSON.parse(opts.body); } catch (e) { /* not JSON */ }
+    const base = u.split('?')[0];
+    if (u.startsWith(CONTRACTS_WEBAPP_URL) || READ_ACTIONS.includes(body.action)) return realFetch(url, opts);
+    if ((DRY_RUN_OK[base] || []).includes(body.action)) return realFetch(url, { ...opts, body: JSON.stringify({ ...body, dryRun: true }) });
+    console.warn('[local] dry run — not sent:', body.action || '(manager edit)', body);
+    return new Response(JSON.stringify({ ok: false, error: `Local test: “${body.action || 'save'}” wasn’t sent (dry run).` }), { headers: { 'Content-Type': 'application/json' } });
+  };
+}
+if (LOCAL_ENV) {
+  document.addEventListener('DOMContentLoaded', () => {
+    const b = document.createElement('div');
+    b.className = 'local-banner';
+    b.textContent = DRY_RUN ? 'Local test · changes are dry runs — nothing is written' : 'Local test · LIVE WRITES ON';
+    if (!DRY_RUN) b.classList.add('live');
+    document.body.prepend(b);
+  });
+}
+
 const DATA_OVERRIDES_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxcel6P0QYZm8m3FKYDFtOOBLpRL6_KvrmIcS5ShrAbuTUPFXSrLtQ3SLDhrDeg6-pSww/exec';
 // Managers see the Manager-mode toggle and manager pages. The live list is the "Dashboard
 // Config" tab of the Support Team Report sheet (the backends read the same tab); this is
