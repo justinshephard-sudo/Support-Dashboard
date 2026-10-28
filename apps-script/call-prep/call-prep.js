@@ -19,7 +19,7 @@
      GONG_BASIC             Gong API "Basic" token (base64 of key:secret), as used by the
                             first-onboarding Zap — or GONG_ACCESS_KEY + GONG_ACCESS_SECRET
      GONG_BASE_URL          optional, defaults to Lawmatics' https://us-32500.api.gong.io
-     ZAPIER_HOOK_URL        the workflow's catch-hook URL
+     ZAPIER_HOOK_URL        optional, overrides the workflow's catch-hook URL below
      ANTHROPIC_API_KEY      optional (direct Claude instead of Zapier)
 
    Deploy: Web app · Execute as: Me · Who has access: Anyone. Each request must carry a
@@ -30,6 +30,8 @@ var CZ_BASE = 'https://lawmatics.us1app.churnzero.net/public/v1';
 var CLAUDE_MODEL = 'claude-opus-5-5';
 var GONG_LOOKBACK_DAYS = 150;
 var CACHE_HOURS = 12;
+// Catch hook of the Zapier workflow "CS Dashboard – Call Prep" (ZAPIER_HOOK_URL overrides it).
+var ZAPIER_HOOK_DEFAULT = 'https://hooks.zapier.com/hooks/catch/14095940/UmLNkN2lGE4oKLuI/';
 
 // What each call normally covers (CS Onboarding Roadmap deck). Call numbers follow the
 // ChurnZero onboarding stages ("First Onboarding" = call 1, …).
@@ -117,7 +119,7 @@ function prep_(b, who) {
     return out;
   }
   // Through Zapier: hand off, then the dashboard polls prepStatus until prepResult lands.
-  var hook = props.getProperty('ZAPIER_HOOK_URL');
+  var hook = props.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT;
   if (!hook) throw new Error('The Zapier hook (ZAPIER_HOOK_URL) isn’t set up yet.');
   var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
   cache.put('req_' + requestId, JSON.stringify({ secret: secret, key: key, shell: out, at: Date.now() }), 3600);
@@ -187,7 +189,8 @@ function prepPrompt_(firm, last, calls) {
       calls.length + ' Gong call(s) with the firm in the last ' + GONG_LOOKBACK_DAYS + ' days: ' +
       calls.slice(0, 8).map(function (c) { return c.started.slice(0, 10) + ' ' + c.title; }).join('; ')
       : 'There is no Gong recording with this firm yet, so base the prep on the stage, the sales notes and the standard plan.');
-  var task = 'Work out which call is next from the ChurnZero stage ("' + firm.stage + '") and the calls already held, then write the prep sheet for that call. ' +
+  var task = 'Today is ' + Utilities.formatDate(new Date(), 'America/Los_Angeles', 'EEEE, MMM d, yyyy') + '. ' +
+    'Work out which call is next from the ChurnZero stage ("' + firm.stage + '") and the calls already held, then write the prep sheet for that call. ' +
     'The agenda should follow our plan for that call, adjusted for what is still open from the last call.';
   return { system: system, context: context, task: task };
 }
@@ -337,7 +340,7 @@ function checkKeys() {
   var g = gongFetch_('/v2/users');
   Logger.log('Gong: ' + ((g && g.users) || []).length + ' users on the first page');
   var p = PropertiesService.getScriptProperties();
-  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') ? 'set' : 'MISSING') + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
+  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
   Logger.log('Web app URL (Zapier posts results here): ' + ScriptApp.getService().getUrl());
 }
 

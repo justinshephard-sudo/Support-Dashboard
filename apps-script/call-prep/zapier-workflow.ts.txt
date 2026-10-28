@@ -55,23 +55,26 @@ export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ct
   const text = String(item.prep_json ?? item.output ?? "");
   const prep = parsePrep(text);
 
-  const delivered = await ctx.step({
-    name: "send-prep-to-dashboard",
-    maxAttempts: 3,
-    retryDelaySeconds: 5,
-    run: async () => {
-      const res = await fetch(input.callbackUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          action: "prepResult", requestId: input.requestId, token: input.token,
-          prep, error: prep ? null : "The AI's answer couldn't be read. Try Regenerate.",
-        }),
-        redirect: "follow",
-      });
-      return { status: res.status, body: (await res.text()).slice(0, 300) };
-    },
+  const payload = JSON.stringify({
+    action: "prepResult", requestId: input.requestId, token: input.token,
+    prep, error: prep ? null : "The AI's answer couldn't be read. Try Regenerate.",
   });
 
-  return { requestId: input.requestId, parsed: !!prep, delivered };
+  // Workflow code can't reach outside hosts directly, so the result goes back through Webhooks by Zapier.
+  const delivered = await ctx.step("send-prep-to-dashboard", async () =>
+    sdk.runAction({
+      appKey: "WebHookCLIAPI",
+      actionType: "write",
+      actionKey: "custom",
+      inputs: {
+        url: input.callbackUrl,
+        method: "POST",
+        data: payload,
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        unflatten: "no",
+      },
+    }),
+  );
+
+  return { requestId: input.requestId, parsed: !!prep, delivered: delivered.data[0] ?? null };
 });
