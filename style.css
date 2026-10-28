@@ -1002,3 +1002,43 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 /* Local test environment banner */
 .local-banner{position:relative;z-index:60;background:#ffd23f;color:#3a2a00;font:700 13px var(--font);text-align:center;padding:5px 10px;letter-spacing:.02em}
 .local-banner.live{background:#ff4f4f;color:#fff}
+/* Call prep */
+.cp-btn{font:600 12px var(--font);color:var(--lm-blue);background:var(--surface-2);border:1px solid transparent;border-radius:999px;padding:3px 10px;margin-left:8px;cursor:pointer;white-space:nowrap;vertical-align:middle}
+.cp-btn:hover{border-color:var(--border-str)}
+.cp-backdrop{z-index:1001}
+.drill.cp{width:min(880px,100%)}
+.cp-hero{position:relative;display:flex;gap:12px;align-items:flex-end;background:var(--lm-navy);background-image:radial-gradient(500px 220px at 95% -30%,rgba(0,207,220,.28),transparent 60%),radial-gradient(420px 200px at 0% 140%,rgba(6,139,255,.3),transparent 60%);color:#fff;border-radius:20px;padding:18px 20px 16px;margin-bottom:18px;overflow:hidden}
+.cp-hero-text{flex:1;min-width:0}
+.cp-eyebrow{font-size:11.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7fd8ff}
+.cp-next{font-size:21px;font-weight:700;line-height:1.2;margin-top:4px;background:linear-gradient(90deg,#fff,#bfe6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.cp-one{font-size:14px;color:#d5e1ee;margin:8px 0 0;line-height:1.45}
+.cp-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.cp-pills span{font-size:12.5px;font-weight:600;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:4px 10px;color:#e8f0f8}
+.cp-pills a{color:#9fe3ff;text-decoration:none}.cp-pills a:hover{text-decoration:underline}
+.cp-merlin{width:96px;height:auto;flex:none;margin:-6px -6px -16px 0;filter:drop-shadow(0 8px 14px rgba(0,0,0,.35))}
+.cp-agenda,.cp-card{border-radius:16px;padding:14px 16px}
+.cp-agenda{background:var(--surface-2);margin-bottom:14px}
+.cp-agenda h4,.cp-card h4{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--text-1);margin:0 0 10px}
+.cp-agenda h4 span,.cp-card h4 span{font-size:16px}
+.cp-agenda ol{list-style:none;margin:0;padding:0;counter-reset:cp}
+.cp-agenda li{counter-increment:cp;position:relative;padding:0 0 10px 38px;font-size:14px;color:var(--text-1);line-height:1.4}
+.cp-agenda li:last-child{padding-bottom:0}
+.cp-agenda li::before{content:counter(cp);position:absolute;left:0;top:-1px;width:26px;height:26px;border-radius:50%;background:var(--grad-blue);color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center}
+.cp-agenda li:not(:last-child)::after{content:"";position:absolute;left:12px;top:27px;bottom:2px;width:2px;background:var(--border)}
+.cp-agenda li span{display:block;font-size:12.5px;color:var(--text-3);margin-top:1px}
+.cp-who{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:14px}
+.cp-who-label{font-size:12.5px;font-weight:700;color:var(--text-2);margin-right:4px}
+.cp-chip{font-size:12.5px;font-weight:600;color:var(--text-1);background:rgba(0,207,220,.14);border-radius:999px;padding:4px 10px}
+.cp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cp-card ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--text-1);line-height:1.45}
+.cp-card li{margin-bottom:3px}
+.cp-blue{background:rgba(6,139,255,.09)}.cp-red{background:rgba(255,97,44,.1)}.cp-green{background:rgba(12,163,90,.1)}
+.cp-purple{background:rgba(138,107,255,.11)}.cp-amber{background:rgba(255,186,8,.13)}
+.cp-none{font-size:13px;color:var(--text-3);margin:0}
+.cp-foot{font-size:12px;color:var(--text-3);margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.cp-loading{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:28px 10px 34px}
+.cp-loading img{width:130px;height:auto;animation:cbBob 1.6s ease-in-out infinite}
+.cp-loading b{font-size:18px;color:var(--text-1);margin-top:6px}
+.cp-loading-msg{font-size:14px;color:var(--text-2)}
+.cp-loading small{font-size:12px;color:var(--text-3)}
+@media(max-width:700px){.cp-grid{grid-template-columns:1fr}.cp-merlin{display:none}}

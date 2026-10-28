@@ -31,7 +31,7 @@ const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
    localStorage.setItem('cs-live-writes', 'on')   (and remove it after). */
 const LOCAL_ENV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const DRY_RUN = LOCAL_ENV && (() => { try { return localStorage.getItem('cs-live-writes') !== 'on'; } catch (e) { return true; } })();
-const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart'];
+const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart', 'prep', 'prepStatus'];
 const DRY_RUN_OK = {};   // backend URL → actions it accepts with dryRun: true (filled in by the tabs that have them)
 if (DRY_RUN) {
   const realFetch = window.fetch.bind(window);
