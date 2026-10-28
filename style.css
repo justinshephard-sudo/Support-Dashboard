@@ -1014,6 +1014,21 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .cp-who-label{font-size:12.5px;font-weight:700;color:var(--text-2);margin-right:4px}
 .cp-chip{font-size:12.5px;font-weight:600;color:var(--text-1);background:rgba(0,207,220,.14);border-radius:999px;padding:4px 10px}
 .cp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cp-asana{margin-top:12px;border-radius:16px;padding:14px 16px;background:color-mix(in srgb,#8a6bff 9%,var(--surface-1));border:1px solid color-mix(in srgb,#8a6bff 22%,transparent)}
+.cp-asana h4{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--text-1);margin:0 0 10px}
+.cp-asana h4 span{font-size:16px}
+.cp-asana h4 em{margin-left:auto;font-style:normal;font-weight:600;font-size:12px;letter-spacing:0;color:var(--text-2)}
+.cp-tasks{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.cp-tasks li{display:grid;grid-template-columns:18px 1fr;column-gap:8px;align-items:start;font-size:13.5px;line-height:1.35}
+.cp-tasks li small{grid-column:2;font-size:12px;color:var(--text-2)}
+.cp-tasks a{color:var(--text-1);font-weight:600;text-decoration:none}
+.cp-tasks a:hover{text-decoration:underline}
+.cp-task-dot{width:16px;height:16px;margin-top:1px;border-radius:50%;border:2px solid #8a6bff;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff}
+.cp-tasks li.is-done .cp-task-dot{background:#2bb673;border-color:#2bb673}
+.cp-tasks li.is-done a{color:var(--text-2);font-weight:500}
+.cp-late{color:#e5484d;font-weight:700}
+.cp-done{margin-top:10px}
+.cp-done summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--text-2);margin-bottom:6px}
 .cp-card ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--text-1);line-height:1.45}
 .cp-card li{margin-bottom:3px}
 .cp-blue{background:rgba(6,139,255,.09)}.cp-red{background:rgba(255,97,44,.1)}.cp-green{background:rgba(12,163,90,.1)}
