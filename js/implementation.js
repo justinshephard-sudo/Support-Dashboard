@@ -298,7 +298,7 @@ let implOverPage = 0;
 
 /* ---- Tile drill-down: the firms behind each Implementation number ---- */
 const IMPL_FIRM_COLS = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
-  ['AccountManager', 'Account Manager'], ['Specialist', 'Specialist'], ['NextMeeting', 'Next meeting']];
+  ['AccountManager', 'Account Manager'], ['NextMeeting', 'Next meeting']];
 
 function implDrillSpec(col, label) {
   const latest = IMPL.months[IMPL.months.length - 1].Month;
