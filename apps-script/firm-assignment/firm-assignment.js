@@ -76,9 +76,15 @@ function doGet() {
   return json_({ ok: true, message: 'New Firm Assignment endpoint is live.' });
 }
 
+// Dry run (the dashboard's local test environment sends dryRun: true): ChurnZero writes and the
+// log are skipped, and the response lists what would have been written.
+var DRY = false, DRY_WRITES = [];
+
 function doPost(e) {
   var b;
   try { b = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'bad request' }); }
+  DRY = !!b.dryRun;
+  DRY_WRITES = [];
   try {
     // Closing an onboarding is open to the firm's IM too (handoff.js checks the firm).
     if (b.action === 'handoffStart' || b.action === 'closeOnboarding') {
@@ -524,6 +530,7 @@ function assign_(b, by) {
   czSet_(appKey, acct.ExternalId, IM_FIELD, im.name);
   if (csm) czSet_(appKey, acct.ExternalId, CSM_FIELD, csm.name);
 
+  if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, owner: owner.name, im: im.name, csm: csm ? csm.name : '' };
   // ChurnZero applies writes asynchronously; check back a few times.
   var confirmed = false, after = null;
   for (var i = 0; i < 4 && !confirmed; i++) {
@@ -545,6 +552,7 @@ function assign_(b, by) {
 }
 
 function czSet_(appKey, externalId, name, value) {
+  if (DRY) { DRY_WRITES.push(name + ' = ' + value); return; }
   var payload = { appKey: appKey, accountExternalId: externalId, action: 'setAttribute', entity: 'account', name: name, value: value };
   var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', payload: payload, muteHttpExceptions: true });
   if (res.getResponseCode() >= 300) { console.error('ChurnZero write ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500)); throw new Error('ChurnZero rejected the change (HTTP ' + res.getResponseCode() + ').'); }

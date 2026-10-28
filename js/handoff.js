@@ -87,7 +87,7 @@ async function openHandoff(firmId, name) {
       const res = await faCall({ action: 'closeOnboarding', firmId, outcome: data.get('outcome'), answers });
       body.innerHTML = `<div class="fa-done"><div class="fa-done-head">${res.confirmed ? '✓ Onboarding closed' : '⏳ Sent to ChurnZero'}</div>
         <p>${esc(f.name)} is marked <b>${esc(res.outcome)}</b>${res.ownerToSupport ? ' and the Owner moved to Support' : ''}.
-          ${res.confirmed ? '' : 'ChurnZero hasn’t shown it yet — it can take a minute.'}
+          ${res.dryRun ? `<br><b>Dry run — nothing was written.</b> Would set: ${esc(res.wouldWrite.join(' · '))}.` : res.confirmed ? '' : 'ChurnZero hasn’t shown it yet — it can take a minute.'}
           ${res.unsaved ? `${res.unsaved} placeholder answer${res.unsaved === 1 ? ' was' : 's were'} logged but not sent to ChurnZero.` : ''}
           The Implementation numbers update with the next sync.</p>
         <button type="button" class="mgr-btn" data-ho-cancel>Done</button></div>`;

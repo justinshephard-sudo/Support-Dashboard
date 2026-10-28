@@ -106,6 +106,8 @@ function closeOnboarding_(b, who) {
   HANDOFF_FIELDS.forEach(function (f) { if (f.cz && clean[f.key] != null) czSet_(appKey, acct.ExternalId, f.cz, clean[f.key]); });
   if (support) czSet_(appKey, acct.ExternalId, props.getProperty('CZ_OWNER_ATTR') || 'OwnerUserAccount', support.email);
 
+  if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, outcome: outcome.status, ownerToSupport: !!support,
+    unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
   var confirmed = false;
   for (var i = 0; i < 4 && !confirmed; i++) {
     Utilities.sleep(2500);

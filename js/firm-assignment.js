@@ -11,6 +11,8 @@
 // switch back to the live deployment (AKfycbxkDLI7…) and redeploy it.
 const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbzS-NAurLZT5b2pHWcVIlYdLK2ApNbsSiV5BxXZw2kH/exec';
 const ASSIGN_EMAILS = MANAGER_EMAILS;
+// Local test environment: these go to the backend as dry runs (it reports what it would write).
+DRY_RUN_OK[ASSIGN_URL] = ['assign', 'closeOnboarding', 'setRotation', 'setTier', 'setCsmBands'];
 // ChurnZero account page; {id} = the ChurnZero account Id.
 const CZ_ACCOUNT_URL = 'https://lawmatics.us1app.churnzero.net/#/app/account/{id}/details';
 const ASSIGN_PLAY = 'Onboarding New Customer Kickoff';
@@ -155,7 +157,7 @@ function faFirmCard(f) {
   if (done) {
     right = `<div class="fa-done">
         <div class="fa-done-head">${done.confirmed ? '✓ Assigned' : '⏳ Sent to ChurnZero'}: IM <b>${esc(done.im)}</b>${done.csm ? `, CSM <b>${esc(done.csm)}</b>` : ''}</div>
-        <p>${done.confirmed ? `Owner (${esc(done.owner)}), the IM / CSM fields and Premium Onboarding are set.` : 'ChurnZero hasn’t shown the change yet — it can take a minute. Refresh to check.'}
+        <p>${done.dry ? `Dry run — nothing was written. Would set: ${esc(done.dry.join(' · '))}.` : done.confirmed ? `Owner (${esc(done.owner)}), the IM / CSM fields and Premium Onboarding are set.` : 'ChurnZero hasn’t shown the change yet — it can take a minute. Refresh to check.'}
           Next: start <b>${esc(ASSIGN_PLAY)}</b>.</p>
         <a class="mgr-btn fa-go" href="${esc(faCzLink(f.czId))}" target="_blank" rel="noopener">Start play in ChurnZero ↗</a>
       </div>`;
@@ -289,7 +291,7 @@ async function faAssign(btn) {
       suggestedId: f.ranking[0].userId, suggestedName: f.ranking[0].name,
       suggestedCsmId: csm ? f.csmRanking[0].userId : null, suggestedCsmName: csm ? f.csmRanking[0].name : '',
     });
-    FA.done[czId] = { im: res.im, csm: res.csm, owner: res.owner, confirmed: res.confirmed };
+    FA.done[czId] = { im: res.im, csm: res.csm, owner: res.owner, confirmed: res.confirmed, dry: res.dryRun ? res.wouldWrite : null };
     renderAssign();
   } catch (e) {
     msg.className = 'fa-msg err';
