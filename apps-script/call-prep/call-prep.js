@@ -10,6 +10,9 @@
                 returns { pending, requestId }.
    prepStatus → { requestId } — the dashboard polls this until the prep arrives.
    prepResult → from the Zapier workflow (no Google sign-in; checked against a one-time token).
+   complete   → { firmId } — the "Onboarding complete" button: sets the firm's Onboarding Status to
+                Complete in ChurnZero (the firm's IM / account manager or a manager). Until the IM/CSM
+                split's handoff form goes live, that's all it does. dryRun: true (local test) writes nothing.
 
    The writing is done by Claude through AI by Zapier (workflow "CS Dashboard – Call Prep"), so
    no Anthropic key is needed. If ANTHROPIC_API_KEY is ever set, it calls Claude directly instead.
@@ -21,6 +24,7 @@
      GONG_BASE_URL          optional, defaults to Lawmatics' https://us-32500.api.gong.io
      ZAPIER_HOOK_URL        optional, overrides the workflow's catch-hook URL below
      ANTHROPIC_API_KEY      optional (direct Claude instead of Zapier)
+     CZ_APP_KEY             ChurnZero write key (Admin → Application Keys), for "Onboarding complete"
 
    Deploy: Web app · Execute as: Me · Who has access: Anyone. Each request must carry a
    Google access token issued to the dashboard client (shared/dash-auth.js).
@@ -58,6 +62,7 @@ function doPost(e) {
     if (!who.ok) return dashJson_(who);
     if (b.action === 'prep') return dashJson_(prep_(b, who));
     if (b.action === 'prepStatus') return dashJson_(prepStatus_(b));
+    if (b.action === 'complete') return dashJson_(complete_(b, who));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
@@ -159,6 +164,44 @@ function prepResult_(b) {
   }
   cache.put('done_' + b.requestId, JSON.stringify(out), 3600);
   return { ok: true };
+}
+
+/* ---------- Onboarding complete ---------- */
+
+var CZ_WRITE = 'https://lawmatics.us1app.churnzero.net/i';
+var OPEN_STATUSES = ['Pre-Kickoff', 'Open'];
+
+// The firm's IM / account manager (or a manager) marks the onboarding Complete.
+function complete_(b, who) {
+  var firmId = String(b.firmId || '').replace(/[^\d]/g, '');
+  if (!firmId) throw new Error('missing Firm ID');
+  var acct = czGet_('/Account', { $filter: "Cf/FirmId eq '" + firmId + "'",
+    $select: 'Id,Name,ExternalId,UserAccountId,Cf/AccountManager,Cf/ImplementationManager,Cf/OnboardingStatus' })[0];
+  if (!acct) throw new Error('Firm ' + firmId + ' wasn’t found in ChurnZero.');
+  var cf = acct.Cf || {}, users = czUsers_();
+  var repName = String(cf.ImplementationManager || cf.AccountManager || (users[acct.UserAccountId] || {}).name || '').trim();
+  var rep = Object.keys(users).map(function (k) { return users[k]; }).filter(function (u) { return u.name === repName; })[0];
+  if (!who.manager && !(rep && String(rep.email).toLowerCase() === who.email)) {
+    throw new Error('Only the firm’s IM or a manager can mark this onboarding complete.');
+  }
+  if (OPEN_STATUSES.indexOf(cf.OnboardingStatus) < 0) {
+    throw new Error(acct.Name + ' isn’t an open onboarding in ChurnZero (status: ' + (cf.OnboardingStatus || 'blank') + ').');
+  }
+  if (b.dryRun) return { ok: true, dryRun: true, firm: acct.Name };
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  if (!appKey) throw new Error('The ChurnZero write key (CZ_APP_KEY) isn’t set up yet.');
+  var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', muteHttpExceptions: true, payload: {
+    appKey: appKey, accountExternalId: acct.ExternalId, action: 'setAttribute', entity: 'account', name: 'OnboardingStatus', value: 'Complete' } });
+  if (res.getResponseCode() >= 300) { console.error('ChurnZero write ' + res.getResponseCode()); throw new Error('ChurnZero rejected the change (HTTP ' + res.getResponseCode() + ').'); }
+  // ChurnZero applies writes asynchronously; check back a few times.
+  var confirmed = false;
+  for (var i = 0; i < 4 && !confirmed; i++) {
+    Utilities.sleep(2500);
+    var after = czGet_('/Account', { $filter: 'Id eq ' + acct.Id, $select: 'Id,Cf/OnboardingStatus' })[0];
+    confirmed = !!after && (after.Cf || {}).OnboardingStatus === 'Complete';
+  }
+  console.log('Onboarding complete: ' + acct.Name + ' (' + firmId + ') by ' + who.email + (confirmed ? '' : ' — not confirmed yet'));
+  return { ok: true, firm: acct.Name, confirmed: confirmed };
 }
 
 /* ---------- Claude ---------- */
