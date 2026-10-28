@@ -116,3 +116,84 @@ async function openCallPrep(row) {
   });
   load(false);
 }
+
+/* ---------- "Onboarding complete" (current flow until the IM/CSM handoff form goes live) ----------
+   Sets the firm's Onboarding Status to Complete in ChurnZero, then Johnny and Merlin dance. */
+DRY_RUN_OK[CALL_PREP_URL] = ['complete'];   // local test: the backend checks everything but writes nothing
+
+function obDoneClose() {
+  document.getElementById('obdone')?.remove();
+  document.removeEventListener('keydown', obDoneKey);
+}
+function obDoneKey(e) { if (e.key === 'Escape') obDoneClose(); }
+
+function confirmOnboardingComplete(row, btn) {
+  if (!row) return;
+  obDoneClose();
+  const wrap = document.createElement('div');
+  wrap.id = 'obdone';
+  wrap.className = 'drill-backdrop cp-backdrop';
+  wrap.innerHTML = `<div class="drill ob-confirm" role="dialog" aria-modal="true" aria-label="Onboarding complete">
+      <div class="drill-head"><div><h3>Mark onboarding complete?</h3><div class="drill-note">${esc(row.Name)} · ${esc(row.Stage || '')}</div></div>
+        <button type="button" class="drill-close" aria-label="Close">×</button></div>
+      <div class="drill-body"><p class="ob-text">This sets <b>${esc(row.Name)}</b>’s Onboarding Status to <b>Complete</b> in ChurnZero.</p>
+        <div class="ob-actions"><button type="button" class="ob-done-btn ob-go">🎉 Yes, it’s complete</button><button type="button" class="mgr-btn" data-ob-cancel>Cancel</button></div>
+        <div class="fa-msg" aria-live="polite"></div></div></div>`;
+  document.body.appendChild(wrap);
+  document.addEventListener('keydown', obDoneKey);
+  wrap.querySelector('.ob-go').focus();
+  wrap.addEventListener('click', async (e) => {
+    if (e.target === wrap || e.target.closest('.drill-close') || e.target.closest('[data-ob-cancel]')) { obDoneClose(); return; }
+    const go = e.target.closest('.ob-go');
+    if (!go) return;
+    const msg = wrap.querySelector('.fa-msg');
+    wrap.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    msg.className = 'fa-msg';
+    msg.textContent = 'Updating ChurnZero…';
+    try {
+      const res = await fetch(CALL_PREP_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ token: AUTH.token, action: 'complete', firmId: row.FirmId }),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || 'Request failed');
+      obDoneClose();
+      IMPL.open = IMPL.open.filter((r) => String(r.FirmId) !== String(row.FirmId));
+      const tr = btn && btn.closest('tr');
+      if (tr) { tr.classList.add('row-muted'); btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ob-done-tag', textContent: d.dryRun ? 'Complete (dry run)' : '✓ Complete' })); }
+      obDanceParty(row.Name, d);
+    } catch (err) {
+      if (isSessionError(err)) showSessionBanner(true);
+      msg.className = 'fa-msg err';
+      msg.textContent = err.message;
+      wrap.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+    }
+  });
+}
+
+// Johnny and Merlin's Woo-Hoo dance (the celebration clip) with confetti. Click anywhere to close.
+function obDanceParty(firm, d) {
+  ensureCelebrateStyles();
+  const layer = document.createElement('div');
+  layer.className = 'cb-layer ob-party';
+  layer.title = 'Click anywhere to close';
+  layer.innerHTML = `<div class="cb-stage">
+      <video class="cb-star cb-star-video" muted playsinline loop autoplay aria-hidden="true">
+        <source src="assets/merlin-woohoo.mov?v=5" type='video/quicktime; codecs="hvc1"'><source src="assets/merlin-woohoo.webm?v=5" type="video/webm"></video>
+      <div class="eyebrow cb-eyebrow">Onboarding complete${d.dryRun ? ' · dry run' : ''}</div>
+      <div class="cb-headline pop">${esc(firm)}</div>
+      <div class="cb-sub">${d.dryRun ? 'Local test — nothing was written to ChurnZero.' : d.confirmed ? 'Marked Complete in ChurnZero. Nice work!' : 'Sent to ChurnZero — it can take a minute to show.'}</div>
+    </div>`;
+  document.body.appendChild(layer);
+  cbRain(layer, 120, 8);
+  cbCannon(layer, 6); cbCannon(layer, 94);
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    layer.classList.add('out');
+    setTimeout(() => layer.remove(), 450);
+  };
+  layer.addEventListener('click', close);
+  setTimeout(close, 9000);
+}

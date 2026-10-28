@@ -392,12 +392,13 @@ function openImplDrill(col, label) {
   back.className = 'drill-backdrop';
   back.id = 'impl-drill';
   const count = spec.rows ? spec.rows.length : 0;
-  // Open onboardings can be closed (with the handoff form) by the firm's IM or a manager.
+  // Open onboardings can be closed (with the handoff form) by the firm's IM or a manager. On the split this
+  // replaces the live site's simple "Onboarding complete" button, in the same far-right spot.
   const closeCol = spec.close && spec.rows && spec.rows.some(canCloseOnboarding);
-  const closeCell = (r) => (closeCol ? `<td>${canCloseOnboarding(r) && r.FirmId ? `<button type="button" class="mgr-btn ho-open" data-close-firm="${esc(r.FirmId)}" data-name="${esc(r.Name)}">Close onboarding</button>` : ''}</td>` : '');
+  const closeCell = (r) => (closeCol ? `<td class="ob-done-cell">${canCloseOnboarding(r) && r.FirmId ? `<button type="button" class="ob-done-btn" data-close-firm="${esc(r.FirmId)}" data-name="${esc(r.Name)}">✓ Close onboarding</button>` : ''}</td>` : '');
   const body = spec.rows && spec.rows.length
-    ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${closeCol ? '<th></th>' : ''}${overridesUnlocked ? '<th></th>' : ''}</tr></thead>`
-      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${closeCell(r)}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
+    ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}${closeCol ? '<th></th>' : ''}</tr></thead>`
+      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${closeCell(r)}</tr>`).join('')}</tbody></table></div>`
     : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
   back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
@@ -412,7 +413,9 @@ function openImplDrill(col, label) {
     const c = e.target.closest('[data-close-firm]');
     if (c) { openHandoff(c.dataset.closeFirm, c.dataset.name); return; }
     const p = e.target.closest('[data-prep-firm]');
-    if (p) openCallPrep(IMPL.open.find((r) => String(r.FirmId) === p.dataset.prepFirm));
+    if (p) { openCallPrep(IMPL.open.find((r) => String(r.FirmId) === p.dataset.prepFirm)); return; }
+    const d = e.target.closest('[data-done-firm]');
+    if (d) confirmOnboardingComplete(IMPL.open.find((r) => String(r.FirmId) === d.dataset.doneFirm), d);
   });
   back.querySelector('.drill-close').addEventListener('click', closeImplDrill);
   document.addEventListener('keydown', implDrillKey);
@@ -420,7 +423,7 @@ function openImplDrill(col, label) {
   document.body.classList.add('drill-open');
   back.querySelector('.drill-close').focus();
 }
-function implDrillKey(e) { if (e.key === 'Escape' && !document.getElementById('handoff') && !document.getElementById('callprep')) closeImplDrill(); }
+function implDrillKey(e) { if (e.key === 'Escape' && !document.getElementById('handoff') && !document.getElementById('callprep') && !document.getElementById('obdone')) closeImplDrill(); }
 function closeImplDrill() {
   const el = document.getElementById('impl-drill');
   if (!el) return;
