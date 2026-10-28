@@ -403,7 +403,7 @@ function openImplDrill(col, label) {
   back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
         <div><h3 id="impl-drill-title">${esc(spec.title)}${spec.rows ? ` <span class="drill-count">${fmtNum(count)}</span>` : ''}</h3>
-          ${spec.note ? `<div class="drill-note">${esc(spec.note)}</div>` : ''}</div>
+          ${spec.note ? `<div class="drill-note">${esc(spec.note)}${doneCol && LOCAL_ENV ? ' <button type="button" class="ob-preview" data-ob-preview>🎉 Preview the celebration</button>' : ''}</div>` : ''}</div>
         <button type="button" class="drill-close" aria-label="Close">×</button>
       </div>
       <div class="drill-body">${body}</div>
@@ -414,6 +414,7 @@ function openImplDrill(col, label) {
     if (c) { openHandoff(c.dataset.closeFirm, c.dataset.name); return; }
     const p = e.target.closest('[data-prep-firm]');
     if (p) { openCallPrep(IMPL.open.find((r) => String(r.FirmId) === p.dataset.prepFirm)); return; }
+    if (e.target.closest('[data-ob-preview]')) { obDanceParty('Test Firm LLP', { preview: true }); return; }
     const d = e.target.closest('[data-done-firm]');
     if (d) confirmOnboardingComplete(IMPL.open.find((r) => String(r.FirmId) === d.dataset.doneFirm), d);
   });
