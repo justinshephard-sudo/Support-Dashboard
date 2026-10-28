@@ -302,8 +302,9 @@ const IMPL_FIRM_COLS = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status
 
 function implDrillSpec(col, label) {
   const latest = IMPL.months[IMPL.months.length - 1].Month;
+  // Firm lists fit the pop-up's width (cells wrap) instead of scrolling sideways.
   const snapshot = (title, note, rows) => (label === latest
-    ? { title, note, cols: IMPL_FIRM_COLS, rows: rows.sort((a, b) => toNumber(b.DaysInOnboarding) - toNumber(a.DaysInOnboarding)) }
+    ? { title, note, cols: IMPL_FIRM_COLS, fit: true, rows: rows.sort((a, b) => toNumber(b.DaysInOnboarding) - toNumber(a.DaysInOnboarding)) }
     : { title, empty: `Firm-level detail for this number is only kept for today — switch the month to ${latest}.` });
   const days = (f) => toNumber(f.DaysInOnboarding) || 0;
   const evs = (type) => implMine(IMPL.events.filter((e) => e.Type === type && e.Month === label));
@@ -311,7 +312,9 @@ function implDrillSpec(col, label) {
   const who = IMPL.rep ? ` · ${IMPL.rep}` : '';
   switch (col) {
     case 'OpenOnboardings':
-      return Object.assign(snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today' + who, [...open]), { close: true, prep: true });
+      // Soonest next meeting first; firms with nothing scheduled go last, longest in onboarding first.
+      return Object.assign(snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today · soonest next meeting first' + who, [...open]), { close: true, prep: true,
+        rows: label === latest ? [...open].sort(implByNextMeeting) : undefined });
     case 'NeedsScheduling':
       return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today' + who, open.filter((f) => !f.NextMeeting));
     case 'Over70':
@@ -351,6 +354,12 @@ function implDrillSpec(col, label) {
   }
 }
 
+function implMeetingTime(f) {
+  const t = f.NextMeeting ? Date.parse(f.NextMeeting) : NaN;
+  return Number.isNaN(t) ? Infinity : t;
+}
+const implByNextMeeting = (a, b) => implMeetingTime(a) - implMeetingTime(b) || toNumber(b.DaysInOnboarding) - toNumber(a.DaysInOnboarding);
+
 // "2026-10-03" → "Oct 3, 2026" (parsed as a local date, so it never shifts a day).
 function implFmtDate(v) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
@@ -387,10 +396,10 @@ function openImplDrill(col, label) {
   const closeCol = spec.close && spec.rows && spec.rows.some(canCloseOnboarding);
   const closeCell = (r) => (closeCol ? `<td>${canCloseOnboarding(r) && r.FirmId ? `<button type="button" class="mgr-btn ho-open" data-close-firm="${esc(r.FirmId)}" data-name="${esc(r.Name)}">Close onboarding</button>` : ''}</td>` : '');
   const body = spec.rows && spec.rows.length
-    ? `<div class="table-wrap"><table class="drill-table"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${closeCol ? '<th></th>' : ''}${overridesUnlocked ? '<th></th>' : ''}</tr></thead>`
+    ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${closeCol ? '<th></th>' : ''}${overridesUnlocked ? '<th></th>' : ''}</tr></thead>`
       + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${closeCell(r)}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
-  back.innerHTML = `<div class="drill" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
+  back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
         <div><h3 id="impl-drill-title">${esc(spec.title)}${spec.rows ? ` <span class="drill-count">${fmtNum(count)}</span>` : ''}</h3>
           ${spec.note ? `<div class="drill-note">${esc(spec.note)}</div>` : ''}</div>

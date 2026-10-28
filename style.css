@@ -253,6 +253,11 @@ body.drill-open{overflow:hidden}
 .drill-body .empty-note{padding:28px 14px;text-align:center;color:var(--text-3)}
 .drill-table td,.drill-table th{text-align:left!important}
 .drill-table td{white-space:nowrap}
+.drill.drill-firms{width:min(1180px,100%)}
+.drill-table.drill-fit{width:100%;table-layout:auto}
+.drill-table.drill-fit th,.drill-table.drill-fit td{white-space:normal;padding:10px 10px;vertical-align:top}
+.drill-table.drill-fit td:first-child{min-width:190px}
+.drill-table.drill-fit td:first-child .cp-btn{margin:4px 0 0;display:inline-block}
 .drill-table td .drill-comment{display:block;white-space:normal;min-width:240px;max-width:420px;color:var(--text-2)}
 .score-pill{display:inline-block;min-width:26px;text-align:center;font-weight:700;border-radius:999px;padding:2px 8px;font-size:13px}
 .score-pill.good{background:rgba(12,163,90,.14);color:#0b8a4d}
