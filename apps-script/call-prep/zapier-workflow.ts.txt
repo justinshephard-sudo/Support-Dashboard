@@ -1,0 +1,77 @@
+import { defineDurable } from "@zapier/zapier-durable";
+import { createZapierSdk } from "@zapier/zapier-sdk";
+import { z } from "zod";
+
+// CS Dashboard "Call prep": the call-prep Apps Script sends the prompt, the firm context and the
+// last Gong transcript; Claude (through AI by Zapier) writes the prep sheet as JSON; this posts
+// it back to the Apps Script, which hands it to the dashboard pop-up.
+const sdk = createZapierSdk();
+
+const InputSchema = z.object({
+  requestId: z.string(),
+  token: z.string(),
+  callbackUrl: z.string().url(),
+  instructions: z.string(),
+  context: z.string().nullable().optional(),
+  transcript: z.string().nullable().optional(),
+}).loose();
+type Input = z.infer<typeof InputSchema>;
+
+function normalizeInput(raw: unknown): unknown {
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+// The model wraps JSON in a code fence now and then; take the outermost object.
+function parsePrep(text: string): unknown {
+  const s = text.indexOf("{"), e = text.lastIndexOf("}");
+  if (s < 0 || e <= s) return null;
+  try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
+}
+
+export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ctx, rawInput) => {
+  const input = InputSchema.parse(normalizeInput(rawInput));
+
+  const completion = await ctx.step("write-call-prep", async () =>
+    sdk.runAction({
+      appKey: "AICLIAPI",
+      actionType: "write",
+      actionKey: "get_completion",
+      inputs: {
+        provider_id: "anthropic",
+        authentication_id: "0",
+        model_id: "anthropic/claude-sonnet-5-5",
+        instructions: input.instructions,
+        inputFields: {
+          firm: input.context ?? "",
+          transcript: input.transcript ?? "(No Gong recording with this firm yet.)",
+        },
+        includeWorkflowData: false,
+        outputFields: [{ name: "prep_json", type: "text", isRequired: true }],
+      },
+    }),
+  );
+
+  const item = (completion.data[0] ?? {}) as Record<string, unknown>;
+  const text = String(item.prep_json ?? item.output ?? "");
+  const prep = parsePrep(text);
+
+  const delivered = await ctx.step({
+    name: "send-prep-to-dashboard",
+    maxAttempts: 3,
+    retryDelaySeconds: 5,
+    run: async () => {
+      const res = await fetch(input.callbackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "prepResult", requestId: input.requestId, token: input.token,
+          prep, error: prep ? null : "The AI's answer couldn't be read. Try Regenerate.",
+        }),
+        redirect: "follow",
+      });
+      return { status: res.status, body: (await res.text()).slice(0, 300) };
+    },
+  });
+
+  return { requestId: input.requestId, parsed: !!prep, delivered };
+});

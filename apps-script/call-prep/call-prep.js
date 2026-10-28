@@ -5,14 +5,22 @@
    from its transcript plus our standard plan for that call (the CS Onboarding
    Roadmap deck, 9/2026). Read-only: nothing is written anywhere.
 
-   prep → { firmId, stage, nextMeeting, regenerate } — the firm's IM / account
-          manager or a manager. Answers are cached per firm + Gong call for 12 hours.
+   prep       → { firmId, stage, nextMeeting, regenerate } — the firm's IM / account manager or a
+                manager. Returns a cached prep (12 hours per firm + Gong call), or starts one and
+                returns { pending, requestId }.
+   prepStatus → { requestId } — the dashboard polls this until the prep arrives.
+   prepResult → from the Zapier workflow (no Google sign-in; checked against a one-time token).
+
+   The writing is done by Claude through AI by Zapier (workflow "CS Dashboard – Call Prep"), so
+   no Anthropic key is needed. If ANTHROPIC_API_KEY is ever set, it calls Claude directly instead.
 
    Script Properties:
      CZ_USER, CZ_KEY        ChurnZero read API (same as the other dashboard scripts)
-     GONG_BASE_URL          e.g. https://us-12345.api.gong.io (shown with the Gong API key)
-     GONG_ACCESS_KEY, GONG_ACCESS_SECRET
-     ANTHROPIC_API_KEY
+     GONG_BASIC             Gong API "Basic" token (base64 of key:secret), as used by the
+                            first-onboarding Zap — or GONG_ACCESS_KEY + GONG_ACCESS_SECRET
+     GONG_BASE_URL          optional, defaults to Lawmatics' https://us-32500.api.gong.io
+     ZAPIER_HOOK_URL        the workflow's catch-hook URL
+     ANTHROPIC_API_KEY      optional (direct Claude instead of Zapier)
 
    Deploy: Web app · Execute as: Me · Who has access: Anyone. Each request must carry a
    Google access token issued to the dashboard client (shared/dash-auth.js).
@@ -40,9 +48,11 @@ function doPost(e) {
   var b;
   try { b = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
   try {
+    if (b.action === 'prepResult') return dashJson_(prepResult_(b));   // Zapier; checked by its token
     var who = dashAuth_(b.token);
     if (!who.ok) return dashJson_(who);
     if (b.action === 'prep') return dashJson_(prep_(b, who));
+    if (b.action === 'prepStatus') return dashJson_(prepStatus_(b));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
@@ -94,14 +104,56 @@ function prep_(b, who) {
     challenges: String(cf.KeyChallenges || '').slice(0, 1500),
     contacts: contacts.map(function (c) { return (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() + (c.Cf && c.Cf.IncludeInOnboarding ? ' (onboarding contact)' : ''); }).filter(String).slice(0, 15),
   };
-  var sheet = claudePrep_(props.getProperty('ANTHROPIC_API_KEY'), firm, last, calls, transcript);
   var out = {
     ok: true, firm: { name: firm.name, firmId: firmId, im: repName, stage: firm.stage, nextMeeting: firm.nextMeeting, mrr: firm.mrr },
     lastCall: last ? { title: last.title, date: last.started, url: last.url, minutes: Math.round((last.duration || 0) / 60) } : null,
-    priorCalls: calls.length, prep: sheet, generated: new Date().toISOString(),
+    priorCalls: calls.length, prep: null, generated: null,
   };
-  try { cache.put(key, JSON.stringify(out), CACHE_HOURS * 3600); } catch (e) { /* too big to cache */ }
-  return out;
+  var prompt = prepPrompt_(firm, last, calls);
+  if (props.getProperty('ANTHROPIC_API_KEY')) {
+    out.prep = claudePrep_(props.getProperty('ANTHROPIC_API_KEY'), prompt, transcript);
+    out.generated = new Date().toISOString();
+    try { cache.put(key, JSON.stringify(out), CACHE_HOURS * 3600); } catch (e) { /* too big to cache */ }
+    return out;
+  }
+  // Through Zapier: hand off, then the dashboard polls prepStatus until prepResult lands.
+  var hook = props.getProperty('ZAPIER_HOOK_URL');
+  if (!hook) throw new Error('The Zapier hook (ZAPIER_HOOK_URL) isn’t set up yet.');
+  var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
+  cache.put('req_' + requestId, JSON.stringify({ secret: secret, key: key, shell: out, at: Date.now() }), 3600);
+  var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ requestId: requestId, token: secret, callbackUrl: ScriptApp.getService().getUrl(),
+      instructions: prompt.system + '\n\n' + prompt.task + '\n\nReturn ONLY a JSON object (no code fence) with exactly these keys: ' +
+        JSON.stringify(PREP_SCHEMA.properties, null, 0),
+      context: prompt.context, transcript: transcript || '' }) });
+  if (res.getResponseCode() >= 300) { console.error('Zapier ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300)); throw new Error('Couldn’t start the prep (Zapier HTTP ' + res.getResponseCode() + ').'); }
+  return { ok: true, pending: true, requestId: requestId, firm: out.firm, lastCall: out.lastCall };
+}
+
+function prepStatus_(b) {
+  var cache = CacheService.getScriptCache();
+  var done = cache.get('done_' + String(b.requestId || ''));
+  if (done) return JSON.parse(done);
+  if (!cache.get('req_' + String(b.requestId || ''))) return { ok: false, error: 'This prep expired — click Call prep again.' };
+  return { ok: true, pending: true };
+}
+
+function prepResult_(b) {
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get('req_' + String(b.requestId || ''));
+  if (!raw) return { ok: false, error: 'unknown or expired request' };
+  var req = JSON.parse(raw);
+  if (!b.token || b.token !== req.secret) return { ok: false, error: 'bad token' };
+  var out = req.shell;
+  if (!b.prep) {
+    out = { ok: false, error: String(b.error || 'The AI didn’t return a prep.').slice(0, 300) };
+  } else {
+    out.prep = b.prep;
+    out.generated = new Date().toISOString();
+    try { cache.put(req.key, JSON.stringify(out), CACHE_HOURS * 3600); } catch (e) { /* too big to cache */ }
+  }
+  cache.put('done_' + b.requestId, JSON.stringify(out), 3600);
+  return { ok: true };
 }
 
 /* ---------- Claude ---------- */
@@ -123,20 +175,26 @@ var PREP_SCHEMA = {
   },
 };
 
-function claudePrep_(apiKey, firm, last, calls, transcript) {
-  if (!apiKey) throw new Error('The Anthropic API key (ANTHROPIC_API_KEY) isn’t set up yet.');
+// The same prompt goes to Claude directly or through Zapier: system rules + call plan, the firm,
+// and the task. The transcript travels separately.
+function prepPrompt_(firm, last, calls) {
   var system = 'You prepare Lawmatics implementation managers for their next onboarding call with a law firm. ' +
     'Be specific and practical: names, dates, documents and automations from the transcript, not generic advice. ' +
     'Keep every bullet short (one line). Leave a list empty rather than guessing. Never invent what was said.\n\n' +
     'Our standard onboarding plan:\n' + CALL_PLAN;
-  var user = 'Firm: ' + JSON.stringify(firm) + '\n\n' +
+  var context = 'Firm: ' + JSON.stringify(firm) + '\n\n' +
     (last ? 'Most recent Gong call with this firm: "' + last.title + '" on ' + last.started + ' (' + Math.round((last.duration || 0) / 60) + ' min). ' +
       calls.length + ' Gong call(s) with the firm in the last ' + GONG_LOOKBACK_DAYS + ' days: ' +
-      calls.slice(0, 8).map(function (c) { return c.started.slice(0, 10) + ' ' + c.title; }).join('; ') + '\n\n' +
-      'Transcript of the most recent call:\n' + transcript
-      : 'There is no Gong recording with this firm yet, so base the prep on the stage, the sales notes and the standard plan.') +
-    '\n\nWork out which call is next from the ChurnZero stage ("' + firm.stage + '") and the calls already held, then write the prep sheet for that call. ' +
+      calls.slice(0, 8).map(function (c) { return c.started.slice(0, 10) + ' ' + c.title; }).join('; ')
+      : 'There is no Gong recording with this firm yet, so base the prep on the stage, the sales notes and the standard plan.');
+  var task = 'Work out which call is next from the ChurnZero stage ("' + firm.stage + '") and the calls already held, then write the prep sheet for that call. ' +
     'The agenda should follow our plan for that call, adjusted for what is still open from the last call.';
+  return { system: system, context: context, task: task };
+}
+
+function claudePrep_(apiKey, prompt, transcript) {
+  var system = prompt.system;
+  var user = prompt.context + '\n\n' + (transcript ? 'Transcript of the most recent call:\n' + transcript + '\n\n' : '') + prompt.task;
   var res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2026-10-21', 'anthropic-beta': 'server-side-fallback-2026-07-01' },
@@ -161,12 +219,13 @@ function claudePrep_(apiKey, firm, last, calls, transcript) {
 
 function gongFetch_(path, payload) {
   var p = PropertiesService.getScriptProperties();
-  var base = String(p.getProperty('GONG_BASE_URL') || 'https://api.gong.io').replace(/\/+$/, '');
+  var base = String(p.getProperty('GONG_BASE_URL') || 'https://us-32500.api.gong.io').replace(/\/+$/, '');
+  var basic = p.getProperty('GONG_BASIC');
   var key = p.getProperty('GONG_ACCESS_KEY'), secret = p.getProperty('GONG_ACCESS_SECRET');
-  if (!key || !secret) throw new Error('The Gong API key (GONG_ACCESS_KEY / GONG_ACCESS_SECRET) isn’t set up yet.');
+  if (!basic && !(key && secret)) throw new Error('The Gong API key (GONG_BASIC) isn’t set up yet.');
   var res = UrlFetchApp.fetch(base + path, {
     method: payload ? 'post' : 'get', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { Authorization: 'Basic ' + Utilities.base64Encode(key + ':' + secret) },
+    headers: { Authorization: 'Basic ' + (basic ? basic.replace(/^Basic\s+/i, '').trim() : Utilities.base64Encode(key + ':' + secret)) },
     payload: payload ? JSON.stringify(payload) : undefined,
   });
   if (res.getResponseCode() === 404) return null;   // Gong answers 404 when nothing matches
@@ -242,7 +301,7 @@ function gongTranscript_(call) {
     if (text) lines.push((names[seg.speakerId] || 'Speaker') + ': ' + text);
   });
   var all = lines.join('\n');
-  return all.length > 120000 ? all.slice(0, 120000) + '\n(…transcript trimmed)' : all;
+  return all.length > 80000 ? all.slice(0, 80000) + '\n(…transcript trimmed)' : all;
 }
 
 /* ---------- ChurnZero ---------- */
@@ -273,19 +332,17 @@ function czUsers_() {
 
 /* ---------- checks (run from the editor) ---------- */
 
-// Confirms the keys work: lists a few Gong users and makes one tiny Claude call.
+// Confirms the setup: Gong answers, and the Zapier hook is set.
 function checkKeys() {
   var g = gongFetch_('/v2/users');
   Logger.log('Gong: ' + ((g && g.users) || []).length + ' users on the first page');
-  var res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { 'x-api-key': PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY'), 'anthropic-version': '2026-10-21' },
-    payload: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 200, output_config: { effort: 'low' }, messages: [{ role: 'user', content: 'Reply with the word ready.' }] }),
-  });
-  Logger.log('Claude: HTTP ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 300));
+  var p = PropertiesService.getScriptProperties();
+  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') ? 'set' : 'MISSING') + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
+  Logger.log('Web app URL (Zapier posts results here): ' + ScriptApp.getService().getUrl());
 }
 
-// Runs a real prep for one firm (as a manager) and logs it — e.g. checkPrep('5447').
+// Starts a real prep for one firm (as a manager) and logs the request — e.g. checkPrep('5447').
+// With Zapier it finishes in the background; the dashboard pop-up shows it.
 function checkPrep(firmId) {
   var out = prep_({ firmId: firmId || '5447', stage: '' }, { ok: true, manager: true, email: '' });
   Logger.log(JSON.stringify(out, null, 2));

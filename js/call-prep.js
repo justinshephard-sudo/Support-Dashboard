@@ -59,15 +59,27 @@ async function openCallPrep(row) {
   document.body.appendChild(wrap);
   document.addEventListener('keydown', callPrepKey);
   const body = wrap.querySelector('.drill-body');
+  const call = async (payload) => {
+    const res = await fetch(CALL_PREP_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ token: AUTH.token, ...payload }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Request failed');
+    return d;
+  };
   const load = async (regenerate) => {
-    body.innerHTML = '<div class="res-loading">Reading the last Gong call and writing the prep… this takes about 15–30 seconds.</div>';
+    body.innerHTML = '<div class="res-loading">Reading the last Gong call and writing the prep… this usually takes 30–60 seconds.</div>';
     try {
-      const res = await fetch(CALL_PREP_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ token: AUTH.token, action: 'prep', firmId: row.FirmId, stage: row.Stage || '', nextMeeting: row.NextMeeting || '', regenerate: !!regenerate }),
-      });
-      const d = await res.json();
-      if (!d.ok) throw new Error(d.error || 'Request failed');
+      let d = await call({ action: 'prep', firmId: row.FirmId, stage: row.Stage || '', nextMeeting: row.NextMeeting || '', regenerate: !!regenerate });
+      // New preps are written in the background (Zapier); check back every few seconds for up to 3 minutes.
+      const requestId = d.requestId;
+      for (let i = 0; d.pending && i < 60 && document.getElementById('callprep') === wrap; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        d = await call({ action: 'prepStatus', requestId });
+      }
+      if (document.getElementById('callprep') !== wrap) return;
+      if (d.pending) throw new Error('it’s taking longer than usual — try again in a minute.');
       body.innerHTML = callPrepBody(d);
     } catch (e) {
       if (isSessionError(e)) showSessionBanner(true);
