@@ -143,7 +143,8 @@ function spRender() {
     const item = options.find((o) => o.itemPriceId === a.itemPriceId) || { name: a.itemPriceId };
     return `<tr class="sp-changed"><td>${esc(item.name)} <span class="sp-tag">NEW</span></td><td class="num">—</td><td class="num">${item.pricingModel === 'PER_UNIT' ? spMoney(item.price) : ''}</td>
       <td><input type="number" class="sp-qty" min="${Math.max(1, item.minQuantity || 1)}" step="1" value="${esc(a.quantity)}" data-sp-addqty="${i}" aria-label="Quantity for ${esc(item.name)}">
-      <button type="button" class="sp-x" data-sp-remove="${i}" aria-label="Remove ${esc(item.name)}">×</button></td></tr>`;
+      <button type="button" class="sp-x" data-sp-remove="${i}" aria-label="Remove ${esc(item.name)}">×</button></td></tr>
+      <tr class="sp-changed sp-disc-row"><td colspan="4">${spDiscountHtml(a, i, item.name)}</td></tr>`;
   }).join('');
   const addPicker = blocked || !options.length ? '' : `<div class="sp-add">
       <select data-sp-addsel aria-label="Add-on to add"><option value="">+ Add an item…</option>
@@ -191,6 +192,18 @@ function spRecipientsHtml() {
   </div>`;
 }
 
+// Discount on a new add-on: % or $, first invoice only / every invoice / N months (as in the sales quote builder).
+function spDiscountHtml(a, i, name) {
+  const opt = (v, label, cur) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${label}</option>`;
+  return `<div class="sp-disc"><span>Discount</span>
+    <select data-sp-disc="discountType" data-i="${i}" aria-label="Discount type for ${esc(name)}">${opt('Percent', '%', a.discountType)}${opt('Amount', '$', a.discountType)}</select>
+    <input type="number" min="0" step="0.01" placeholder="0" value="${esc(a.discountValue || '')}" data-sp-disc="discountValue" data-i="${i}" aria-label="Discount for ${esc(name)}">
+    <select data-sp-disc="discountDuration" data-i="${i}" aria-label="How long the discount on ${esc(name)} lasts">
+      ${opt('One time', 'First invoice only', a.discountDuration)}${opt('Forever', 'Every invoice', a.discountDuration)}${opt('Limited', 'For a number of months', a.discountDuration)}</select>
+    ${a.discountDuration === 'Limited' ? `<input type="number" min="1" max="60" step="1" value="${esc(a.discountMonths || 3)}" data-sp-disc="discountMonths" data-i="${i}" aria-label="Months"> months` : ''}
+  </div>`;
+}
+
 function spPreviewHtml(p) {
   const table = (rows, withPeriod) => `<table class="drill-table sp-table"><thead><tr><th>Item</th><th class="num">Qty</th>${withPeriod ? '<th>Period</th>' : ''}<th class="num">Discount</th><th class="num">Pays</th></tr></thead><tbody>
     ${rows.map((r) => `<tr class="${r.changed ? 'sp-changed' : ''}"><td>${esc(r.name)}</td><td class="num">${spNum(r.quantity)}</td>${withPeriod ? `<td>${esc(r.period || '')}</td>` : ''}
@@ -199,7 +212,7 @@ function spPreviewHtml(p) {
   return `<div class="sp-preview">
     <h4>${p.mode === 'quote' ? 'If the firm accepts the quote' : 'Charged today (prorated)'} · ${spMoney(p.dueNowTotal)}</h4>
     ${p.dueNow.length ? table(p.dueNow, true) : '<div class="muted">Nothing due today.</div>'}
-    <h4>New recurring amount · ${spMoney(p.recurringTotal)} ${esc((p.frequency || '').toLowerCase())}</h4>
+    <h4>New recurring amount · ${spMoney(p.recurringTotal)} ${esc((p.frequency || '').toLowerCase())} <span class="muted">(ongoing; first-invoice and limited discounts not included)</span></h4>
     ${table(p.recurring, false)}
     ${p.mode === 'apply' ? `<div class="muted sp-mail">The amendment will be emailed to ${esc(to)}.</div>` : ''}
   </div>`;
@@ -231,7 +244,9 @@ function spPayload(action) {
   const sub = spSub();
   const changes = sub.items.filter((it) => it.editable && SP.qty[it.itemPriceId] != null && Number(SP.qty[it.itemPriceId]) !== Number(it.quantity))
     .map((it) => ({ itemPriceId: it.itemPriceId, quantity: Number(SP.qty[it.itemPriceId]) }));
-  const out = { action, firmId: SP.firmId, subscriptionId: SP.subId, changes, adds: SP.adds.map((a) => ({ itemPriceId: a.itemPriceId, quantity: Number(a.quantity) })), note: SP.note || '' };
+  const out = { action, firmId: SP.firmId, subscriptionId: SP.subId, changes, adds: SP.adds.map((a) => Object.assign({ itemPriceId: a.itemPriceId, quantity: Number(a.quantity) },
+    Number(a.discountValue) > 0 ? { discountType: a.discountType, discountValue: Number(a.discountValue), discountDuration: a.discountDuration,
+      discountMonths: a.discountDuration === 'Limited' ? Number(a.discountMonths || 3) : null } : {})), note: SP.note || '' };
   if (SP.adds.length) Object.assign(out, { primaryContactId: SP.primary, ccContactIds: [...SP.cc].filter((id) => id !== SP.primary) });
   return out;
 }
@@ -256,6 +271,7 @@ function spOnInput(e) {
   const t = e.target;
   if (t.dataset.spQty) { SP.qty[t.dataset.spQty] = t.value; spInvalidate(); }
   else if (t.dataset.spAddqty != null) { SP.adds[Number(t.dataset.spAddqty)].quantity = t.value; spInvalidate(); }
+  else if (t.dataset.spDisc && t.tagName === 'INPUT') { SP.adds[Number(t.dataset.i)][t.dataset.spDisc] = t.value; spInvalidate(); }
   else if (t.matches('[data-sp-note]')) { SP.note = t.value; }
 }
 
@@ -272,7 +288,11 @@ document.addEventListener('change', (e) => {
   if (e.target.matches('[data-sp-addsel]') && e.target.value) {
     const sub = spSub();
     const item = ((SP.data.addable || {})[sub.frequency] || []).find((o) => o.itemPriceId === e.target.value);
-    SP.adds.push({ itemPriceId: e.target.value, quantity: Math.max(1, (item && item.minQuantity) || 1) });
+    SP.adds.push({ itemPriceId: e.target.value, quantity: Math.max(1, (item && item.minQuantity) || 1), discountType: 'Percent', discountValue: '', discountDuration: 'One time', discountMonths: 3 });
+    SP.preview = null;
+    spRender();
+  } else if (e.target.matches('select[data-sp-disc]')) {
+    SP.adds[Number(e.target.dataset.i)][e.target.dataset.spDisc] = e.target.value;
     SP.preview = null;
     spRender();
   } else if (e.target.matches('[data-sp-primary]')) {
@@ -315,7 +335,7 @@ async function spDoConfirm() {
   const p = SP.preview;
   if (!p || !SP.requestId) return;
   const quote = p.mode === 'quote';
-  const lines = p.changes.map((c) => c.isNew ? `+ ${c.name}${c.to ? ' × ' + c.to : ''}` : `${c.name}: ${c.from} → ${c.to}`).join('\n');
+  const lines = p.changes.map((c) => c.isNew ? `+ ${c.name}${c.to ? ' × ' + c.to : ''}${c.discount ? ' (' + c.discount + ')' : ''}` : `${c.name}: ${c.from} → ${c.to}`).join('\n');
   const primary = (SP.data.contacts || []).find((c) => c.id === SP.primary);
   const msg = quote
     ? `Send a quote to ${SP.data.account.name}?\n\n${lines}\n\nDue on acceptance: ${spMoney(p.dueNowTotal)}\nCreates an Opportunity on the account${SP.data.sendViaMattSign ? `; MattSign emails it to ${primary ? primary.name + ' (' + primary.email + ')' : 'the chosen contact'}` : ' (MattSign sending is off, so nothing is emailed)'}.`

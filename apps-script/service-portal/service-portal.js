@@ -91,7 +91,17 @@ function spLines_(list) {
   if (!Array.isArray(list)) return [];
   return list.slice(0, 50).map(function (l) {
     var q = l && l.quantity != null && l.quantity !== '' ? Math.floor(Number(l.quantity)) : null;
-    return { itemPriceId: String((l && l.itemPriceId) || ''), quantity: isFinite(q) ? q : null };
+    var out = { itemPriceId: String((l && l.itemPriceId) || ''), quantity: isFinite(q) ? q : null };
+    // Discount on a new add-on (Salesforce validates it).
+    var v = l && Number(l.discountValue);
+    if (v > 0 && isFinite(v)) {
+      out.discountType = l.discountType === 'Amount' ? 'Amount' : 'Percent';
+      out.discountValue = Math.round(v * 100) / 100;
+      out.discountDuration = ['One time', 'Forever', 'Limited'].indexOf(l.discountDuration) > -1 ? l.discountDuration : 'One time';
+      var m = Math.floor(Number(l.discountMonths));
+      out.discountMonths = out.discountDuration === 'Limited' && isFinite(m) ? m : null;
+    }
+    return out;
   }).filter(function (l) { return l.itemPriceId; });
 }
 
