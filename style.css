@@ -1007,6 +1007,7 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 /* Local test environment banner */
 .local-banner{position:relative;z-index:60;background:#ffd23f;color:#3a2a00;font:700 13px var(--font);text-align:center;padding:5px 10px;letter-spacing:.02em}
 .local-banner.live{background:#ff4f4f;color:#fff}
+.local-banner-btn{margin-left:10px;border:1px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:12px;border-radius:999px;padding:1px 10px;cursor:pointer}
 /* Call prep */
 .cp-btn{font:600 12px var(--font);color:var(--lm-blue);background:var(--surface-2);border:1px solid transparent;border-radius:999px;padding:3px 10px;margin-left:8px;cursor:pointer;white-space:nowrap;vertical-align:middle}
 .cp-btn:hover{border-color:var(--border-str)}
