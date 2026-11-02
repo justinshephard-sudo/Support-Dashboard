@@ -1,6 +1,7 @@
 // LEGACY INCENTIVE OVERRIDES web app — bound to "Support Team Report 2026".
 // Writes the "Overrides" tab there (Month | Incentive | Winner | Updated | Stat text), and
-// (action exclude / unexclude) the "Excluded Firms" tab — see exclusions.gs.
+// (action exclude / unexclude) the "Excluded Firms" tab — see exclusions.gs, and (action
+// refreshChurn, any signed-in viewer) today's churn reasons into the Accounts tab — see sync-accounts.gs.
 //
 // Security: only dashboard MANAGERS can write. Each request carries the viewer's
 // Google access token, checked by dashAuth_ (shared/dash-auth.js, copied in by
@@ -18,6 +19,11 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
   const who = dashAuth_(body.token);
   if (!who.ok) return dashJson_(who);
+  // MRR Report "Update now" (anyone signed in): pull today's churn reasons from ChurnZero.
+  if (body.action === 'refreshChurn') {
+    try { return dashJson_(refreshChurnReasons_()); }
+    catch (err) { console.error(err); return dashJson_({ ok: false, error: 'Couldn’t refresh churn reasons from ChurnZero.' }); }
+  }
   if (!who.manager) return dashJson_({ ok: false, error: 'Only managers can do that.' });
   if (body.action === 'exclude' || body.action === 'unexclude') {
     try { return dashJson_(handleExclusion_(body, who)); }

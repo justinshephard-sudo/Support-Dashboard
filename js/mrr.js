@@ -8,6 +8,8 @@
 const MRR_URL = 'https://script.google.com/macros/s/AKfycbxWBNVsOhP027_V8jpCJ52lja3iMtVehZlQUVG9T2g2k2PLt84bgU_JtENO24LNd0DD/exec';
 // Johnny's Chargebee sync (the MRR Data sheet's script): "Update now" runs it on demand instead of waiting for the hourly run.
 const MRR_SYNC_URL = 'https://script.google.com/macros/s/AKfycbyVN9ZkilFEOYh3R2j7zkH0ymi4_NYECcuK_GeQoZScIu0vO4FTBEcPIgQUTguauWNI/exec';
+// The Support Team Report sheet's script: refreshes churn reasons from ChurnZero into its Accounts tab.
+const MRR_CHURN_URL = 'https://script.google.com/macros/s/AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g/exec';
 const MRR_CATS = [
   { key: 'u', label: 'Upgrades', color: '--st-good' },
   { key: 'r', label: 'Reactivations', color: '--slot-2' },
@@ -120,19 +122,24 @@ async function loadMrr(force) {
   return MRR.loading;
 }
 
-// "Update now": run the Chargebee sync (1–3 minutes), then rebuild the report from what it wrote.
+// "Update now": run the Chargebee sync (1–3 minutes) and refresh churn reasons from ChurnZero side by side,
+// then rebuild the report from what they wrote.
 async function mrrSyncNow() {
   if (MRR.syncing) return;
   MRR.syncing = true;
   const btn = document.getElementById('mrrRefresh'), note = document.querySelector('#mrrHero .mrr-sync');
   if (btn) { btn.disabled = true; btn.classList.add('spin'); btn.textContent = '↻ Updating…'; }
-  if (note) { note.classList.remove('bad'); note.textContent = 'Pulling the latest from Chargebee — usually 1–3 minutes…'; }
+  if (note) { note.classList.remove('bad'); note.textContent = 'Pulling the latest from Chargebee and ChurnZero — usually 1–3 minutes…'; }
+  const post = (url, action) => fetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ token: AUTH.token, action }),
+  }).then((r) => r.json());
   try {
-    const res = await fetch(MRR_SYNC_URL, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ token: AUTH.token, action: 'syncNow' }),
-    });
-    const d = await res.json();
+    // A failed churn-reason refresh shouldn't block the MRR update; the 4am sync catches it up.
+    const [d] = await Promise.all([
+      post(MRR_SYNC_URL, 'syncNow'),
+      post(MRR_CHURN_URL, 'refreshChurn').catch((e) => console.warn('Churn reasons:', e)),
+    ]);
     if (!d.ok) throw new Error(d.error || 'Request failed');
     if (d.busy) { if (note) note.textContent = 'A Chargebee sync is already running — try again in a couple of minutes.'; return; }
     MRR.syncing = false;

@@ -268,6 +268,47 @@ function legacySummary_(contracts) {
 /* ---- fetch / sheet ---- */
 // Every page of an OData query. The first page asks for $count, then the rest
 // are fetched in parallel batches by $skip (ChurnZero allows $top 100 at most).
+// "Update now" on the MRR Report: re-reads just the churn reason and details from ChurnZero
+// (every firm that has a churn category, ~1,100) into the Accounts tab, so a reason changed
+// today shows without waiting for the 4am full sync. Returns how many rows changed.
+function refreshChurnReasons_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { ok: true, busy: true };   // the full sync is running; it'll have them
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var user = props.getProperty('CZ_USER'), key = props.getProperty('CZ_KEY');
+    var base = props.getProperty('CZ_BASE') || 'https://lawmatics.us1app.churnzero.net/public/v1';
+    if (!user || !key) throw new Error('Set CZ_USER and CZ_KEY in Script Properties first.');
+    var headers = { Authorization: 'Basic ' + Utilities.base64Encode(user + ':' + key) };
+    var fresh = {};
+    fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('Cf/ChurnCategory ne null') +
+      '&$select=' + encodeURIComponent('Cf/FirmId,Cf/ChurnCategory,Cf/ChurnDetails'), headers).forEach(function (a) {
+      var cf = a.Cf || {};
+      if (cf.FirmId) fresh[String(cf.FirmId).trim()] = [cf.ChurnCategory || '', String(cf.ChurnDetails || '').slice(0, 600)];
+    });
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CZ_ACCOUNTS_TAB);
+    if (!sheet || sheet.getLastRow() < 2) return { ok: true, changed: 0 };
+    var n = sheet.getLastRow() - 1;
+    var idCol = CZ_COLUMNS.indexOf('FirmId') + 1, catCol = CZ_COLUMNS.indexOf('ChurnCategory') + 1;
+    if (CZ_COLUMNS[catCol] !== 'ChurnDetails') throw new Error('Accounts columns moved');
+    var ids = sheet.getRange(2, idCol, n, 1).getDisplayValues();
+    var range = sheet.getRange(2, catCol, n, 2);
+    var cur = range.getDisplayValues();
+    var changed = 0;
+    var out = cur.map(function (row, i) {
+      var f = fresh[String(ids[i][0]).trim()];
+      if (!f || (f[0] === row[0] && f[1] === row[1])) return row;
+      changed++;
+      return [dashSafe_(f[0]), dashSafe_(f[1])];
+    });
+    if (changed) range.setNumberFormat('@').setValues(out);
+    return { ok: true, changed: changed };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function fetchAllCZ_(url, headers) {
   var get = function (urls) {
     return UrlFetchApp.fetchAll(urls.map(function (u) { return { url: u, headers: headers, muteHttpExceptions: true }; }))
