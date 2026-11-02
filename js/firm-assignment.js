@@ -120,7 +120,7 @@ function faFirmCard(f) {
         <div class="fa-why">${top.partnerRule ? `Partner-sourced firm${f.leadSourceDetail ? ' (' + esc(f.leadSourceDetail) + ')' : ''}: partner firms always go to ${esc(top.name.split(' ')[0])}. ` : ''}${esc(faWhy(top))}</div>
         <label class="fa-change">Assign to
           <select class="fa-select" data-cz="${f.czId}">
-            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.partnerRule ? 'partner rule' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
+            ${f.ranking.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${r.partnerRule ? 'partner rule' : r.partnerOnly ? 'partner firms only' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
           </select>
         </label>
         <div class="fa-why fa-why-alt" hidden></div>
