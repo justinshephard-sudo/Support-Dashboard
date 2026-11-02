@@ -2,8 +2,8 @@
    New Firm Assignment (managers; shows with Manager mode on).
    Live from ChurnZero through apps-script/firm-assignment: new firms nobody
    owns yet, a suggested AM for each (with the reasons), and Approve / change.
-   IM/CSM split: every firm gets an Implementation Manager; firms over $400/mo also
-   get a CSM, who becomes the Owner (otherwise the IM is). Assign writes the Owner,
+   IM/CSM split: every firm gets an Implementation Manager, who is the Owner; firms over
+   $400/mo also get a CSM (the handoff moves the Owner to them). Assign writes the Owner,
    Onboarding Type = Premium and the IM / CSM fields in ChurnZero, and logs suggested
    vs chosen.
    ========================================================================== */
@@ -134,8 +134,8 @@ function faPicker(f, kind) {
 
 function faOwnerLine(f) {
   return f.needsCsm
-    ? `<div class="fa-owner">Owner: <b>the CSM</b> (over ${fmtMoney(FA.data.csmMin)}/mo)</div>`
-    : `<div class="fa-owner">Owner: <b>the IM</b> · no CSM at ${fmtMoney(FA.data.csmMin)}/mo or under. Support takes over when onboarding is complete.</div>`;
+    ? `<div class="fa-owner">Owner: <b>the IM</b> · moves to the CSM when onboarding is complete</div>`
+    : `<div class="fa-owner">Owner: <b>the IM</b> · no CSM at ${fmtMoney(FA.data.csmMin)}/mo or under, so Support takes over when onboarding is complete</div>`;
 }
 
 function faScoreTip(r, f) {
@@ -230,7 +230,7 @@ function renderAssign() {
     <div class="fa-hero-text">
       <div class="loop-eyebrow">Manager mode · Onboarding</div>
       <h2>New Firm <span>Assignment</span></h2>
-      <p>${open.length ? `Every firm gets an IM; firms over ${fmtMoney(d.csmMin)}/mo also get a CSM, who becomes the Owner. Suggestions balance each rep’s load, time since their last new firm and book size.` : 'All caught up — every new firm has an owner.'}</p>
+      <p>${open.length ? `Every firm gets an IM; firms over ${fmtMoney(d.csmMin)}/mo also get a CSM. The IM is the Owner until the handoff. Suggestions balance each rep’s load, time since their last new firm and book size.` : 'All caught up — every new firm has an owner.'}</p>
       <div class="loop-stats">
         <div class="loop-stat"><b>${open.length}</b><span>Waiting for an owner</span></div>
         <div class="loop-stat s-closed"><b>${ready}</b><span>Ready to assign</span></div>

@@ -50,8 +50,8 @@ var WEIGHTS = { open: 40, since: 30, book: 15, value: 15 };
 var PARTNER_REP_ID = 11; // Kennedy Wickham's ChurnZero user (not the duplicate #120)
 var TIER_DEFAULT = { reps: {}, min: 1000 };
 
-/* IM/CSM split. Every new firm gets an Implementation Manager; firms over CSM_MIN also get a CSM,
-   who is the Owner. Under that the IM is the Owner (Support takes over when onboarding completes).
+/* IM/CSM split. Every new firm gets an Implementation Manager, who is the Owner; firms over CSM_MIN
+   also get a CSM. The handoff (handoff.js) moves the Owner to the CSM, or to Support if there's none.
    The IM and CSM go into two text fields that sync with Salesforce; a ChurnZero play sets the
    roles from them (the roles themselves can't be written through the API). Partner-sourced firms
    get Kennedy for both. Names as they appear in ChurnZero. */
@@ -518,7 +518,7 @@ function assign_(b, by) {
   var mrr = Number(acct.TotalContractAmount) || 0, needsCsm = mrr > CSM_MIN;
   if (needsCsm && (!csm || !csm.active)) throw new Error(acct.Name + ' is over $' + CSM_MIN + '/mo, so it needs a CSM too.');
   if (!needsCsm) csm = null;
-  var owner = csm || im;
+  var owner = im;   // the IM owns the firm through onboarding; the handoff moves it on
   if (acct.UserAccountId && acct.UserAccountId !== owner.id) {
     throw new Error(acct.Name + ' was already assigned in ChurnZero. Reload to refresh the queue.');
   }
@@ -661,7 +661,7 @@ function checkSplitLoad() {
   d.queue.forEach(function (f) {
     var im = f.ranking && f.ranking[0], csm = f.csmRanking[0];
     Logger.log(f.name + ' · $' + f.mrr + (f.partner ? ' · partner' : '') + ' → IM ' + (im ? im.name + ' (' + (im.partnerRule ? 'partner' : im.score) + ')' : '—') +
-      (f.needsCsm ? ', CSM ' + (csm ? csm.name + ' (' + (csm.partnerRule ? 'partner' : csm.score) + ')' : '—') + ', Owner = CSM' : ', no CSM, Owner = IM'));
+      (f.needsCsm ? ', CSM ' + (csm ? csm.name + ' (' + (csm.partnerRule ? 'partner' : csm.score) + ')' : '—') : ', no CSM') + ', Owner = IM');
   });
 }
 
