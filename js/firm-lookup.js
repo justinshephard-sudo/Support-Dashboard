@@ -117,13 +117,14 @@ function parseContracts(rows) {
   const header = rows[0].map((h) => String(h || '').trim());
   const col = (name) => header.indexOf(name);
   const iFirm = col('FirmId'), iName = col('AccountName'), iDoc = col('ContentDocumentId'), iTitle = col('Title'), iAt = col('UploadedAt');
-  // Indexed by Firm ID, and by name too: some Salesforce accounts have no Firm ID.
+  // Indexed by Firm ID. Only contracts whose Salesforce account has no Firm ID are indexed by name too,
+  // so two firms with the same name (e.g. two "Acorn Law"s) never get each other's contract.
   const add = (key, entry) => { if (!map.has(key)) map.set(key, []); map.get(key).push(entry); };
   rows.slice(1).forEach((r) => {
     if (!r[iDoc]) return;
     const entry = { docId: String(r[iDoc]), title: String(r[iTitle] || ''), at: String(r[iAt] || '') };
     const firm = normId(r[iFirm]);
-    if (firm) add('id:' + firm, entry);
+    if (firm) { add('id:' + firm, entry); return; }
     const name = normFirmName(r[iName]);
     if (name) add('name:' + name, entry);
   });
@@ -135,7 +136,12 @@ function normFirmName(s) {
     .replace(/\b(llc|pllc|llp|pc|p c|pa|inc|ltd|the)\b/g, ' ').replace(/\s+/g, ' ').trim();
 }
 function contractsFor(f) {
-  return FIRMS.contracts.get('id:' + normId(f.firmId)) || FIRMS.contracts.get('name:' + normFirmName(f.name)) || [];
+  const byId = FIRMS.contracts.get('id:' + normId(f.firmId));
+  if (byId) return byId;
+  // By name only when no other firm has the same name; otherwise we can't tell whose contract it is.
+  const name = normFirmName(f.name);
+  if (!name || FIRMS.list.filter((x) => normFirmName(x.name) === name).length > 1) return [];
+  return FIRMS.contracts.get('name:' + name) || [];
 }
 function fmtContractDate(s) {
   const d = new Date(String(s).replace(/\+0000$/, 'Z'));
