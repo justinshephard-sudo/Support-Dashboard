@@ -25,16 +25,17 @@ var HANDOFF_OUTCOMES = [
   { status: 'Onboarded by Third Party', label: 'Onboarded by a third party', form: 'none' },
 ];
 // type: text | textarea | choice (pills) | scale (1–5) | contact (pick one of the firm's contacts).
-// prefill: the ChurnZero field the form starts from (sales' notes, ChurnZero's AI guess, or the current value).
+// prefill: the field's current value in ChurnZero. Only for fields the form saves to (never sales' fields:
+// every handoff answer is its own field, written fresh by the IM).
 // cz: the ChurnZero field the answer saves to. null = the field doesn't exist yet: shown and logged, never
 // sent (setAttribute with an unknown name CREATES a custom field). Set each one once Justin creates it.
 var HANDOFF_SECTIONS = [{ key: 'firm', label: 'About the firm' }, { key: 'went', label: 'How onboarding went' }];
 var HANDOFF_FIELDS = [
-  { key: 'intakeBuilt', section: 'firm', label: 'Intake process built', type: 'textarea', required: true, prefill: 'IntakeProcess', prefillFrom: 'sales notes', cz: null,
+  { key: 'intakeBuilt', section: 'firm', label: 'Intake process built', type: 'textarea', required: true, cz: null,
     hint: 'What we set up: forms, automations, how leads flow through.' },
   { key: 'marketing', section: 'firm', label: 'Main marketing sources', type: 'textarea', cz: null, hint: 'e.g. Google Ads, referrals, SEO, Avvo' },
-  { key: 'painPoints', section: 'firm', label: 'Pain points', type: 'textarea', prefill: 'KeyChallenges', prefillFrom: 'sales notes', cz: null },
-  { key: 'goal', section: 'firm', label: 'Primary goal with Lawmatics', type: 'text', prefill: 'AiStrategicGoalsstatedOrInferred', prefillFrom: 'ChurnZero AI', cz: null },
+  { key: 'painPoints', section: 'firm', label: 'Pain points', type: 'textarea', cz: null },
+  { key: 'goal', section: 'firm', label: 'Primary goal with Lawmatics', type: 'text', cz: null },
   { key: 'decisionMaker', section: 'firm', label: 'Main decision maker', type: 'contact', required: true, cz: null, existing: true,
     hint: 'Saved as the contact’s Role = Primary Decision Maker.' },
   { key: 'techSavvy', section: 'firm', label: 'Tech savvy score', type: 'scale', required: true, prefill: 'TechSavvyScore1Low5High', cz: 'TechSavvyScore1Low5High',
