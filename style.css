@@ -1061,3 +1061,24 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .ob-actions{display:flex;gap:8px;margin:0 4px 6px}
 .ob-actions .ob-done-btn{font-size:14px;padding:9px 16px}
 .ob-party{z-index:100000}
+
+.ho{max-width:720px}
+.ho-full[hidden],.ho-none[hidden]{display:none}
+.ho-none{font-size:14px;color:var(--text-2);background:var(--surface-2);border-radius:12px;padding:12px 14px;margin:0}
+.ho-sec{border:1px solid var(--border);border-radius:16px;padding:14px 16px 4px;margin-bottom:12px}
+.ho-sec h4{margin:0 0 12px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--lm-blue)}
+.ho-sec .ho-field{margin-bottom:14px}
+.ho-hint{display:block;font-size:12px;color:var(--text-3);margin:-2px 0 6px}
+.ho-from{display:block;font-size:11.5px;color:var(--text-3);margin-top:4px;font-style:italic}
+.ho-pills{display:flex;flex-wrap:wrap;gap:8px}
+.ho-pills label,.ho-scale label{cursor:pointer}
+.ho-pills input,.ho-scale input{position:absolute;opacity:0;pointer-events:none}
+.ho-pills label{font-size:14px;font-weight:700;color:var(--text-2);background:var(--surface-2);border:2px solid transparent;border-radius:999px;padding:7px 16px}
+.ho-pills label:has(input:checked){color:var(--text-1);border-color:currentColor}
+.ho-pills .ho-mood-positive:has(input:checked){background:color-mix(in srgb,var(--st-good) 14%,transparent);color:var(--st-good)}
+.ho-pills .ho-mood-neutral:has(input:checked){background:color-mix(in srgb,var(--st-warn) 14%,transparent);color:var(--st-warn)}
+.ho-pills .ho-mood-negative:has(input:checked){background:color-mix(in srgb,var(--st-critical) 14%,transparent);color:var(--st-critical)}
+.ho-scale{display:flex;gap:6px}
+.ho-scale span{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--surface-2);font-weight:800;font-size:15px;color:var(--text-2);border:2px solid transparent}
+.ho-scale label:has(input:checked) span{background:var(--lm-blue);color:#fff}
+.ho-pills label:has(input:focus-visible),.ho-scale label:has(input:focus-visible) span{outline:2px solid var(--lm-blue);outline-offset:2px}

@@ -8,7 +8,7 @@
    closeOnboarding → validates the answers, then in ChurnZero: sets Onboarding
                      Status + Onboarding Completed Date (today), saves each answer
                      that has a ChurnZero field, and for new-model firms (IM field
-                     set) at or under CSM_MIN moves the Owner to Support. Reads the
+                     set) moves the Owner from the IM to the CSM, or to Support when there's no CSM. Reads the
                      account back to confirm and logs the handoff to the
                      "Onboarding Handoffs" tab.
 
@@ -18,20 +18,32 @@
 
 var HANDOFF_TAB = 'Onboarding Handoffs';
 var SUPPORT_EMAIL = 'support@lawmatics.com';
+// Never Engaged and Third Party need no form: just the status, the completed date and the Owner move.
 var HANDOFF_OUTCOMES = [
   { status: 'Complete', label: 'Complete', form: 'full' },
-  { status: 'Complete - Never Engaged', label: 'Complete – never engaged', form: 'short' },
-  { status: 'Onboarded by Third Party', label: 'Onboarded by a third party', form: 'short' },
+  { status: 'Complete - Never Engaged', label: 'Complete – never engaged', form: 'none' },
+  { status: 'Onboarded by Third Party', label: 'Onboarded by a third party', form: 'none' },
 ];
-// type: text | textarea | select | yesno | date | number. forms: which outcomes show it.
-// PLACEHOLDERS until Justin's ChurnZero fields exist; set cz to each field's name then.
+// type: text | textarea | choice (pills) | scale (1–5) | contact (pick one of the firm's contacts).
+// prefill: the ChurnZero field the form starts from (sales' notes, ChurnZero's AI guess, or the current value).
+// cz: the ChurnZero field the answer saves to. null = the field doesn't exist yet: shown and logged, never
+// sent (setAttribute with an unknown name CREATES a custom field). Set each one once Justin creates it.
+var HANDOFF_SECTIONS = [{ key: 'firm', label: 'About the firm' }, { key: 'went', label: 'How onboarding went' }];
 var HANDOFF_FIELDS = [
-  { key: 'goals', label: 'What the firm wants to get out of Lawmatics', type: 'textarea', required: true, forms: ['full'], cz: null },
-  { key: 'useCase', label: 'Main use case', type: 'select', options: ['Intake', 'Marketing automation', 'Matter management', 'Billing', 'Other'], required: true, forms: ['full'], cz: null },
-  { key: 'health', label: 'How the firm feels at handoff', type: 'select', options: ['Happy', 'Some concerns', 'At risk'], required: true, forms: ['full'], cz: null },
-  { key: 'aiInterest', label: 'Interested in AI features?', type: 'yesno', forms: ['full'], cz: null },
-  { key: 'checkIn', label: 'Suggested first CSM check-in', type: 'date', forms: ['full'], cz: null },
-  { key: 'notes', label: 'Anything the CSM should know', type: 'textarea', required: true, forms: ['full', 'short'], cz: null },
+  { key: 'intakeBuilt', section: 'firm', label: 'Intake process built', type: 'textarea', required: true, prefill: 'IntakeProcess', prefillFrom: 'sales notes', cz: null,
+    hint: 'What we set up: forms, automations, how leads flow through.' },
+  { key: 'marketing', section: 'firm', label: 'Main marketing sources', type: 'textarea', cz: null, hint: 'e.g. Google Ads, referrals, SEO, Avvo' },
+  { key: 'painPoints', section: 'firm', label: 'Pain points', type: 'textarea', prefill: 'KeyChallenges', prefillFrom: 'sales notes', cz: null },
+  { key: 'goal', section: 'firm', label: 'Primary goal with Lawmatics', type: 'text', prefill: 'AiStrategicGoalsstatedOrInferred', prefillFrom: 'ChurnZero AI', cz: null },
+  { key: 'decisionMaker', section: 'firm', label: 'Main decision maker', type: 'contact', required: true, cz: null, existing: true,
+    hint: 'Saved as the contact’s Role = Primary Decision Maker.' },
+  { key: 'techSavvy', section: 'firm', label: 'Tech savvy score', type: 'scale', required: true, prefill: 'TechSavvyScore1Low5High', cz: 'TechSavvyScore1Low5High',
+    hint: '1 = needs a lot of help · 5 = very comfortable' },
+  { key: 'sentiment', section: 'went', label: 'Onboarding sentiment', type: 'choice', options: ['Positive', 'Neutral', 'Negative'], required: true, cz: null },
+  { key: 'openItems', section: 'went', label: 'Open items', type: 'textarea', cz: null, hint: 'Anything still owed to the firm.' },
+  { key: 'bugs', section: 'went', label: 'Bugs', type: 'textarea', cz: null },
+  { key: 'features', section: 'went', label: 'Feature requests', type: 'textarea', cz: null },
+  { key: 'notes', section: 'went', label: 'Handoff notes', type: 'textarea', required: true, cz: null, hint: 'Anything else the CSM should know.' },
 ];
 
 // Any signed-in Lawmatics user may call these; the per-firm check is below.
@@ -62,11 +74,30 @@ function handoffStart_(b, who) {
   if (!handoffCanClose_(who, acct, users)) throw new Error('Only the firm’s IM or a manager can close this onboarding.');
   if (['Pre-Kickoff', 'Open'].indexOf(cf.OnboardingStatus) < 0) throw new Error(acct.Name + ' isn’t an open onboarding in ChurnZero (status: ' + (cf.OnboardingStatus || 'blank') + ').');
   var mrr = Number(acct.TotalContractAmount) || 0, im = cfGet_(cf, IM_FIELD);
+  var contacts = czGet_('/Contact', { $filter: 'AccountId eq ' + acct.Id, $select: 'Id,FirstName,LastName,Email,Cf/Role,Cf/Title' })
+    .map(function (c) {
+      var ccf = c.Cf || {};
+      return { id: c.Id, name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() || String(c.Email || ''),
+        email: String(c.Email || ''), title: String(ccf.Title || ''), dm: ccf.Role === 'Primary Decision Maker' };
+    }).filter(function (c) { return c.name; })
+    .sort(function (a, b) { return (b.dm - a.dm) || a.name.localeCompare(b.name); }).slice(0, 60);
+  var values = {};
+  HANDOFF_FIELDS.forEach(function (f) {
+    var v = f.prefill ? cfGet_(cf, f.prefill) : '';
+    if (v !== '' && v != null && String(v) !== 'None') values[f.key] = f.type === 'scale' ? String(Math.round(Number(v)) || '') : String(v).slice(0, 4000);
+  });
+  var dm = contacts.filter(function (c) { return c.dm; })[0];
+  if (dm) values.decisionMaker = String(dm.id);
   return {
     ok: true, firm: { firmId: String(cf.FirmId || acct.ExternalId), name: acct.Name, mrr: mrr, im: im || String(cf.AccountManager || ''),
       csm: cfGet_(cf, CSM_FIELD), owner: (users[acct.UserAccountId] || {}).name || '',
-      toSupport: !!im && mrr <= CSM_MIN },
-    outcomes: HANDOFF_OUTCOMES, fields: HANDOFF_FIELDS.map(function (f) { return { key: f.key, label: f.label, type: f.type, options: f.options || null, required: !!f.required, forms: f.forms, saved: !!f.cz }; }),
+      // New-model firms (IM field set): the Owner moves to the CSM if there is one, else to Support.
+      ownerTo: !im ? '' : cfGet_(cf, CSM_FIELD) ? 'csm' : 'support' },
+    outcomes: HANDOFF_OUTCOMES, sections: HANDOFF_SECTIONS, contacts: contacts, values: values,
+    fields: HANDOFF_FIELDS.map(function (f) {
+      return { key: f.key, section: f.section, label: f.label, type: f.type, options: f.options || null, required: !!f.required,
+        hint: f.hint || '', prefillFrom: values[f.key] ? (f.prefillFrom || '') : '', saved: !!f.cz, existing: !!(f.cz || f.existing) };
+    }),
   };
 }
 
@@ -81,32 +112,34 @@ function closeOnboarding_(b, who) {
   if (!outcome) throw new Error('pick how the onboarding ended');
 
   var answers = b.answers || {}, clean = {};
-  HANDOFF_FIELDS.forEach(function (f) {
-    if (f.forms.indexOf(outcome.form) < 0) return;
+  if (outcome.form === 'full') HANDOFF_FIELDS.forEach(function (f) {
     var v = answers[f.key] == null ? '' : String(answers[f.key]).trim().slice(0, 4000);
-    if (f.type === 'select' && v && f.options.indexOf(v) < 0) throw new Error(f.label + ': pick one of the options');
-    if (f.type === 'yesno' && v && ['Yes', 'No'].indexOf(v) < 0) throw new Error(f.label + ': pick Yes or No');
-    if (f.type === 'date' && v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error(f.label + ': enter a date');
-    if (f.type === 'number' && v && !isFinite(Number(v))) throw new Error(f.label + ': enter a number');
+    if (f.type === 'choice' && v && f.options.indexOf(v) < 0) throw new Error(f.label + ': pick one of the options');
+    if (f.type === 'scale' && v && !/^[1-5]$/.test(v)) throw new Error(f.label + ': pick 1 to 5');
+    if (f.type === 'contact' && v && !/^\d+$/.test(v)) throw new Error(f.label + ': pick a contact');
     if (f.required && !v) throw new Error(f.label + ' is required');
     clean[f.key] = v;
   });
 
   var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
   var mrr = Number(acct.TotalContractAmount) || 0, im = cfGet_(cf, IM_FIELD);
-  var support = null;
-  if (im && mrr <= CSM_MIN) {
-    support = Object.keys(users).map(function (k) { return users[k]; })
-      .filter(function (u) { return u.active && String(u.email || '').toLowerCase() === SUPPORT_EMAIL; })[0];
-    if (!support) throw new Error(SUPPORT_EMAIL + ' isn’t an active ChurnZero user, so the Owner can’t move to Support.');
+  // New-model firms (IM field set): the Owner moves from the IM to the CSM, or to Support when there's no CSM.
+  var support = null, csmName = cfGet_(cf, CSM_FIELD);
+  if (im) {
+    var all = Object.keys(users).map(function (k) { return users[k]; }).filter(function (u) { return u.active; });
+    support = csmName ? all.filter(function (u) { return u.name === csmName; })[0]
+      : all.filter(function (u) { return String(u.email || '').toLowerCase() === SUPPORT_EMAIL; })[0];
+    if (!support) throw new Error((csmName || SUPPORT_EMAIL) + ' isn’t an active ChurnZero user, so the Owner can’t move.');
   }
 
   czSet_(appKey, acct.ExternalId, 'OnboardingStatus', outcome.status);
   czSet_(appKey, acct.ExternalId, 'OnboardingCompletedDate', today);
-  HANDOFF_FIELDS.forEach(function (f) { if (f.cz && clean[f.key] != null) czSet_(appKey, acct.ExternalId, f.cz, clean[f.key]); });
+  HANDOFF_FIELDS.forEach(function (f) {
+    if (f.cz && f.type !== 'contact' && clean[f.key]) czSet_(appKey, acct.ExternalId, f.cz, f.type === 'scale' ? Number(clean[f.key]) : clean[f.key]);
+  });
   if (support) czSet_(appKey, acct.ExternalId, props.getProperty('CZ_OWNER_ATTR') || 'OwnerUserAccount', support.email);
 
-  if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, outcome: outcome.status, ownerToSupport: !!support,
+  if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
     unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
   var confirmed = false;
   for (var i = 0; i < 4 && !confirmed; i++) {
@@ -118,7 +151,7 @@ function closeOnboarding_(b, who) {
   }
   handoffLog_({ by: who.email, acct: acct, outcome: outcome.status, im: im || String(cf.AccountManager || ''), mrr: mrr,
     owner: support ? support.name : '', answers: clean, confirmed: confirmed });
-  return { ok: true, confirmed: confirmed, outcome: outcome.status, ownerToSupport: !!support,
+  return { ok: true, confirmed: confirmed, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
     unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
 }
 

@@ -18,16 +18,25 @@ function handoffClose() {
 }
 function handoffKey(e) { if (e.key === 'Escape') handoffClose(); }
 
-function handoffField(f) {
+const HO_MOOD = { Positive: '😊', Neutral: '😐', Negative: '😟' };
+
+function handoffField(f, d) {
   const id = `ho-${f.key}`;
+  const v = d.values[f.key] || '';
   const req = f.required ? ' required' : '';
-  const tag = f.saved ? '' : ' <span class="ho-ph" title="Placeholder question — not saved to ChurnZero yet">placeholder</span>';
+  const tag = f.saved ? '' : f.existing ? ' <span class="ho-ph" title="This field exists in ChurnZero; saving it gets connected next">connect next</span>'
+    : ' <span class="ho-ph" title="ChurnZero field not created yet — the answer is logged but not saved to ChurnZero">new field</span>';
   let input;
-  if (f.type === 'textarea') input = `<textarea id="${id}" name="${f.key}" rows="3" maxlength="4000"${req}></textarea>`;
-  else if (f.type === 'select') input = `<select id="${id}" name="${f.key}" class="fb-select"${req}><option value="">Choose…</option>${f.options.map((o) => `<option>${esc(o)}</option>`).join('')}</select>`;
-  else if (f.type === 'yesno') input = `<span class="ho-yesno">${['Yes', 'No'].map((o) => `<label><input type="radio" name="${f.key}" value="${o}"${req}> ${o}</label>`).join('')}</span>`;
-  else input = `<input id="${id}" name="${f.key}" type="${f.type === 'date' ? 'date' : f.type === 'number' ? 'number' : 'text'}"${req}>`;
-  return `<div class="ho-field" data-forms="${esc(f.forms.join(' '))}"><label for="${id}">${esc(f.label)}${f.required ? ' <b class="ho-req">*</b>' : ''}${tag}</label>${input}</div>`;
+  if (f.type === 'textarea') input = `<textarea id="${id}" name="${f.key}" rows="3" maxlength="4000"${req}>${esc(v)}</textarea>`;
+  else if (f.type === 'choice') input = `<span class="ho-pills">${f.options.map((o) => `<label class="ho-mood-${o.toLowerCase()}"><input type="radio" name="${f.key}" value="${esc(o)}"${o === v ? ' checked' : ''}${req}> ${HO_MOOD[o] || ''} ${esc(o)}</label>`).join('')}</span>`;
+  else if (f.type === 'scale') input = `<span class="ho-scale">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="${f.key}" value="${n}"${String(n) === v ? ' checked' : ''}${req}><span>${n}</span></label>`).join('')}</span>`;
+  else if (f.type === 'contact') input = d.contacts.length
+    ? `<select id="${id}" name="${f.key}" class="fb-select"${req}><option value="">Choose a contact…</option>${d.contacts.map((c) => `<option value="${c.id}"${String(c.id) === v ? ' selected' : ''}>${esc(c.name)}${c.title ? ' · ' + esc(c.title) : ''}${c.dm ? ' (current)' : ''}</option>`).join('')}</select>`
+    : `<p class="ho-hint">No contacts on this firm in ChurnZero.</p><input type="hidden" name="${f.key}" value="">`;
+  else input = `<input id="${id}" name="${f.key}" type="text" maxlength="4000" value="${esc(v)}"${req}>`;
+  const from = f.prefillFrom ? `<span class="ho-from">Started from ${esc(f.prefillFrom)} — edit as needed</span>` : '';
+  return `<div class="ho-field ho-t-${f.type}"><label for="${id}">${esc(f.label)}${f.required ? ' <b class="ho-req">*</b>' : ''}${tag}</label>
+    ${f.hint ? `<span class="ho-hint">${esc(f.hint)}</span>` : ''}${input}${from}</div>`;
 }
 
 async function openHandoff(firmId, name) {
@@ -51,24 +60,25 @@ async function openHandoff(firmId, name) {
     return;
   }
   const f = d.firm;
-  const after = f.toSupport ? 'Owner moves to <b>Support</b> (new firm at $400/mo or under).'
-    : f.csm ? `<b>${esc(f.csm)}</b> stays the Owner as CSM.` : `Owner stays <b>${esc(f.owner || '—')}</b>.`;
+  const after = f.ownerTo === 'csm' ? `Owner moves from ${esc(f.owner || 'the IM')} to the CSM, <b>${esc(f.csm)}</b>.`
+    : f.ownerTo === 'support' ? `No CSM on this firm, so the Owner moves to <b>Support</b>.` : `Owner stays <b>${esc(f.owner || '—')}</b> (firm from before the split).`;
   body.innerHTML = `<form class="ho-form" novalidate>
       <p class="ho-facts">${esc(f.name)} · Firm ${esc(f.firmId)} · ${fmtMoney(f.mrr)}/mo · IM <b>${esc(f.im || '—')}</b><br>${after}</p>
       <fieldset class="ho-outcome"><legend>How did the onboarding end?</legend>
         <div class="ho-seg">${d.outcomes.map((o, i) => `<label><input type="radio" name="outcome" value="${esc(o.status)}" data-form="${o.form}"${i === 0 ? ' checked' : ''}> ${esc(o.label)}</label>`).join('')}</div></fieldset>
-      ${d.fields.map(handoffField).join('')}
+      <div class="ho-full">${d.sections.map((sec) => `<section class="ho-sec"><h4>${esc(sec.label)}</h4>
+        ${d.fields.filter((x) => x.section === sec.key).map((x) => handoffField(x, d)).join('')}</section>`).join('')}</div>
+      <p class="ho-none" hidden>No form needed — this just closes the onboarding and moves the Owner.</p>
       <div class="ho-actions"><button type="submit" class="mgr-btn on">Close onboarding &amp; save</button><button type="button" class="mgr-btn" data-ho-cancel>Cancel</button></div>
       <div class="fa-msg" aria-live="polite"></div>
     </form>`;
   const form = body.querySelector('form');
   const showFor = () => {
-    const kind = form.querySelector('input[name="outcome"]:checked').dataset.form;
-    form.querySelectorAll('.ho-field').forEach((el) => {
-      const on = el.dataset.forms.split(' ').includes(kind);
-      el.hidden = !on;
-      el.querySelectorAll('input,select,textarea').forEach((x) => { x.disabled = !on; });
-    });
+    const full = form.querySelector('input[name="outcome"]:checked').dataset.form === 'full';
+    form.querySelector('.ho-full').hidden = !full;
+    form.querySelector('.ho-none').hidden = full;
+    form.querySelectorAll('.ho-full input,.ho-full select,.ho-full textarea').forEach((x) => { x.disabled = !full; });
+    form.querySelector('[type="submit"]').textContent = full ? 'Close onboarding & save handoff' : 'Close onboarding';
   };
   showFor();
   form.addEventListener('change', (e) => { if (e.target.name === 'outcome') showFor(); });
@@ -86,9 +96,9 @@ async function openHandoff(firmId, name) {
     try {
       const res = await faCall({ action: 'closeOnboarding', firmId, outcome: data.get('outcome'), answers });
       body.innerHTML = `<div class="fa-done"><div class="fa-done-head">${res.confirmed ? '✓ Onboarding closed' : '⏳ Sent to ChurnZero'}</div>
-        <p>${esc(f.name)} is marked <b>${esc(res.outcome)}</b>${res.ownerToSupport ? ' and the Owner moved to Support' : ''}.
+        <p>${esc(f.name)} is marked <b>${esc(res.outcome)}</b>${res.ownerMovedTo ? ` and the Owner moved to ${esc(res.ownerMovedTo)}` : ''}.
           ${res.dryRun ? `<br><b>Dry run — nothing was written.</b> Would set: ${esc(res.wouldWrite.join(' · '))}.` : res.confirmed ? '' : 'ChurnZero hasn’t shown it yet — it can take a minute.'}
-          ${res.unsaved ? `${res.unsaved} placeholder answer${res.unsaved === 1 ? ' was' : 's were'} logged but not sent to ChurnZero.` : ''}
+          ${res.unsaved ? `${res.unsaved} answer${res.unsaved === 1 ? ' was' : 's were'} logged but not sent to ChurnZero yet (fields still to be connected).` : ''}
           The Implementation numbers update with the next sync.</p>
         <button type="button" class="mgr-btn" data-ho-cancel>Done</button></div>`;
       body.querySelector('[data-ho-cancel]').addEventListener('click', handoffClose);
