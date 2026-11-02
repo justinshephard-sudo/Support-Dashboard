@@ -227,9 +227,10 @@ function initAuth(onReady) {
   }
 }
 
-/* Google access tokens last an hour. Near the end (or after a request comes back
-   "session expired") a small banner offers one-click renewal; renewing needs a
-   click because browsers block sign-in popups that open on their own. */
+/* Google access tokens last an hour. Browsers block sign-in popups that open on their own,
+   so in the last 15 minutes the next click anywhere on the page renews the token quietly
+   (Google's popup flashes and closes; no account picker). Only if the hour runs out with no
+   click, or a request comes back "session expired", does a banner ask for a click. */
 function showSessionBanner(expired) {
   let b = document.getElementById('sessionBanner');
   if (!b) {
@@ -237,15 +238,23 @@ function showSessionBanner(expired) {
     b.id = 'sessionBanner';
     b.className = 'session-banner';
     b.innerHTML = '<span></span><button type="button">Stay signed in</button>';
-    b.querySelector('button').addEventListener('click', () => AUTH.tokenClient.requestAccessToken({ prompt: '' }));
+    b.querySelector('button').addEventListener('click', renewSignIn);
     document.body.appendChild(b);
   }
-  b.querySelector('span').textContent = expired || Date.now() > AUTH.expiresAt
-    ? 'Your Google sign-in expired.' : 'Your Google sign-in expires in a few minutes.';
+  b.querySelector('span').textContent = 'Your Google sign-in expired.';
 }
 function hideSessionBanner() { document.getElementById('sessionBanner')?.remove(); }
+function renewSignIn() {
+  AUTH.renewAsked = Date.now();
+  AUTH.tokenClient.requestAccessToken({ prompt: '', hint: AUTH.email });
+}
+document.addEventListener('pointerdown', (e) => {
+  if (!AUTH.email || !AUTH.tokenClient || !AUTH.expiresAt || e.target.closest('#sessionBanner')) return;
+  if (AUTH.expiresAt - Date.now() > 15 * 60000 || Date.now() - (AUTH.renewAsked || 0) < 2 * 60000) return;
+  renewSignIn();
+}, true);
 setInterval(() => {
-  if (AUTH.email && AUTH.expiresAt && AUTH.expiresAt - Date.now() < 5 * 60000) showSessionBanner();
+  if (AUTH.email && AUTH.expiresAt && Date.now() > AUTH.expiresAt) showSessionBanner(true);
 }, 30000);
 const isSessionError = (e) => /session expired|not signed in/i.test(String(e && e.message));
 
