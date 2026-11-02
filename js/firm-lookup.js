@@ -43,7 +43,6 @@ async function initFirmLookup() {
       fetchSheetByTitle(CONTRACTS_TAB).catch(() => []),
     ]);
     FIRMS.list = parseAccounts(rows);
-    if (typeof spAddTestFirm === 'function') FIRMS.list = spAddTestFirm(FIRMS.list);
     FIRMS.contracts = parseContracts(contractRows);
     FIRMS.loaded = true;
     if (cnt) cnt.textContent = FIRMS.list.length ? `${FIRMS.list.length} firms` : '';
