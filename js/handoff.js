@@ -95,13 +95,14 @@ async function openHandoff(firmId, name) {
     msg.textContent = 'Saving to ChurnZero…';
     try {
       const res = await faCall({ action: 'closeOnboarding', firmId, outcome: data.get('outcome'), answers });
-      body.innerHTML = `<div class="fa-done"><div class="fa-done-head">${res.confirmed ? '✓ Onboarding closed' : '⏳ Sent to ChurnZero'}</div>
+      body.innerHTML = `<div class="fa-done"><div class="fa-done-head">${res.dryRun ? '🧪 Dry run' : res.confirmed ? '✓ Onboarding closed' : '⏳ Sent to ChurnZero'}</div>
         <p>${esc(f.name)} is marked <b>${esc(res.outcome)}</b>${res.ownerMovedTo ? ` and the Owner moved to ${esc(res.ownerMovedTo)}` : ''}.
           ${res.dryRun ? `<br><b>Dry run — nothing was written.</b> Would set: ${esc(res.wouldWrite.join(' · '))}.` : res.confirmed ? '' : 'ChurnZero hasn’t shown it yet — it can take a minute.'}
           ${res.unsaved ? `${res.unsaved} answer${res.unsaved === 1 ? ' was' : 's were'} logged but not sent to ChurnZero yet (fields still to be connected).` : ''}
           The Implementation numbers update with the next sync.</p>
         <button type="button" class="mgr-btn" data-ho-cancel>Done</button></div>`;
       body.querySelector('[data-ho-cancel]').addEventListener('click', handoffClose);
+      if (res.dryRun) return;
       IMPL.open = IMPL.open.filter((r) => String(r.FirmId) !== String(firmId));
       document.querySelectorAll(`#impl-drill [data-close-firm="${CSS.escape(String(firmId))}"]`).forEach((b) => { b.closest('tr').classList.add('row-muted'); b.replaceWith(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'Closed' })); });
     } catch (err) {

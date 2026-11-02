@@ -35,8 +35,8 @@ var HANDOFF_FIELDS = [
     hint: 'What we set up: forms, automations, how leads flow through.' },
   { key: 'painPoints', section: 'firm', label: 'Product pain points', type: 'textarea', cz: 'ProductPainPoints' },
   { key: 'goal', section: 'firm', label: 'Primary goal with Lawmatics', type: 'text', cz: 'PrimaryGoalWithLawmatics' },
-  { key: 'decisionMaker', section: 'firm', label: 'Main decision maker', type: 'contact', required: true, cz: null, existing: true,
-    hint: 'Saved as the contact’s Role = Primary Decision Maker.' },
+  { key: 'decisionMaker', section: 'firm', label: 'Main decision maker', type: 'contact', required: true, cz: 'contact:Role', existing: true,
+    hint: 'Saved as the contact’s Role = Primary Decision Maker (only one per firm).' },
   { key: 'techSavvy', section: 'firm', label: 'Tech savvy score', type: 'scale', required: true, prefill: 'TechSavvyScore1Low5High', cz: 'TechSavvyScore1Low5High',
     hint: '1 = needs a lot of help · 5 = very comfortable' },
   { key: 'sentiment', section: 'went', label: 'Onboarding sentiment', type: 'choice', options: ['Positive', 'Neutral', 'Negative'], required: true, cz: 'OnboardingSentiment' },
@@ -74,7 +74,9 @@ function handoffStart_(b, who) {
   if (!handoffCanClose_(who, acct, users)) throw new Error('Only the firm’s IM or a manager can close this onboarding.');
   if (['Pre-Kickoff', 'Open'].indexOf(cf.OnboardingStatus) < 0) throw new Error(acct.Name + ' isn’t an open onboarding in ChurnZero (status: ' + (cf.OnboardingStatus || 'blank') + ').');
   var mrr = Number(acct.TotalContractAmount) || 0, im = cfGet_(cf, IM_FIELD);
-  var contacts = czGet_('/Contact', { $filter: 'AccountId eq ' + acct.Id, $select: 'Id,FirstName,LastName,Email,Cf/Role,Cf/Title' })
+  // Only contacts with an External ID can be written back, so only those are offered.
+  var contacts = czGet_('/Contact', { $filter: 'AccountId eq ' + acct.Id, $select: 'Id,ExternalId,FirstName,LastName,Email,Cf/Role,Cf/Title' })
+    .filter(function (c) { return c.ExternalId; })
     .map(function (c) {
       var ccf = c.Cf || {};
       return { id: c.Id, name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() || String(c.Email || ''),
@@ -137,6 +139,7 @@ function closeOnboarding_(b, who) {
   HANDOFF_FIELDS.forEach(function (f) {
     if (f.cz && f.type !== 'contact' && clean[f.key]) czSet_(appKey, acct.ExternalId, f.cz, f.type === 'scale' ? Number(clean[f.key]) : clean[f.key]);
   });
+  if (clean.decisionMaker) setDecisionMaker_(appKey, acct, Number(clean.decisionMaker));
   if (support) czSet_(appKey, acct.ExternalId, props.getProperty('CZ_OWNER_ATTR') || 'OwnerUserAccount', support.email);
 
   if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
@@ -153,6 +156,26 @@ function closeOnboarding_(b, who) {
     owner: support ? support.name : '', answers: clean, confirmed: confirmed });
   return { ok: true, confirmed: confirmed, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
     unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
+}
+
+// One Primary Decision Maker per firm: the chosen contact gets the Role, anyone else who had it is cleared.
+var DM_ROLE = 'Primary Decision Maker';
+function setDecisionMaker_(appKey, acct, contactId) {
+  var cs = czGet_('/Contact', { $filter: 'AccountId eq ' + acct.Id, $select: 'Id,ExternalId,Cf/Role' });
+  var pick = cs.filter(function (c) { return c.Id === contactId; })[0];
+  if (!pick || !pick.ExternalId) throw new Error('That decision maker isn’t a contact on this firm in ChurnZero. Refresh and pick again.');
+  cs.forEach(function (c) {
+    if (c.Id !== contactId && (c.Cf || {}).Role === DM_ROLE && c.ExternalId) czSetContact_(appKey, acct.ExternalId, c.ExternalId, 'Role', '');
+  });
+  if ((pick.Cf || {}).Role !== DM_ROLE) czSetContact_(appKey, acct.ExternalId, pick.ExternalId, 'Role', DM_ROLE);
+}
+
+function czSetContact_(appKey, accountExternalId, contactExternalId, name, value) {
+  if (DRY) { DRY_WRITES.push('contact ' + contactExternalId + ': ' + name + ' = ' + (value || '(cleared)')); return; }
+  var payload = { appKey: appKey, accountExternalId: accountExternalId, contactExternalId: contactExternalId,
+    action: 'setAttribute', entity: 'contact', name: name, value: value };
+  var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', payload: payload, muteHttpExceptions: true });
+  if (res.getResponseCode() >= 300) { console.error('ChurnZero contact write ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500)); throw new Error('ChurnZero rejected the decision maker change (HTTP ' + res.getResponseCode() + ').'); }
 }
 
 function handoffLog_(x) {
@@ -189,4 +212,23 @@ function testCloseWrite() {
   Utilities.sleep(8000);
   a = read();
   Logger.log('After restore: status "%s", completed "%s"', (a.Cf || {}).OnboardingStatus || '', (a.Cf || {}).OnboardingCompletedDate || '');
+}
+
+/* One-off check (run from the editor): on VIP Law (OLD), makes Jason Kidder (contact 21297) the Primary
+   Decision Maker the way the handoff does, reads it back, then clears it again. Role already exists on
+   contacts, so this can't create stray fields. */
+function testDecisionMakerWrite() {
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  var acct = czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId' })[0];
+  var read = function () { return czGet_('/Contact', { $filter: 'Id eq 21297', $select: 'Id,ExternalId,FirstName,LastName,Cf/Role' })[0]; };
+  var before = read();
+  Logger.log('Before: %s %s, Role "%s"', before.FirstName, before.LastName, (before.Cf || {}).Role || '');
+  czSetContact_(appKey, acct.ExternalId, before.ExternalId, 'Role', DM_ROLE);
+  var ok = false, c;
+  for (var i = 0; i < 6 && !ok; i++) { Utilities.sleep(4000); c = read(); ok = (c.Cf || {}).Role === DM_ROLE; }
+  Logger.log('Set: %s (Role "%s")', ok ? 'WORKS' : 'no change', (c.Cf || {}).Role || '');
+  czSetContact_(appKey, acct.ExternalId, before.ExternalId, 'Role', (before.Cf || {}).Role || '');
+  var cleared = false;
+  for (var j = 0; j < 6 && !cleared; j++) { Utilities.sleep(4000); c = read(); cleared = ((c.Cf || {}).Role || '') === ((before.Cf || {}).Role || ''); }
+  Logger.log('Clear: %s (Role "%s")', cleared ? 'WORKS — back to how it was' : 'didn’t clear, fix by hand', (c.Cf || {}).Role || '');
 }
