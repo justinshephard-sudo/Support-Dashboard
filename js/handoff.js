@@ -102,6 +102,8 @@ async function openHandoff(firmId, name) {
           The Implementation numbers update with the next sync.</p>
         <button type="button" class="mgr-btn" data-ho-cancel>Done</button></div>`;
       body.querySelector('[data-ho-cancel]').addEventListener('click', handoffClose);
+      // Johnny and Merlin dance for a completed onboarding (not for never engaged / third party).
+      if (res.outcome === 'Complete') obDanceParty(f.name, res);
       if (res.dryRun) return;
       IMPL.open = IMPL.open.filter((r) => String(r.FirmId) !== String(firmId));
       document.querySelectorAll(`#impl-drill [data-close-firm="${CSS.escape(String(firmId))}"]`).forEach((b) => { b.closest('tr').classList.add('row-muted'); b.replaceWith(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'Closed' })); });

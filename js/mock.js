@@ -257,7 +257,7 @@ function mockClose(b) {
     decisionMakers: dm ? [{ name: dm.name, title: dm.title, email: dm.email }] : [], answers });
   mockSave();
   CSM.handoffs = null;   // the CSM page picks it up next time it opens
-  return { ok: true, confirmed: true, outcome: outcome.status, ownerMovedTo: f.csm || 'Support', unsaved: 0 };
+  return { ok: true, confirmed: true, testData: true, outcome: outcome.status, ownerMovedTo: f.csm || 'Support', unsaved: 0 };
 }
 
 function mockHandoffs() {
