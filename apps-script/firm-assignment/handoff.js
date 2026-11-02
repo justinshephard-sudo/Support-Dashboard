@@ -34,15 +34,15 @@ var HANDOFF_FIELDS = [
   { key: 'intakeBuilt', section: 'firm', label: 'Implemented intake process', type: 'textarea', required: true, cz: 'ImplementedIntakeProcess',
     hint: 'What we set up: forms, automations, how leads flow through.' },
   { key: 'painPoints', section: 'firm', label: 'Product pain points', type: 'textarea', cz: 'ProductPainPoints' },
-  { key: 'goal', section: 'firm', label: 'Primary goal with Lawmatics', type: 'text', cz: null },
+  { key: 'goal', section: 'firm', label: 'Primary goal with Lawmatics', type: 'text', cz: 'PrimaryGoalWithLawmatics' },
   { key: 'decisionMaker', section: 'firm', label: 'Main decision maker', type: 'contact', required: true, cz: null, existing: true,
     hint: 'Saved as the contact’s Role = Primary Decision Maker.' },
   { key: 'techSavvy', section: 'firm', label: 'Tech savvy score', type: 'scale', required: true, prefill: 'TechSavvyScore1Low5High', cz: 'TechSavvyScore1Low5High',
     hint: '1 = needs a lot of help · 5 = very comfortable' },
   { key: 'sentiment', section: 'went', label: 'Onboarding sentiment', type: 'choice', options: ['Positive', 'Neutral', 'Negative'], required: true, cz: 'OnboardingSentiment' },
   { key: 'openItems', section: 'went', label: 'Open items', type: 'textarea', cz: 'OpenItems', hint: 'Anything still owed to the firm.' },
-  { key: 'bugs', section: 'went', label: 'Bugs', type: 'textarea', cz: null },
-  { key: 'features', section: 'went', label: 'Feature requests', type: 'textarea', cz: null },
+  { key: 'bugs', section: 'went', label: 'Outstanding onboarding bugs', type: 'textarea', cz: 'OutstandingOnboardingBugs' },
+  { key: 'features', section: 'went', label: 'Feature requests', type: 'textarea', cz: 'OnboardingFeatureRequests' },
   { key: 'notes', section: 'went', label: 'Handoff notes', type: 'textarea', required: true, cz: 'HandoffNotes', hint: 'Anything else the CSM should know.' },
 ];
 
