@@ -7,9 +7,11 @@
    Onboarding Type = Premium and the IM / CSM fields in ChurnZero, and logs suggested
    vs chosen.
    ========================================================================== */
-// IM/CSM split branch: the script's test deployment (always the latest pushed code). At go-live,
-// switch back to the live deployment (AKfycbxkDLI7…) and redeploy it.
-const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbzS-NAurLZT5b2pHWcVIlYdLK2ApNbsSiV5BxXZw2kH/exec';
+// IM/CSM split branch: a separate TEST deployment of the script (the @HEAD one needs an editor's
+// Google sign-in, so the page can't call it). After changing the backend on the branch:
+//   clasp push -f && clasp update-deployment AKfycbz1Wrpc…  (never the live AKfycbxkDLI7…)
+// At go-live, switch back to the live deployment (AKfycbxkDLI7…) and redeploy it.
+const ASSIGN_URL = 'https://script.google.com/macros/s/AKfycbz1Wrpc1wToGa0rekS2XxUZwmyBr7kbmQuKnBPLzp18mu4_hmCZi_fBCa5ZqfpcbjCDGQ/exec';
 const ASSIGN_EMAILS = MANAGER_EMAILS;
 // Local test environment: these go to the backend as dry runs (it reports what it would write).
 DRY_RUN_OK[ASSIGN_URL] = ['assign', 'closeOnboarding', 'setRotation', 'setTier', 'setCsmBands'];
