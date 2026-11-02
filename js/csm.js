@@ -6,10 +6,12 @@
    snapshots, ChurnZero health, per-rep monthly totals) and `load` — shared with the MRR
    Report tab — for the firm-level events behind the pop-ups. Reps are the ones on the
    Implementation tab.
+   Completed onboardings this week: firms whose onboarding closed in the last 7 days, with the
+   IM's handoff answers (apps-script/firm-assignment/handoff.js → `handoffs`, through faCall).
    ========================================================================== */
 const CSM_AI_TARGET = 500;
 // rep: whose book is shown. Reps see only their own; managers see the whole team or pick a rep.
-const CSM = { data: null, loading: null, ym: '', error: '', rep: null };
+const CSM = { data: null, loading: null, ym: '', error: '', rep: null, handoffs: null, hoLoading: null, hoError: '' };
 const CSM_NONE = '\u0000none';   // signed in, but not matched to a rep
 
 // Same reps as the Implementation tab's per-rep table (its latest month), else anyone with an open onboarding.
@@ -64,6 +66,7 @@ function openCsm() {
   const root = document.getElementById('csm');
   if (!root.innerHTML) root.innerHTML = '<div class="mrr-hero" id="csmHero"></div><div id="csmError" class="error-banner" hidden></div><div id="csmBody"><div class="res-loading">Pulling each rep’s book…</div></div>';
   if (!CSM.data) prefetchCsm();
+  loadCsmHandoffs(false);
   // Draw straight away from the saved copy (once Implementation's reps are in), then refresh behind it.
   if (CSM.data) Promise.all([ensureTabData('impl'), loadManagerList()]).then(renderCsm);
 }
@@ -226,11 +229,104 @@ function renderCsm() {
   }).join('');
 
   document.getElementById('csmBody').innerHTML = `
+    <div id="csmHandoffs">${csmHandoffsHtml()}</div>
     <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry()}</span></h3>
       ${isManager() ? `<label class="csm-rep-pick">Rep <select class="fb-select" id="csmRep"><option value="">Whole team</option>${allReps.map((r) => `<option value="${esc(r)}"${r === view ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>` : ''}
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid${solo ? ' csm-grid-solo' : ''}">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
     <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
+}
+
+/* ---------- completed onboardings this week (handoff answers) ---------- */
+async function loadCsmHandoffs(force) {
+  if (CSM.hoLoading || (CSM.handoffs && !force)) return CSM.hoLoading;
+  CSM.hoLoading = (async () => {
+    try {
+      CSM.handoffs = await faCall({ action: 'handoffs' });
+      CSM.hoError = '';
+    } catch (e) {
+      if (isSessionError(e)) showSessionBanner(true);
+      CSM.hoError = e.message;
+    } finally {
+      CSM.hoLoading = null;
+    }
+    const el = document.getElementById('csmHandoffs');
+    if (el) el.innerHTML = csmHandoffsHtml();
+  })();
+  return CSM.hoLoading;
+}
+
+// A rep sees the firms coming to them: their CSM field, or (firms from before the split, no CSM)
+// the account manager. Managers on the whole team see every firm.
+function csmHandoffFirms() {
+  const all = (CSM.handoffs && CSM.handoffs.firms) || [];
+  const rep = CSM.rep;
+  if (!rep) return all;
+  if (rep === CSM_NONE) return [];
+  return all.filter((f) => (f.csm ? f.csm === rep : f.am === rep));
+}
+
+const csmHoDay = (d) => new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+const CSM_MOOD = { Positive: ['😊', 'good'], Neutral: ['😐', 'okay'], Negative: ['😟', 'bad'] };
+function csmMood(v) {
+  const m = CSM_MOOD[v];
+  return m ? `<span class="csm-pill h-${m[1]}">${m[0]} ${esc(v)}</span>` : '<span class="muted">—</span>';
+}
+const csmHoFull = (f) => f.outcome === 'Complete';
+
+function csmHandoffsHtml() {
+  const head = (n) => `<div class="mrr-panel-head csm-head"><h3>Completed onboardings this week${n == null ? '' : ` <span class="muted">· ${n}</span>`}</h3>
+    <button type="button" class="loop-btn" id="csmHoRefresh">↻ Refresh</button></div>`;
+  if (!CSM.handoffs) {
+    return head() + (CSM.hoError ? `<div class="error-banner">Couldn’t load the handoffs: ${esc(CSM.hoError)}</div>` : '<div class="res-loading">Pulling this week’s handoffs…</div>');
+  }
+  const firms = csmHandoffFirms();
+  const mine = CSM.rep && CSM.rep !== CSM_NONE;
+  if (!firms.length) {
+    return head(0) + `<div class="empty-note">${mine ? `No firms handed off to ${esc(CSM.rep)}` : 'No onboardings completed'} in the last ${CSM.handoffs.days} days.</div>`;
+  }
+  return head(firms.length) + `<div class="table-wrap"><table class="drill-table mrr-table csm-ho-table"><thead><tr>
+      <th>Firm</th><th>Completed</th><th>IM</th>${mine ? '' : '<th>Goes to</th>'}<th>Sentiment</th><th>Tech savvy</th><th>Decision maker</th><th></th></tr></thead><tbody>
+    ${firms.map((f) => `<tr>
+      <td><b>${esc(f.name)}</b><br><small class="muted">${fmtMoney(f.mrr)}/mo · Firm ${esc(f.firmId)}</small></td>
+      <td>${esc(csmHoDay(f.completed))}${csmHoFull(f) ? '' : `<br><span class="mrr-badge">${esc(f.outcome.replace(/^Complete - /, '') || '—')}</span>`}</td>
+      <td>${esc(f.im || '—')}</td>
+      ${mine ? '' : `<td>${f.csm ? esc(f.csm) : f.im && f.owner ? esc(f.owner) : '<span class="muted">—</span>'}</td>`}
+      <td>${csmMood(f.answers.sentiment)}</td>
+      <td>${f.answers.techSavvy ? `<b>${esc(f.answers.techSavvy)}</b><small class="muted"> / 5</small>` : '<span class="muted">—</span>'}</td>
+      <td>${f.decisionMakers.length ? esc(f.decisionMakers.map((c) => c.name).join(', ')) : '<span class="muted">—</span>'}</td>
+      <td><button type="button" class="mgr-btn" data-csm-ho="${esc(f.firmId)}">${csmHoFull(f) ? 'View handoff' : 'Details'}</button></td>
+    </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+function csmHandoffDrill(firmId) {
+  const d = CSM.handoffs;
+  const f = d && d.firms.find((x) => x.firmId === String(firmId));
+  if (!f) return;
+  const a = f.answers;
+  const val = (fld) => {
+    const v = a[fld.key];
+    if (fld.key === 'sentiment') return v ? csmMood(v) : '';
+    if (fld.type === 'scale') return v ? `<b>${esc(v)}</b> / 5` : '';
+    return v ? esc(v).replace(/\n/g, '<br>') : '';
+  };
+  const dm = f.decisionMakers.length
+    ? f.decisionMakers.map((c) => `${esc(c.name)}${c.title ? ` · ${esc(c.title)}` : ''}${c.email ? ` · <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ''}`).join('<br>')
+    : '';
+  const row = (fld) => {
+    const v = fld.type === 'contact' ? dm : val(fld);
+    return `<div class="csm-ho-q"><span>${esc(fld.label)}</span><div>${v || '<span class="muted">Not answered</span>'}</div></div>`;
+  };
+  const none = !f.closedBy && !Object.keys(a).length
+    ? '<div class="empty-note">Closed in ChurnZero, not through the handoff form, so there are no answers.</div>' : '';
+  const body = csmHoFull(f)
+    ? none + d.sections.map((sec) => `<section class="ho-sec"><h4>${esc(sec.label)}</h4>${d.fields.filter((x) => x.section === sec.key).map(row).join('')}</section>`).join('')
+    : `<div class="empty-note">Closed as <b>${esc(f.outcome)}</b>, so there’s no handoff form for this firm.</div>`;
+  MRR.drill = null;
+  mrrModal(`${f.name} — handoff`,
+    `Completed ${esc(csmHoDay(f.completed))} · ${fmtMoney(f.mrr)}/mo · IM ${esc(f.im || '—')}${f.csm ? ` · CSM ${esc(f.csm)}` : ''}${f.owner ? ` · Owner ${esc(f.owner)}` : ''}${f.closedBy ? ` · closed by ${esc(f.closedBy)}` : ''}`,
+    `<div class="csm-ho">${body}</div>`);
 }
 
 /* ---------- pop-ups ---------- */
@@ -406,7 +502,10 @@ function setupCsm() {
   root.addEventListener('change', (e) => { if (e.target.id === 'csmRep') { CSM.rep = e.target.value; renderCsm(); } });
   root.addEventListener('click', (e) => {
     const t = e.target;
-    if (t.closest('#csmRefresh')) { loadCsm(true); return; }
+    if (t.closest('#csmRefresh')) { loadCsm(true); loadCsmHandoffs(true); return; }
+    if (t.closest('#csmHoRefresh')) { CSM.handoffs = null; document.getElementById('csmHandoffs').innerHTML = csmHandoffsHtml(); loadCsmHandoffs(true); return; }
+    const ho = t.closest('[data-csm-ho]');
+    if (ho) { csmHandoffDrill(ho.dataset.csmHo); return; }
     const co = t.closest('[data-csm-cohort]');
     if (co) { csmCohortOpen(co.dataset.csmCohort); return; }
     const ym = t.closest('[data-csm-ym]');

@@ -1082,3 +1082,10 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .ho-scale span{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--surface-2);font-weight:800;font-size:15px;color:var(--text-2);border:2px solid transparent}
 .ho-scale label:has(input:checked) span{background:var(--lm-blue);color:#fff}
 .ho-pills label:has(input:focus-visible),.ho-scale label:has(input:focus-visible) span{outline:2px solid var(--lm-blue);outline-offset:2px}
+/* CSM page: completed onboardings this week + handoff pop-up */
+.csm-ho-table td{vertical-align:top}
+.csm-ho .ho-sec{margin-bottom:18px}
+.csm-ho-q{display:grid;grid-template-columns:200px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--border)}
+.csm-ho-q>span{font-weight:600;color:var(--text-2);font-size:13px}
+.csm-ho-q>div{white-space:normal;line-height:1.45}
+@media (max-width:640px){.csm-ho-q{grid-template-columns:1fr;gap:4px}}

@@ -192,6 +192,69 @@ function handoffLog_(x) {
   ].map(dashSafe_)]);
 }
 
+/* ---------- recent handoffs (CSM page: "Completed onboardings this week") ----------
+   Firms whose Onboarding Completed Date is in the last HANDOFF_DAYS days, with the handoff answers.
+   ChurnZero's fields are the record (they cover firms closed in ChurnZero itself, and later edits);
+   the Onboarding Handoffs log fills in who closed it, and any answer whose field is blank there. */
+var HANDOFF_DAYS = 7;
+function recentHandoffs_(b) {
+  var days = Math.min(31, Math.max(1, Number(b.days) || HANDOFF_DAYS));
+  var since = Utilities.formatDate(new Date(Date.now() - (days - 1) * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');   // today and the 6 days before
+  var cfSel = ['FirmId', 'OnboardingStatus', 'OnboardingCompletedDate', 'AccountManager', IM_FIELD, CSM_FIELD]
+    .concat(HANDOFF_FIELDS.filter(function (f) { return f.cz && f.type !== 'contact'; }).map(function (f) { return f.cz; }));
+  var sel = 'Id,Name,ExternalId,TotalContractAmount,UserAccountId,' + cfSel.map(function (f) { return 'Cf/' + f; }).join(',');
+  var accts;
+  try {
+    accts = czGet_('/Account', { $filter: 'Cf/OnboardingCompletedDate ge ' + since + 'T00:00:00Z', $select: sel });
+  } catch (e) {   // if the custom date field can't be filtered on, filter here instead
+    accts = czGet_('/Account', { $filter: 'Cf/OnboardingCompletedDate ne null', $select: sel });
+  }
+  accts = accts.filter(function (a) { return String((a.Cf || {}).OnboardingCompletedDate || '').slice(0, 10) >= since; });
+  if (!accts.length) return { ok: true, days: days, since: since, firms: [] };
+
+  // Decision makers: contacts with Role = Primary Decision Maker on these firms.
+  var dms = {};
+  for (var i = 0; i < accts.length; i += 15) {
+    var ids = accts.slice(i, i + 15).map(function (a) { return 'AccountId eq ' + a.Id; }).join(' or ');
+    czGet_('/Contact', { $filter: "(" + ids + ") and Cf/Role eq '" + DM_ROLE + "'", $select: 'Id,AccountId,FirstName,LastName,Email,Cf/Title' }).forEach(function (c) {
+      (dms[c.AccountId] = dms[c.AccountId] || []).push({ name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() || String(c.Email || ''),
+        email: String(c.Email || ''), title: String((c.Cf || {}).Title || '') });
+    });
+  }
+  var logged = handoffLogByFirm_(since);
+  var users = users_();
+  var firms = accts.map(function (a) {
+    var cf = a.Cf || {}, firmId = String(cf.FirmId || a.ExternalId), log = logged[firmId] || {}, la = log.answers || {};
+    var answers = {};
+    HANDOFF_FIELDS.forEach(function (f) {
+      if (f.type === 'contact') return;
+      var v = f.cz ? cfGet_(cf, f.cz) : '';
+      if ((v === '' || v === 'None') && la[f.key]) v = String(la[f.key]);
+      if (v !== '' && v !== 'None') answers[f.key] = f.type === 'scale' ? String(Math.round(Number(v)) || v) : v;
+    });
+    return { firmId: firmId, name: a.Name, mrr: Number(a.TotalContractAmount) || 0,
+      completed: String(cf.OnboardingCompletedDate).slice(0, 10), outcome: String(cf.OnboardingStatus || ''),
+      im: cfGet_(cf, IM_FIELD) || String(cf.AccountManager || '').trim(), csm: cfGet_(cf, CSM_FIELD),
+      am: String(cf.AccountManager || '').trim(), owner: (users[a.UserAccountId] || {}).name || '',
+      closedBy: log.by || '', decisionMakers: dms[a.Id] || [], answers: answers };
+  }).sort(function (x, y) { return y.completed.localeCompare(x.completed) || x.name.localeCompare(y.name); });
+  return { ok: true, days: days, since: since, sections: HANDOFF_SECTIONS,
+    fields: HANDOFF_FIELDS.map(function (f) { return { key: f.key, section: f.section, label: f.label, type: f.type }; }), firms: firms };
+}
+
+// Latest Onboarding Handoffs log row per Firm ID since a date (newest rows are on top).
+function handoffLogByFirm_(since) {
+  var sh = SpreadsheetApp.openById(LOG_SHEET_ID).getSheetByName(HANDOFF_TAB), out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, Math.min(sh.getLastRow() - 1, 500), 11).getDisplayValues().forEach(function (r) {
+    if (String(r[0]).slice(0, 10) < since || out[r[3]]) return;
+    var ans = {};
+    try { ans = JSON.parse(String(r[9]).replace(/^'/, '')); } catch (e) { /* not JSON */ }
+    out[r[3]] = { by: r[1], answers: ans };
+  });
+  return out;
+}
+
 /* One-off check (run from the editor): on VIP Law (OLD), sets Onboarding Status and Completed
    Date the way closeOnboarding does, reads them back, then puts both back the way they were.
    Both fields already exist, so this can't create stray fields. */

@@ -87,9 +87,11 @@ function doPost(e) {
   DRY_WRITES = [];
   try {
     // Closing an onboarding is open to the firm's IM too (handoff.js checks the firm).
-    if (b.action === 'handoffStart' || b.action === 'closeOnboarding') {
+    // So is reading recent handoffs (the CSM page's "Completed onboardings this week").
+    if (b.action === 'handoffStart' || b.action === 'closeOnboarding' || b.action === 'handoffs') {
       var anyone = handoffAuth_(b.token);
       if (!anyone.ok) return json_(anyone);
+      if (b.action === 'handoffs') return json_(recentHandoffs_(b));
       return json_(b.action === 'handoffStart' ? handoffStart_(b, anyone) : closeOnboarding_(b, anyone));
     }
     var who = verify_(b.token);
