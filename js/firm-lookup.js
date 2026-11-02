@@ -147,14 +147,20 @@ function fmtContractDate(s) {
   const d = new Date(String(s).replace(/\+0000$/, 'Z'));
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
+// Signed documents are merged_quote files (contracts, renewals, wet-signed addendums); files with
+// "addendum" in the name are verbally approved addendums. Newest first, every one openable.
+const isVerbalAddendum = (c) => /addendum/i.test(c.title) && !/^merged_quote_/i.test(c.title);
 function contractRowHtml(f) {
   const list = contractsFor(f);
   if (!list.length) return pfRow('Signed contract', 'None on file');
-  const newest = list[0];
-  const date = fmtContractDate(newest.at);
-  const more = list.length > 1 ? `<div class="pf-flag">⚠ ${list.length} contracts on file — showing newest</div>` : '';
-  return `<div class="pf-row"><span class="k">Signed contract</span><span class="v">`
-    + `<button type="button" class="pf-link" data-contract="${esc(newest.docId)}">View PDF${date ? ' · ' + esc(date) : ''}</button>${more}</span></div>`;
+  const link = (c) => {
+    const date = fmtContractDate(c.at);
+    const label = isVerbalAddendum(c) ? 'Verbal addendum' : 'Signed';
+    return `<button type="button" class="pf-link${isVerbalAddendum(c) ? ' alt' : ''}" data-contract="${esc(c.docId)}">${label}${date ? ' · ' + esc(date) : ''}</button>`;
+  };
+  const shown = list.slice(0, 4), rest = list.slice(4);
+  const more = rest.length ? `<details class="pf-more"><summary>${rest.length} older</summary>${rest.map(link).join('')}</details>` : '';
+  return `<div class="pf-row"><span class="k">Contract${list.length > 1 ? 's' : ''}</span><span class="v pf-docs">${shown.map(link).join('')}${more}</span></div>`;
 }
 // Opens the window synchronously (so popup blockers allow it), then fills it with the PDF
 // once the contracts web app has verified the viewer and returned the file.

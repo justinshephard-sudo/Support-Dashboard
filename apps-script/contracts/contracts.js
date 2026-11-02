@@ -2,7 +2,8 @@
    Signed contracts — private store + gatekeeper for the Firm Lookup
    --------------------------------------------------------------------------
    Signed contracts live in Salesforce as files on the Account, named
-   "merged_quote_<OpportunityId>.pdf". The support team has no Salesforce
+   "merged_quote_<OpportunityId>.pdf" (verbally approved addendums: "addendum" in the
+   name). The support team has no Salesforce
    logins, so a daily Zapier workflow ("cs-dashboard-contract-sync") copies
    each new contract here:
 
@@ -36,6 +37,10 @@ var FOLDER_NAME = 'CS Dashboard — Signed Contracts (private)';
 // Zapier hands files over as short-lived links on its own file host; refuse anything else.
 var ALLOWED_FILE_PREFIX = 'https://zapier-dev-files.s3.amazonaws.com/';
 var CONTRACT_NAME = /^merged_quote_(006[A-Za-z0-9]{12,15})?.*\.pdf$/i;
+// Verbally approved addendums (since 11/2026): "addendum" anywhere in the file name. An addendum with a
+// wet signature is still a merged_quote file.
+var ADDENDUM_NAME = /addendum/i;
+function isContractDoc_(name) { return CONTRACT_NAME.test(name) || ADDENDUM_NAME.test(name); }
 var MAX_ACCOUNTS_PER_PLAN = 60;   // keeps each Zapier run well inside its time limits
 
 function setup() {
@@ -73,7 +78,7 @@ function plan_(b) {
   var pendingDocs = 0;
   (b.links || []).forEach(function (l) {
     if (!l || !l.accountId || !l.docId || saved[l.docId]) return;
-    if (!CONTRACT_NAME.test(String(l.title || ''))) return;
+    if (!isContractDoc_(String(l.title || ''))) return;
     pending[l.accountId] = true;
     pendingDocs++;
   });
@@ -96,7 +101,7 @@ function ingest_(b) {
     var out = { ok: true, saved: 0, skipped: 0, errors: [] };
     (b.files || []).forEach(function (f) {
       var name = String((f && f.Name) || '');
-      if (!CONTRACT_NAME.test(name)) return;
+      if (!isContractDoc_(name)) return;
       if (saved[f.Id]) { out.skipped++; return; }
       var url = String(f.file || '');
       if (url.indexOf(ALLOWED_FILE_PREFIX) !== 0) { out.errors.push(name + ': unexpected file host'); return; }
