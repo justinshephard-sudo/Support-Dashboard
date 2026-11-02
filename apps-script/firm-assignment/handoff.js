@@ -134,12 +134,13 @@ function closeOnboarding_(b, who) {
     if (!support) throw new Error((csmName || SUPPORT_EMAIL) + ' isn’t an active ChurnZero user, so the Owner can’t move.');
   }
 
+  // The decision maker first: it's the step most likely to be refused, so nothing else is half-written if it is.
+  if (clean.decisionMaker) setDecisionMaker_(appKey, acct, Number(clean.decisionMaker));
   czSet_(appKey, acct.ExternalId, 'OnboardingStatus', outcome.status);
   czSet_(appKey, acct.ExternalId, 'OnboardingCompletedDate', today);
   HANDOFF_FIELDS.forEach(function (f) {
     if (f.cz && f.type !== 'contact' && clean[f.key]) czSet_(appKey, acct.ExternalId, f.cz, f.type === 'scale' ? Number(clean[f.key]) : clean[f.key]);
   });
-  if (clean.decisionMaker) setDecisionMaker_(appKey, acct, Number(clean.decisionMaker));
   if (support) czSet_(appKey, acct.ExternalId, props.getProperty('CZ_OWNER_ATTR') || 'OwnerUserAccount', support.email);
 
   if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
@@ -165,7 +166,7 @@ function setDecisionMaker_(appKey, acct, contactId) {
   var pick = cs.filter(function (c) { return c.Id === contactId; })[0];
   if (!pick || !pick.ExternalId) throw new Error('That decision maker isn’t a contact on this firm in ChurnZero. Refresh and pick again.');
   cs.forEach(function (c) {
-    if (c.Id !== contactId && (c.Cf || {}).Role === DM_ROLE && c.ExternalId) czSetContact_(appKey, acct.ExternalId, c.ExternalId, 'Role', '');
+    if (c.Id !== contactId && (c.Cf || {}).Role === DM_ROLE) czClearContactRole_(c.Id);
   });
   if ((pick.Cf || {}).Role !== DM_ROLE) czSetContact_(appKey, acct.ExternalId, pick.ExternalId, 'Role', DM_ROLE);
 }
@@ -176,6 +177,22 @@ function czSetContact_(appKey, accountExternalId, contactExternalId, name, value
     action: 'setAttribute', entity: 'contact', name: name, value: value };
   var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', payload: payload, muteHttpExceptions: true });
   if (res.getResponseCode() >= 300) { console.error('ChurnZero contact write ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500)); throw new Error('ChurnZero rejected the decision maker change (HTTP ' + res.getResponseCode() + ').'); }
+}
+
+// The write API ignores blank values, so clearing goes through the REST API (PATCH, null). Needs the
+// "Create/Update Externally" permission on the CZ_USER's ChurnZero permission group.
+function czClearContactRole_(contactId) {
+  if (DRY) { DRY_WRITES.push('contact #' + contactId + ': Role = (cleared)'); return; }
+  var res = UrlFetchApp.fetch(CZ_BASE + '/Contact(' + Number(contactId) + ')', {
+    method: 'patch', contentType: 'application/json', headers: czHeaders_(), muteHttpExceptions: true,
+    payload: JSON.stringify({ Cf: { Role: null } }),
+  });
+  if (res.getResponseCode() >= 300) {
+    console.error('ChurnZero contact clear ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 500));
+    throw new Error(res.getResponseCode() === 403
+      ? 'ChurnZero won’t let the dashboard clear the old decision maker yet (the “Create/Update Externally” permission is off).'
+      : 'ChurnZero rejected clearing the old decision maker (HTTP ' + res.getResponseCode() + ').');
+  }
 }
 
 function handoffLog_(x) {
@@ -215,7 +232,7 @@ function testCloseWrite() {
 }
 
 /* One-off check (run from the editor): on VIP Law (OLD), makes Jason Kidder (contact 21297) the Primary
-   Decision Maker the way the handoff does, reads it back, then clears it again. Role already exists on
+   Decision Maker the way the handoff does, reads it back, then clears it again (REST PATCH). Role already exists on
    contacts, so this can't create stray fields. */
 function testDecisionMakerWrite() {
   var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
@@ -227,7 +244,8 @@ function testDecisionMakerWrite() {
   var ok = false, c;
   for (var i = 0; i < 6 && !ok; i++) { Utilities.sleep(4000); c = read(); ok = (c.Cf || {}).Role === DM_ROLE; }
   Logger.log('Set: %s (Role "%s")', ok ? 'WORKS' : 'no change', (c.Cf || {}).Role || '');
-  czSetContact_(appKey, acct.ExternalId, before.ExternalId, 'Role', (before.Cf || {}).Role || '');
+  if ((before.Cf || {}).Role) czSetContact_(appKey, acct.ExternalId, before.ExternalId, 'Role', before.Cf.Role);
+  else czClearContactRole_(before.Id);
   var cleared = false;
   for (var j = 0; j < 6 && !cleared; j++) { Utilities.sleep(4000); c = read(); cleared = ((c.Cf || {}).Role || '') === ((before.Cf || {}).Role || ''); }
   Logger.log('Clear: %s (Role "%s")', cleared ? 'WORKS — back to how it was' : 'didn’t clear, fix by hand', (c.Cf || {}).Role || '');
