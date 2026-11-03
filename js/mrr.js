@@ -86,8 +86,13 @@ const mrrReason = (e) => e.reason || 'Voluntary / unspecified';
 const mrrReasonCat = (e) => {
   if (!e.reason) return 'Other';
   if (e.reason === 'Not paid') return 'Non-payment';
-  const i = e.reason.indexOf(' - ');
-  return i === -1 ? 'Other' : e.reason.slice(0, i).trim() || 'Other';
+  // Known categories first, however the separator is typed ("Competitor - …", "Competitor- …",
+  // "Competitor – …", or just "Competitor"); anything else splits at its first dash.
+  const r = e.reason.trim(), low = r.toLowerCase();
+  const known = MRR_REASON_ORDER.find((c) => low === c.toLowerCase() || new RegExp(`^${c.toLowerCase()}\\s*[-–—:]`).test(low));
+  if (known) return known;
+  const m = r.match(/^(.+?)\s+[-–—]\s*|^(.+?)\s*[–—]\s*/);
+  return (m && (m[1] || m[2]) || '').trim() || 'Other';
 };
 const mrrChurnDate = (e) => e.date || e.ym + '-01';
 const mrrAm = (e) => (e.am || '').trim() || MRR_UNASSIGNED;
