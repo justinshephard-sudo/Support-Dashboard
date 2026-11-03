@@ -6,7 +6,7 @@
    ========================================================================== */
 const CALL_PREP_URL = 'https://script.google.com/macros/s/AKfycbwltwhfY4-dLO6F5uyfzxIXIMcb_N0_zrk-2q0atrk_c8fMj4USTTcEJK4QsChbmAVR/exec';
 
-// The firm's IM / account manager, or a manager.
+// The firm's IM (the open-firm list's AccountManager column), or a manager.
 function canCallPrep(row) {
   return !!row && !!row.FirmId && (isManager() || (!!row.AccountManager && row.AccountManager === implMyRepName()));
 }

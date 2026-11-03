@@ -282,7 +282,7 @@ const mrrTenure = (e) => {
 
 // Deep-dive groupings for the churn outlook.
 const MRR_GROUPS = {
-  am: { label: 'Account Manager', key: mrrAm, sort: 'size' },
+  am: { label: 'CSM', key: mrrAm, sort: 'size' },
   owner: { label: 'Owner (AE)', key: (e) => (e.owner || '').trim() || MRR_UNASSIGNED, sort: 'size' },
   reason: { label: 'Churn reason', key: mrrReasonCat, order: MRR_REASON_ORDER },
   leads: { label: 'Lead volume', key: (e) => MRR_LEAD_BUCKETS.find((b) => b.test(e.leadsN)).label, order: MRR_LEAD_BUCKETS.map((b) => b.label) },
@@ -337,7 +337,7 @@ function renderMrr() {
   const chips = MRR_CATS.map((c) => `<button type="button" class="mrr-chip c-${c.key}" data-drill="cat" data-cat="${c.key}" data-ym="${cur}">
       <i style="background:var(${c.color})"></i><span>${c.label}</span><b>${mrrMoney(t[c.key], true)}</b><small>${mrrPlural(t.n[c.key], 'firm')}</small></button>`).join('');
 
-  const tabs = [['leaderboard', 'AM leaderboard'], ['movement', 'Monthly movement'], ['churn', 'Churn outlook'], ['history', 'Churn history'], ['retention', 'Month 13 retention'], ['insights', 'Insights']];
+  const tabs = [['leaderboard', 'CSM leaderboard'], ['movement', 'Monthly movement'], ['churn', 'Churn outlook'], ['history', 'Churn history'], ['retention', 'Month 13 retention'], ['insights', 'Insights']];
   document.getElementById('mrrBody').innerHTML = `
     <div class="mrr-chips">${chips}</div>
     <div class="res-switch mrr-tabs" role="tablist" aria-label="MRR Report sections">
@@ -382,10 +382,10 @@ function mrrLeaderboard(el) {
   const label = MRR.lbRange === 'month' ? mrrYmLabel(cur) : `${mrrYmLabel(yms[2], true)} – ${mrrYmLabel(cur, true)}`;
 
   el.innerHTML = `
-    <div class="mrr-panel-head"><h3>Net movement by Account Manager <span class="muted">· ${esc(label)}</span></h3>
+    <div class="mrr-panel-head"><h3>Net movement by CSM <span class="muted">· ${esc(label)}</span></h3>
       <div class="mrr-seg">${[['month', 'This month'], ['3m', 'Last 3 months']].map(([k, l]) => `<button type="button" data-lb="${k}" aria-pressed="${MRR.lbRange === k}">${l}</button>`).join('')}</div></div>
-    <p class="mrr-note">Click a row for that AM’s firms. Month 13 retention: of the firms an AM signed 13 months ago, the share still with us.${MRR.lbRange === 'month' ? ' Cancellations include firms scheduled to cancel later this month.' : ''}</p>
-    ${list.length ? `<div class="table-wrap"><table class="mrr-table"><thead><tr><th>#</th><th>Account Manager</th><th>Net MRR</th>${MRR_CATS.map((c) => `<th>${c.label}</th>`).join('')}<th>Month 13 retention</th></tr></thead><tbody>
+    <p class="mrr-note">Click a row for that CSM’s firms. Each firm counts for its CSM (Support for newer firms with no CSM; the account manager on firms from before the IM/CSM split). Month 13 retention: of the firms someone signed as AM 13 months ago, the share still with us.${MRR.lbRange === 'month' ? ' Cancellations include firms scheduled to cancel later this month.' : ''}</p>
+    ${list.length ? `<div class="table-wrap"><table class="mrr-table"><thead><tr><th>#</th><th>CSM</th><th>Net MRR</th>${MRR_CATS.map((c) => `<th>${c.label}</th>`).join('')}<th>Month 13 retention</th></tr></thead><tbody>
       ${list.map((r, i) => `<tr class="mrr-click" data-drill="am" data-am="${esc(r.am)}"><td>${i + 1}</td><td><b>${esc(r.am)}</b></td>
         <td class="${r.net >= 0 ? 'pos' : 'neg'}"><b>${mrrMoney(r.net, true)}</b></td>${MRR_CATS.map((c) => `<td>${cell(r[c.key])}</td>`).join('')}<td>${retCell(ret.get(r.am))}</td></tr>`).join('')}
       <tr class="mrr-total"><td></td><td>Team</td><td class="${team.net >= 0 ? 'pos' : 'neg'}">${mrrMoney(team.net, true)}</td>${MRR_CATS.map((c) => `<td>${cell(team[c.key])}</td>`).join('')}<td>${tr.cohort ? retCell(tr) : '—'}</td></tr>
@@ -661,7 +661,7 @@ function mrrDrillTable() {
   const list = rows.slice().sort((a, b) => { const x = val(a), y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
   const cols = [
     ['company', 'Company', (e) => `${esc(e.company)}${e.src === 's' ? ' <span class="mrr-badge">scheduled</span>' : ''}`],
-    ['am', 'Account Manager', (e) => esc(mrrAm(e))],
+    ['am', 'CSM', (e) => esc(mrrAm(e))],
     churn ? null : ['cat', 'Type', (e) => MRR_CAT_LABEL[e.cat]],
     ['date', churn ? 'Cancel date' : 'Month', (e) => (churn && e.date ? esc(e.date) : esc(mrrYmLabel(e.ym)))],
     churn ? ['reason', 'Reason', (e) => esc(mrrReason(e))] : null,
@@ -683,7 +683,7 @@ function mrrDrillRetention(ym, nonAgency) {
   const sf = MRR.data.sf || {};
   MRR.drill = null;
   mrrModal(`Month 13 retention — ${mrrYmLabel(ym)}`, `${nonAgency ? 'Excluding agency · ' : ''}${mrrPlural(rows.length, 'firm')} · ${kept} retained · ${rows.length - kept} cancelled`,
-    rows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Account Manager</th><th>Owner</th><th>Outcome</th><th>Cancelled</th><th>Reason</th><th>MRR</th></tr></thead><tbody>
+    rows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>CSM</th><th>Owner</th><th>Outcome</th><th>Cancelled</th><th>Reason</th><th>MRR</th></tr></thead><tbody>
       ${rows.map((r) => `<tr><td>${esc(r.company)}${r.agency ? ' <span class="mrr-badge">agency</span>' : ''}</td><td>${esc(r.am || '—')}</td><td>${esc(r.owner || '—')}</td>
         <td><span class="score-pill ${r.kept ? 'good' : 'bad'}">${r.kept ? 'Retained' : 'Cancelled'}</span></td><td>${esc(r.kept ? '' : r.date)}</td>
         <td>${esc((sf[r.firm] || [])[1] || (r.kept ? '' : '—'))}</td><td>${r.kept ? mrrMoney(r.mrr) : '<span class="muted">—</span>'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-note">No firms match this slice.</div>');

@@ -6,8 +6,8 @@
    ChurnZero, and moves the Owner to Support for new firms at $400/mo or under.
    ========================================================================== */
 
-// The firm's IM (or a manager) can close it. Until the sync keys on the IM field, the IM is the
-// open-firm list's Account Manager.
+// The firm's IM (or a manager) can close it: the open-firm list's AccountManager column, which the
+// sync fills with the IM (the ImplementationManager field, else the old AM).
 function canCloseOnboarding(row) {
   return isManager() || (!!row.AccountManager && row.AccountManager === implMyRepName());
 }

@@ -178,6 +178,7 @@ function build_() {
   var events = netWithinMonth_(washCancelReactivate_(mergeFeeds_(live, archive.concat(hist))));
 
   var scheduled = readScheduled_();
+  events.concat(scheduled).forEach(function (e) { e.am = csmFor_(e.firm, e.am); });
   var retention = readRetention_(ss);
   var snapshots = readSnapshots_(ss);
 
@@ -451,6 +452,34 @@ function num_(v) { var n = Number(String(v).replace(/[^0-9.\-]/g, '')); return i
 function truthy_(v) { return /^true$/i.test(String(v).trim()); }
 function name_(v) { return String(v || '').trim().replace(/^Swetha Devakuma$/, 'Swetha Devakumar'); }
 
+/* ---------- IM/CSM split: who a firm's MRR counts for ----------
+   The Chargebee sheets' "Account Manager" mirrors the ChurnZero owner, which is the IM while a
+   new firm onboards. After the split, MRR counts for the firm's CSM instead, from the Accounts
+   tab's CustomerSuccessManager / ImplementationManager columns (sync-accounts.gs):
+     CSM field set           → that CSM
+     IM field set, no CSM    → SPLIT_SUPPORT (firms at $400/mo or under, which Support looks after)
+     neither (legacy firms)  → the sheet's Account Manager, as before
+   Until the Accounts tab has those columns, or while no firm has them filled in, nothing changes. */
+var SPLIT_SUPPORT = 'Support';
+var splitOwnerCache_ = null;   // per run
+function splitOwners_() {
+  if (splitOwnerCache_) return splitOwnerCache_;
+  var out = splitOwnerCache_ = {};
+  try {
+    var sh = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(ACCOUNTS_TAB);
+    var rows = sh ? rows_(sh) : [];
+    if (rows.length && 'CustomerSuccessManager#' in rows[0]) {
+      rows.forEach(function (r) {
+        var id = firmId_(r['FirmId#']);
+        var csm = name_(r['CustomerSuccessManager#']), im = name_(r['ImplementationManager#']);
+        if (id && (csm || im)) out[id] = csm || SPLIT_SUPPORT;
+      });
+    }
+  } catch (e) { console.error('Accounts tab unavailable for the IM/CSM split: ' + e); }
+  return out;
+}
+function csmFor_(firm, am) { return splitOwners_()[firm] || am; }
+
 // "$4,864.00" / "4864.0" / 4864 → "4864"
 function firmId_(v) {
   var s = String(v == null ? '' : v).trim();
@@ -566,7 +595,8 @@ function repMonths_(force, skip) {
 // Cohort and all-time retention, from the CSM Firm History tab Johnny's hourly snapshot writes
 // (one row per customer). Last month is the checkpoint: the 6-month cohort is firms whose first
 // paid month was 6 months before it, the 13-month cohort 13 months before (Johnny's Month 13
-// convention). Credit goes to each firm's latest AM: its current AM, or its AM when it cancelled.
+// convention). Credit goes to each firm's latest AM: its current AM, or its AM when it cancelled
+// (its CSM, for firms set up after the IM/CSM split: csmFor_).
 // firms: [company, am, signupYm, startMrr, lastMonthMrr, mrrNow, firmId, monthly] — monthly is the
 // firm's MRR for each month from its signup month through this one (the cohort analysis grid).
 function readFirmHistory_(skip) {
@@ -581,7 +611,7 @@ function readFirmHistory_(skip) {
   var firms = rows.filter(function (r) {
     return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0 && !skip[firmId_(r['Firm ID#'])];
   }).map(function (r) {
-    return [String(r['Company#']).trim(), name_(r['Account Manager#']), ymNorm_(r['Signup Month#']), money_(r['Start MRR#']),
+    return [String(r['Company#']).trim(), csmFor_(firmId_(r['Firm ID#']), name_(r['Account Manager#'])), ymNorm_(r['Signup Month#']), money_(r['Start MRR#']),
       money_(r['Last Month MRR#']), money_(r['MRR Now#']), firmId_(r['Firm ID#']),
       String(r['Monthly MRR#'] || '').split('|').filter(String).map(Number)];
   });
@@ -624,20 +654,19 @@ function readMonthEnd_() {
   return { end: end, start6: by[s6] ? s6 : '', start13: by[s13] ? s13 : '', firms: firms };
 }
 
-// Active accounts by AM with ChurnZero's churn score, from the daily Accounts sync.
+// Active accounts by AM (CSM after the split: csmFor_) with ChurnZero's churn score, from the daily Accounts sync.
 // accounts: [name, am, score, mrr, firmId]
 function readHealth_(skip) {
   skip = skip || {};
   var sh = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(ACCOUNTS_TAB);
   if (!sh) return { error: 'Accounts tab missing' };
   var rows = rows_(sh);
-  var accounts = rows.filter(function (r) {
-    return String(r['ContractStatus#']).trim() !== 'Inactive' && money_(r['MRR#']) > 0 && String(r['AccountManager#']).trim()
-      && !skip[firmId_(r['FirmId#'])];
-  }).map(function (r) {
-    var sc = String(r['ChurnScore#']).trim();
-    return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#']), firmId_(r['FirmId#'])];
-  });
+  var accounts = rows.map(function (r) {
+    var sc = String(r['ChurnScore#']).trim(), id = firmId_(r['FirmId#']);
+    return { r: r, row: [String(r['Name#']).trim(), csmFor_(id, name_(r['AccountManager#'])), sc === '' ? null : Number(sc), money_(r['MRR#']), id] };
+  }).filter(function (x) {
+    return String(x.r['ContractStatus#']).trim() !== 'Inactive' && x.row[3] > 0 && x.row[1] && !skip[x.row[4]];
+  }).map(function (x) { return x.row; });
   return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts };
 }
 
@@ -661,7 +690,7 @@ function readAiHealth_(skip) {
   var firms = rows_(list).filter(function (r) { return !skip[firmId_(r['Firm ID#'])]; }).map(function (r) {
     var u = byCustomer[String(r['Customer ID#']).trim()] || byFirm[firmId_(r['Firm ID#'])] || none;
     var cov = u.leads >= AI_HEALTH.minLeads ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
-    return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#'])];
+    return [String(r['Company#']).trim(), csmFor_(firmId_(r['Firm ID#']), name_(r['Account Manager#'])), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#'])];
   });
   return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, minLeads: AI_HEALTH.minLeads, asOf: asOf, firms: firms };
 }

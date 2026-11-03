@@ -14,13 +14,17 @@ const CSM_AI_TARGET = 500;
 const CSM = { data: null, loading: null, ym: '', error: '', rep: null, handoffs: null, hoLoading: null, hoError: '' };
 const CSM_NONE = '\u0000none';   // signed in, but not matched to a rep
 
-// Same reps as the Implementation tab's per-rep table (its latest month), else anyone with an open onboarding.
+// Everyone with an active book: each firm counts for its CSM (the backend's csmFor_: the CSM field,
+// Support for new firms with no CSM, else the account manager on firms from before the split).
+// Support isn't a rep. Until the book has loaded, the Implementation tab's reps stand in.
+const CSM_NOT_REPS = new Set(['Support', 'Unassigned', '— Unassigned —']);
 function csmReps() {
-  const latest = [...IMPL.months].reverse().find((m) => m.RepStats);
-  let reps = [];
-  try { reps = Object.keys(JSON.parse(latest.RepStats)); } catch (e) { /* no stats yet */ }
-  if (!reps.length) reps = IMPL.open.map((f) => f.AccountManager);
-  return [...new Set(reps)].filter((r) => r && r !== 'Unassigned').sort((a, b) => a.localeCompare(b));
+  let reps = ((CSM.data && CSM.data.health && CSM.data.health.accounts) || []).map((a) => a[1]);
+  if (!reps.length) {
+    const latest = [...IMPL.months].reverse().find((m) => m.RepStats);
+    try { reps = Object.keys(JSON.parse(latest.RepStats)); } catch (e) { /* no stats yet */ }
+  }
+  return [...new Set(reps)].filter((r) => r && !CSM_NOT_REPS.has(r)).sort((a, b) => a.localeCompare(b));
 }
 
 // The last copy lives in this browser tab (sessionStorage): reopening is instant while a
@@ -167,7 +171,7 @@ function renderCsm() {
   CSM.rep = view;
   if (view === CSM_NONE) {
     document.getElementById('csmHero').innerHTML = `<div class="fa-hero-text"><div class="loop-eyebrow">Customer Success Managers</div><h2>CSM <span>Scorecard</span></h2>
-      <p>This tab shows your own book. We couldn’t match your sign-in to an account manager in ChurnZero yet. Ask a manager to add you.</p></div>`;
+      <p>This tab shows your own book. We couldn’t match your sign-in to a CSM in ChurnZero yet. Ask a manager to add you.</p></div>`;
     document.getElementById('csmBody').innerHTML = '';
     return;
   }
@@ -346,8 +350,8 @@ function csmRetentionDrill(kind, rep) {
     `<div class="mrr-method"><p>Each firm starts at its MRR in its <b>first paid month</b> and is compared with its MRR at ${when}.
       <b>NRR</b> = ${mrrMoney(r.now)} ÷ ${mrrMoney(r.start)}; upgrades count, so it can go over 100%.
       <b>GRR</b> counts each firm at no more than its starting MRR, so it only shows what was kept (cancellations and downgrades).
-      Firms count for their current AM, or the AM they had when they cancelled.${kind === 'bob' ? ` Firms already paying in ${esc(mrrYmLabel(h.first))}, when the snapshots begin, start from that month.` : ''}</p></div>
-    ${rows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR ${r.cohort ? 'end of ' + esc(mrrYmLabel(h.checkpoint)) : 'now'}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      Firms count for their CSM: the current one, or the one they had when they cancelled.${kind === 'bob' ? ` Firms already paying in ${esc(mrrYmLabel(h.first))}, when the snapshots begin, start from that month.` : ''}</p></div>
+    ${rows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${rep ? '' : '<th>CSM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR ${r.cohort ? 'end of ' + esc(mrrYmLabel(h.checkpoint)) : 'now'}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
       ${rows.map((f) => `<tr><td>${esc(f[0])}${now(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(then(f))}</td><td>${mrrMoney(now(f))}</td><td><b class="${delta(f) >= 0 ? 'pos' : 'neg'}">${mrrMoney(delta(f), true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>` : '<div class="empty-note">No firms in this group.</div>'}`);
 }
@@ -448,7 +452,7 @@ function csmCohortDrill(k, age) {
   mrrModal(`${o.rep || 'Team'} — ${r.label} cohort, ${p}`,
     `${o.metric.toUpperCase()} ${csmPct(c && c.v)} · ${mrrPlural(rows.length, 'firm')} · ${lost} cancelled by then · ${m} month${m === 1 ? '' : 's'} after signup`,
     `<div class="coh-back"><button type="button" class="csm-cohort-btn" data-coh-back>‹ Back to cohort analysis</button></div>
-    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${o.rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR at ${p}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${o.rep ? '' : '<th>CSM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR at ${p}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
       ${rows.map((f) => { const d = at(f) - f[3]; return `<tr><td>${esc(f[0])}${at(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${o.rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(f[3])}</td><td>${mrrMoney(at(f))}</td><td><b class="${d >= 0 ? 'pos' : 'neg'}">${mrrMoney(d, true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
     </tbody></table></div>`, { back: () => csmCohortOpen(o.rep) });
   document.getElementById('mrrDrill').addEventListener('click', (e) => { if (e.target.closest('[data-coh-back]')) mrrCloseModal(); });
@@ -466,7 +470,7 @@ function csmCohortBody() {
       ${g.rows.map((r) => `<tr><td title="${esc(mrrMoney(r.start))} starting MRR">${esc(r.label)}</td><td>${r.firms.length}</td>${r.cells.map((c) => csmCohortCell(c, r)).join('')}</tr>`).join('')}
     </tbody></table></div>` : `<div class="empty-note">${(h.firms || []).some((f) => f[7] && f[7].length) ? 'No firms signed up in this window.' : 'The month-by-month MRR arrives with the next hourly snapshot.'}</div>`}
     <div class="mrr-method"><p>Each row is the firms that signed up (first paid) in that ${g.step === 3 ? 'quarter' : 'month'}. ${p}${g.step === 3 ? '2 is 6 months' : '6 is 6 months'} after signup, measured at that month’s end against the cohort’s MRR in its signup month.
-      <b>NRR</b> counts upgrades, so it can go over 100%; <b>GRR</b> counts each firm at no more than it started with. Firms count for their current AM, or the AM they had when they cancelled.
+      <b>NRR</b> counts upgrades, so it can go over 100%; <b>GRR</b> counts each firm at no more than it started with. Firms count for their CSM: the current one, or the one they had when they cancelled.
       Months run through ${esc(mrrYmLabel(h.checkpoint))} (the last full month); “–” is a month the cohort hasn’t reached yet. Hover a cell for the dollars behind it; click it for the firms.</p></div>`;
 }
 

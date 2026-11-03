@@ -36,6 +36,9 @@ var CZ_COLUMNS = [
   'ChargebeePlan', 'ChargebeeStart', 'AddOns', 'InvoiceBalance', 'LegacyContract', 'MRRSource',
   // Churn detail for the MRR Report (replaces the Salesforce Detail tab).
   'ChurnCategory', 'ChurnDetails', 'AvgLeadsMonthly',
+  // IM/CSM split (rep full names; blank on legacy firms). The MRR Report and CSM tab credit a
+  // firm to its CSM from these; Firm Lookup shows both.
+  'ImplementationManager', 'CustomerSuccessManager',
 ];
 
 var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmount', 'NextRenewalDate', 'LicenseCount',
@@ -43,7 +46,8 @@ var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmou
 var ACCOUNT_CF = ['FirmId', 'PrimaryPracticeArea', 'PracticeArea', 'AccountManager', 'ChargebeeAccountStatus', 'ContractStatus',
   'CurrentTermEnd', 'RemainingBillingCycles', 'DangerZone', 'CancellationRequested', 'AverageCsatLast60', 'AvgMattersCreatedmonth',
   'LeadVolume', 'AvgMonthlyLeadVolumelifetime', 'TotalSms', 'SmsPlanType', 'OfActivitiesLoggedl30', 'Employees',
-  'OnboardingStatus', 'Website', 'CurrentMrrStartingMrr', 'ChurnCategory', 'ChurnDetails'];
+  'OnboardingStatus', 'Website', 'CurrentMrrStartingMrr', 'ChurnCategory', 'ChurnDetails',
+  'ImplementationManager', 'CustomerSuccessManager'];
 
 // Daily trigger entry point: the Accounts tab (Firm Lookup). Records the outcome on
 // the "Sync Status" tab, which the dashboard shows, so a failure (e.g. an expired
@@ -180,6 +184,8 @@ function accountToRow_(a, ctx) {
     ChurnCategory: cf.ChurnCategory || '',
     ChurnDetails: String(cf.ChurnDetails || '').slice(0, 600),
     AvgLeadsMonthly: leadAvg == null || leadAvg === '' ? '' : String(Math.round(leadAvg)),
+    ImplementationManager: cfAny_(cf, 'ImplementationManager'),
+    CustomerSuccessManager: cfAny_(cf, 'CustomerSuccessManager'),
   };
   return CZ_COLUMNS.map(function (c) { return map[c]; });
 }
@@ -348,6 +354,14 @@ function writeAccountsTab_(rows) {
 }
 
 /* ---- helpers ---- */
+// A custom field read without minding case: ChurnZero returns CustomerSuccessManager as
+// "Customersuccessmanager". Also used by implementation-sync.gs.
+function cfAny_(cf, name) {
+  var want = name.toLowerCase();
+  for (var k in cf) if (k.toLowerCase() === want) return cf[k] == null ? '' : String(cf[k]).trim();
+  return '';
+}
+
 function groupBy_(list, key) {
   var m = {};
   (list || []).forEach(function (r) { var k = String(r[key]); (m[k] = m[k] || []).push(r); });

@@ -73,7 +73,9 @@ function parseAccounts(rows) {
       name,
       firmId: get(r, 'FirmId'),
       area: get(r, 'PracticeArea'),
-      am: get(r, 'AccountManager'),
+      am: get(r, 'AccountManager'),   // mirrors the ChurnZero owner
+      im: get(r, 'ImplementationManager'),
+      csm: get(r, 'CustomerSuccessManager'),
       mrr: get(r, 'MRR'),
       mrrSource: get(r, 'MRRSource'),
       contract: get(r, 'TotalContract'),
@@ -237,6 +239,9 @@ function fmtMoney(v) {
 }
 const orDash = (v) => (v == null || String(v).trim() === '' ? '—' : String(v));
 
+// Firms set up after the IM/CSM split have an IM (and a CSM over $400/mo); older firms just an AM.
+const firmRepMeta = (f) => (f.csm ? 'CSM ' + f.csm : f.im ? 'IM ' + f.im : f.am ? 'AM ' + f.am : '');
+
 function onFirmSearch() {
   const v = document.getElementById('q').value;
   const results = document.getElementById('results');
@@ -255,7 +260,7 @@ function renderFirmResults(list) {
   if (!list.length) { results.classList.remove('show'); return; }
   results.innerHTML = list.map((f) => {
     const h = HEALTH[healthOf(f)];
-    const meta = [f.firmId ? 'ID ' + f.firmId : '', f.area, f.am ? 'AM ' + f.am : '', f.mrr ? fmtMoney(f.mrr) + '/mo' : ''].filter(Boolean).join(' · ');
+    const meta = [f.firmId ? 'ID ' + f.firmId : '', f.area, firmRepMeta(f), f.mrr ? fmtMoney(f.mrr) + '/mo' : ''].filter(Boolean).join(' · ');
     return `<div class="res" data-id="${esc(f.firmId)}" data-name="${esc(f.name)}">
       <div class="res-logo">${esc(firmInitials(f.name))}</div>
       <div class="res-main"><div class="res-name">${esc(f.name)}</div><div class="res-meta">${esc(meta)}</div></div>
@@ -294,7 +299,9 @@ function openFirm(firmId, name) {
     </div>
     <div class="pf-grid">
       <div class="pf-card"><h4>👤 Ownership</h4>
-        ${pfRow('Account Manager', orDash(f.am))}
+        ${f.im || f.csm ? `${pfRow('Implementation Manager', orDash(f.im))}
+        ${pfRow('CSM', f.csm || 'None · Support after onboarding')}
+        ${pfRow('Owner', orDash(f.am))}` : pfRow('Account Manager', orDash(f.am))}
         ${pfRow('Onboarding', orDash(f.onb), /complete/i.test(f.onb) ? 'good' : f.onb ? 'warn' : '')}
       </div>
       <div class="pf-card"><h4>💳 Billing</h4>

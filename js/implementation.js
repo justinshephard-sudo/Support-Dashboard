@@ -298,7 +298,7 @@ let implOverPage = 0;
 
 /* ---- Tile drill-down: the firms behind each Implementation number ---- */
 const IMPL_FIRM_COLS = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
-  ['AccountManager', 'Account Manager'], ['NextMeeting', 'Next meeting']];
+  ['AccountManager', 'IM'], ['NextMeeting', 'Next meeting']];
 
 function implDrillSpec(col, label) {
   const latest = IMPL.months[IMPL.months.length - 1].Month;
@@ -326,7 +326,7 @@ function implDrillSpec(col, label) {
       return {
         title: col === 'MedianDays' ? 'Median Time in Onboarding' : 'Onboardings Closed',
         note: `Completed in ${label}${who}` + (m && m.MedianDays !== '' ? ` · median ${fmtNum(toNumber(m.MedianDays))} days` : ''),
-        cols: [['Name', 'Firm'], ['Date', 'Completed'], ['Days', 'Days in onboarding'], ['AccountManager', 'Account Manager'], ['Specialist', 'Specialist']],
+        cols: [['Name', 'Firm'], ['Date', 'Completed'], ['Days', 'Days in onboarding'], ['AccountManager', 'IM'], ['Specialist', 'Specialist']],
         rows, median: col === 'MedianDays' && m ? toNumber(m.MedianDays) : null,
         empty: IMPL.events.length ? 'No onboardings completed this month.' : 'Firm detail appears after the next ChurnZero sync.',
       };
@@ -346,7 +346,7 @@ function implDrillSpec(col, label) {
       }
       return {
         title: 'Onboarding CSAT', note: `Responses in ${label} · 4–5 counts as satisfied`,
-        cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['AccountManager', 'Account Manager'], ['Comment', 'Comment']],
+        cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['AccountManager', 'IM'], ['Comment', 'Comment']],
         rows, empty: IMPL.events.length ? 'No survey responses this month.' : noData,
       };
     }
@@ -367,7 +367,8 @@ function implFmtDate(v) {
   return new Date(+m[1], m[2] - 1, +m[3]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Signed-in person → their ChurnZero "Account Manager" name (matching lives in core.js: myRepName).
+// Signed-in person → their IM name (matching lives in core.js: myRepName). The sync puts each
+// firm's IM in the AccountManager column: the ImplementationManager field, else the old AM.
 function implMyRepName() {
   return myRepName([...new Set(IMPL.events.map((e) => e.AccountManager).concat(IMPL.open.map((f) => f.AccountManager)))]);
 }
@@ -522,7 +523,7 @@ function renderImplOverList() {
     .sort((a, b) => toNumber(a.DaysInOnboarding) - toNumber(b.DaysInOnboarding) || a.Name.localeCompare(b.Name));
   document.getElementById('impl-over-note').textContent = `As of today · ${over.length} firm${over.length === 1 ? '' : 's'}`;
   const cols = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
-    ['Specialist', 'Specialist'], ['AccountManager', 'Account Manager'], ['NextMeeting', 'Next meeting']];
+    ['Specialist', 'Specialist'], ['AccountManager', 'IM'], ['NextMeeting', 'Next meeting']];
   const pages = Math.max(1, Math.ceil(over.length / IMPL_OVER_PAGE_SIZE));
   implOverPage = Math.min(Math.max(implOverPage, 0), pages - 1);
   const start = implOverPage * IMPL_OVER_PAGE_SIZE;
@@ -564,7 +565,7 @@ function mountServices() {
   const root = document.getElementById('services-root');
   if (!root || root.querySelector('iframe')) return;
   const frame = document.createElement('iframe');
-  frame.src = 'services/index.html?v=2610211051';
+  frame.src = 'services/index.html?v=2611030751';
   frame.title = 'Additional Services';
   frame.className = 'services-frame';
   root.appendChild(frame);

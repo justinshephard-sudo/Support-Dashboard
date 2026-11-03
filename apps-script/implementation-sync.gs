@@ -17,11 +17,11 @@
                              final total, populated when onboarding completes)
           CsatPct / CsatResponses   "Onboarding CSAT" survey: share of 4–5 scores
                                     (responses on/after the firm's current start only)
-        RepStats (JSON)  the same metrics per rep (ChurnZero "Account Manager", blank →
+        RepStats (JSON)  the same metrics per rep (the firm's IM, see "rep" below, blank →
                          "Unassigned"): { rep: { open, preKick, needsSched, over70,
                          stages: { stage: n }, closed, medianDays, csatPct, csatN } }. Snapshot keys follow the
                          snapshot rule above; closed/median/CSAT are recomputed using
-                         each firm's CURRENT account manager.
+                         each firm's CURRENT IM.
      "Impl - Open Firms" today's open onboardings, one row per firm
      "Impl - Firm Events" firm-level detail behind the history tiles (drill-down):
           Type "closed"  one row per completed onboarding (Days = NewTimeInOnboarding)
@@ -35,7 +35,10 @@
 
    Definitions:
      open onboarding  = OnboardingStatus "Pre-Kickoff" or "Open"
-     rep              = AccountManager (blank → "Unassigned")
+     rep              = the firm's IM: ImplementationManager (IM/CSM split; it never changes, while
+                        the owner / AccountManager moves to the CSM or Support at handoff), else
+                        AccountManager for firms from before the split (blank → "Unassigned").
+                        The tabs keep the column name "AccountManager" for it.
      stage            = NewOnboardingCall (blank → "No stage set")
      needs scheduling = open onboarding with no upcoming ChurnZero meeting
      days in onboarding (open firms) = days since that start date
@@ -78,7 +81,7 @@ function syncImplementation() {
   accounts.forEach(function (a) {
     activeIds[String(a.Id)] = implStart_(a);
     byId[String(a.Id)] = a;
-    repOf[String(a.Id)] = (a.Cf || {}).AccountManager || IMPL_UNASSIGNED;
+    repOf[String(a.Id)] = implRep_(a.Cf || {}) || IMPL_UNASSIGNED;
   });
   var repSnap = {};   // rep -> today's open-onboarding counts
   function repBucket_(rep) {
@@ -110,7 +113,7 @@ function syncImplementation() {
     var days = Math.floor((now - implStart_(a)) / 86400000);
     if (days !== '' && days >= IMPL_OVER_DAYS) { over++; rb.over70++; }
     return [a.Name || '', a.ExternalId || cf.FirmId || '', cf.OnboardingStatus || '', stage,
-      cf.ImplementationSpecialist || '', cf.AccountManager || '', days,
+      cf.ImplementationSpecialist || '', implRep_(cf), days,
       next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || ''];
   });
   openRows.sort(function (x, y) { return (Number(y[6]) || 0) - (Number(x[6]) || 0); });
@@ -121,7 +124,7 @@ function syncImplementation() {
   function eventRow_(type, date, a, days, score, comment) {
     var cf = a.Cf || {};
     return [type, Utilities.formatDate(date, tz, 'MMMM yyyy'), Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
-      a.Name || '', a.ExternalId || cf.FirmId || '', cf.AccountManager || IMPL_UNASSIGNED,
+      a.Name || '', a.ExternalId || cf.FirmId || '', implRep_(cf) || IMPL_UNASSIGNED,
       cf.ImplementationSpecialist || '', days, score, comment];
   }
   var completed = {};      // 'yyyy-MM' -> [days]
@@ -213,6 +216,12 @@ function syncImplementation() {
   var eventsOut = [IMPL_EVENT_COLUMNS].concat(events);
   eventsSheet.getRange(1, 1, eventsOut.length, IMPL_EVENT_COLUMNS.length).setNumberFormat('@').setValues(eventsOut);
   return { open: open.length, needsScheduling: needsSched, over70: over, events: events.length };
+}
+
+// The firm's IM: the ImplementationManager field (IM/CSM split), else the AccountManager
+// (firms from before the split). '' when neither is set. cfAny_ lives in sync-accounts.gs.
+function implRep_(cf) {
+  return cfAny_(cf, 'ImplementationManager') || cf.AccountManager || '';
 }
 
 // When the firm started: the account StartDate, or its current term start if that's blank.
