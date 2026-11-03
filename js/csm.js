@@ -235,7 +235,7 @@ function renderCsm() {
         <span>Account health</span><b>${total} <small>accounts</small></b>
         ${csmHealthBar(h, 'unscored')}</button>
       <button type="button" class="csm-row" data-csm-fresh="${esc(rep)}">
-        <span>First 90 days</span><b>${CSM.data.health.hasDone ? fresh.firms.length : '—'} <small>accounts</small></b>
+        <span>First 90 days</span><b>${CSM.data.health.hasDone ? fresh.firms.length : '—'} <small>${fresh.firms.length === 1 ? 'account' : 'accounts'}</small></b>
         <small>${CSM.data.health.hasDone ? `${fresh.bands[0]} in days 1–30 · ${fresh.bands[1]} in 31–60 · ${fresh.bands[2]} in 61–90${fresh.firms.length ? ` · ${mrrMoney(fresh.mrr)} MRR` : ''}` : 'Fills in after the next ChurnZero sync.'}</small></button>
       <button type="button" class="csm-row" data-csm-aihealth="${esc(rep)}">
         <span>Merlin AI health</span><b>${aiTotal} <small>AI firms</small></b>
