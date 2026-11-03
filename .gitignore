@@ -5,3 +5,5 @@ apps-script/contracts/secret.js
 apps-script/*/dash-auth.js
 !apps-script/shared/dash-auth.js
 apps-script/service-portal/secret.js
+
+apps-script/call-prep/secret.js

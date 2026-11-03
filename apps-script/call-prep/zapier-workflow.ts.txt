@@ -1,16 +1,23 @@
 import { defineDurable } from "@zapier/zapier-durable";
 import { createZapierSdk } from "@zapier/zapier-sdk";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 
 // CS Dashboard "Call prep": the call-prep Apps Script sends the prompt, the firm context and the
 // last Gong transcript; Claude (through AI by Zapier) writes the prep sheet as JSON; this posts
 // it back to the Apps Script, which hands it to the dashboard pop-up.
 const sdk = createZapierSdk();
 
+// Only the call-prep Apps Script can start a run: it sends hookKey (kept in its git-ignored secret.js), and
+// this holds just the key's SHA-256. Results only ever go back to that script's web app, never to a
+// callbackUrl from the request, so the public hook can't be used to run Claude for someone else.
+const HOOK_KEY_SHA256 = "5c81bc12f2cc73346dc1d4ac188bea5b7b6bcb803f8e9dfcf5054341b26232f7";
+const CALLBACK_URL = "https://script.google.com/macros/s/AKfycbwltwhfY4-dLO6F5uyfzxIXIMcb_N0_zrk-2q0atrk_c8fMj4USTTcEJK4QsChbmAVR/exec";
+
 const InputSchema = z.object({
   requestId: z.string(),
   token: z.string(),
-  callbackUrl: z.string().url(),
+  hookKey: z.string(),
   instructions: z.string(),
   context: z.string().nullable().optional(),
   transcript: z.string().nullable().optional(),
@@ -43,6 +50,7 @@ export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ct
   const parsed = InputSchema.safeParse(normalizeInput(rawInput));
   if (!parsed.success) return { skipped: true, reason: "not a call-prep request" };
   const input = parsed.data;
+  if (createHash("sha256").update(input.hookKey).digest("hex") !== HOOK_KEY_SHA256) return { skipped: true, reason: "bad key" };
 
   const completion = await ctx.step("write-call-prep", async () =>
     sdk.runAction({
@@ -80,7 +88,7 @@ export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ct
       actionType: "write",
       actionKey: "custom",
       inputs: {
-        url: input.callbackUrl,
+        url: CALLBACK_URL,
         method: "POST",
         data: payload,
         headers: { "Content-Type": "text/plain;charset=utf-8" },

@@ -22,7 +22,7 @@
      GONG_BASIC             Gong API "Basic" token (base64 of key:secret), as used by the
                             first-onboarding Zap — or GONG_ACCESS_KEY + GONG_ACCESS_SECRET
      GONG_BASE_URL          optional, defaults to Lawmatics' https://us-32500.api.gong.io
-     ZAPIER_HOOK_URL        optional, overrides the workflow's catch-hook URL below
+     ZAPIER_HOOK_URL        optional, overrides the catch-hook URL in secret.js
      ANTHROPIC_API_KEY      optional (direct Claude instead of Zapier)
      CZ_APP_KEY             ChurnZero write key (Admin → Application Keys), for "Onboarding complete"
      ASANA_TOKEN            Asana personal access token (read), for the firm's build tasks in the prep
@@ -36,11 +36,11 @@ var CLAUDE_MODEL = 'claude-opus-5-5';
 var GONG_LOOKBACK_DAYS = 150;
 var CACHE_HOURS = 12;
 var ASANA_WORKSPACE = '1199511629835021';
-// Catch hook of the Zapier workflow "CS Dashboard – Call Prep" (ZAPIER_HOOK_URL overrides it).
+// The Zapier workflow "CS Dashboard – Call Prep": its catch-hook URL (ZAPIER_HOOK_SECRET_URL) and the
+// key it checks (ZAPIER_HOOK_KEY) live in secret.js, which is pushed with clasp but kept out of git.
 // Where Zapier posts the finished prep: this web app's public /exec address. (ScriptApp.getService().getUrl()
 // can give a lawmatics.com-only or /dev address, which Zapier can't reach.)
 var CALLBACK_URL = 'https://script.google.com/macros/s/AKfycbwltwhfY4-dLO6F5uyfzxIXIMcb_N0_zrk-2q0atrk_c8fMj4USTTcEJK4QsChbmAVR/exec';
-var ZAPIER_HOOK_DEFAULT = 'https://hooks.zapier.com/hooks/catch/14095940/UmLNkN2lGE4oKLuI/';
 
 // What each call normally covers (CS Onboarding Roadmap deck). Call numbers follow the
 // ChurnZero onboarding stages ("First Onboarding" = call 1, …).
@@ -134,12 +134,12 @@ function prep_(b, who) {
     return out;
   }
   // Through Zapier: hand off, then the dashboard polls prepStatus until prepResult lands.
-  var hook = props.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT;
-  if (!hook) throw new Error('The Zapier hook (ZAPIER_HOOK_URL) isn’t set up yet.');
+  var hook = props.getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? '' : ZAPIER_HOOK_SECRET_URL);
+  if (!hook || typeof ZAPIER_HOOK_KEY === 'undefined') throw new Error('The Zapier hook (ZAPIER_HOOK_URL) isn’t set up yet.');
   var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
   cache.put('req_' + requestId, JSON.stringify({ secret: secret, key: key, shell: out, at: Date.now() }), 3600);
   var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ requestId: requestId, token: secret, callbackUrl: CALLBACK_URL,
+    payload: JSON.stringify({ requestId: requestId, token: secret, hookKey: ZAPIER_HOOK_KEY, callbackUrl: CALLBACK_URL,
       instructions: prompt.system + '\n\n' + prompt.task + '\n\nReturn ONLY a JSON object (no code fence) with exactly these keys: ' +
         JSON.stringify(PREP_SCHEMA.properties, null, 0),
       context: prompt.context, transcript: transcript || '' }) });
@@ -454,7 +454,7 @@ function checkKeys() {
   var g = gongFetch_('/v2/users');
   Logger.log('Gong: ' + ((g && g.users) || []).length + ' users on the first page');
   var p = PropertiesService.getScriptProperties();
-  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
+  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? 'not set' : 'secret.js')) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
   Logger.log('Zapier posts results to: ' + CALLBACK_URL);
   var a = asanaTasks_('Garcia Sheppard');
   Logger.log('Asana: ' + (a.ok ? a.tasks.length + ' task(s) for Garcia Sheppard: ' + a.tasks.map(function (t) { return (t.completed ? '✓ ' : '○ ') + t.name; }).join(' | ') : a.error));
