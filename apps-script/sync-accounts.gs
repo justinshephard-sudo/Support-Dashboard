@@ -36,6 +36,8 @@ var CZ_COLUMNS = [
   'ChargebeePlan', 'ChargebeeStart', 'AddOns', 'InvoiceBalance', 'LegacyContract', 'MRRSource',
   // Churn detail for the MRR Report (replaces the Salesforce Detail tab).
   'ChurnCategory', 'ChurnDetails', 'AvgLeadsMonthly',
+  // yyyy-MM-dd, for the CSM tab's first-90-days count.
+  'OnboardingCompletedDate',
 ];
 
 var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmount', 'NextRenewalDate', 'LicenseCount',
@@ -43,7 +45,8 @@ var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmou
 var ACCOUNT_CF = ['FirmId', 'PrimaryPracticeArea', 'PracticeArea', 'AccountManager', 'ChargebeeAccountStatus', 'ContractStatus',
   'CurrentTermEnd', 'RemainingBillingCycles', 'DangerZone', 'CancellationRequested', 'AverageCsatLast60', 'AvgMattersCreatedmonth',
   'LeadVolume', 'AvgMonthlyLeadVolumelifetime', 'TotalSms', 'SmsPlanType', 'OfActivitiesLoggedl30', 'Employees',
-  'OnboardingStatus', 'Website', 'CurrentMrrStartingMrr', 'ChurnCategory', 'ChurnDetails'];
+  'OnboardingStatus', 'Website', 'CurrentMrrStartingMrr', 'ChurnCategory', 'ChurnDetails',
+  'OnboardingCompletedDate'];
 
 // Daily trigger entry point: the Accounts tab (Firm Lookup). Records the outcome on
 // the "Sync Status" tab, which the dashboard shows, so a failure (e.g. an expired
@@ -180,6 +183,7 @@ function accountToRow_(a, ctx) {
     ChurnCategory: cf.ChurnCategory || '',
     ChurnDetails: String(cf.ChurnDetails || '').slice(0, 600),
     AvgLeadsMonthly: leadAvg == null || leadAvg === '' ? '' : String(Math.round(leadAvg)),
+    OnboardingCompletedDate: cf.OnboardingCompletedDate ? String(cf.OnboardingCompletedDate).slice(0, 10) : '',
   };
   return CZ_COLUMNS.map(function (c) { return map[c]; });
 }

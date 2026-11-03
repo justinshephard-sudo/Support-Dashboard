@@ -501,7 +501,7 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm8_';
+var CSM_CACHE = 'csm9_';
 var HEALTH = { good: 33, bad: 67 };      // churn score: lower is healthier — good under 33, bad 67+
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
@@ -636,9 +636,13 @@ function readHealth_(skip) {
       && !skip[firmId_(r['FirmId#'])];
   }).map(function (r) {
     var sc = String(r['ChurnScore#']).trim();
-    return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#']), firmId_(r['FirmId#'])];
+    var done = String(r['OnboardingCompletedDate#'] || '').trim();
+    return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#']), firmId_(r['FirmId#']),
+      /^\d{4}-\d{2}-\d{2}$/.test(done) ? done : ''];
   });
-  return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts };
+  // hasDone: the Accounts sync has started copying OnboardingCompletedDate (the CSM tab says "after the next sync" until then).
+  var hasDone = rows.length > 0 && 'OnboardingCompletedDate#' in rows[0];
+  return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts, hasDone: hasDone };
 }
 
 // firms: [company, am, coverage % (null = too few new leads to grade), leads, scored, engaged, credits $, add-on MRR, firmId]

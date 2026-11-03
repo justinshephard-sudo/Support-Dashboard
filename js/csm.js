@@ -1,7 +1,8 @@
 /* ==========================================================================
    CSM — each rep's book: retention (6- and 13-month cohort and all-time NRR / GRR, and a
    cohort-by-age grid), growth this
-   month, AI upsells against the $500/mo target, and account health.
+   month, AI upsells against the $500/mo target, account health, and firms in their first 90 days
+   after onboarding.
    Data: the MRR Report backend (apps-script/mrr-report): `csm` for the cards (month-end
    snapshots, ChurnZero health, per-rep monthly totals) and `load` — shared with the MRR
    Report tab — for the firm-level events behind the pop-ups. Reps are the ones on the
@@ -123,6 +124,19 @@ function csmHealth(rep) {
   return by;
 }
 
+// First 90 days: active firms whose ChurnZero OnboardingCompletedDate was 0–89 days ago (Pacific),
+// split into days 1–30 / 31–60 / 61–90. accounts: [name, am, score, mrr, firmId, completed yyyy-mm-dd].
+const CSM_FRESH_DAYS = 90;
+function csmFresh(rep) {
+  const today = Date.parse(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
+  const firms = (CSM.data.health.accounts || []).filter((a) => a[5] && (rep == null || a[1] === rep))
+    .map((a) => ({ a, age: Math.round((today - Date.parse(a[5])) / 864e5) }))
+    .filter((f) => f.age >= 0 && f.age < CSM_FRESH_DAYS)
+    .sort((x, y) => x.age - y.age);
+  const band = (lo, hi) => firms.filter((f) => f.age >= lo && f.age < hi).length;
+  return { firms, bands: [band(0, 30), band(30, 60), band(60, 90)], mrr: firms.reduce((t, f) => t + f.a[3], 0) };
+}
+
 // Merlin AI Health: add-on firms graded by the share of new leads Merlin scored or worked.
 function csmAiHealth(rep) {
   const h = CSM.data.ai || {};
@@ -182,7 +196,7 @@ function renderCsm() {
       <div class="mrr-kpis csm-kpis">
         ${tile('nrr', 6, '6-month')}${tile('nrr', 13, '13-month')}${tile('nrr', 'bob', 'All-time')}${tile('grr', 6, '6-month')}${tile('grr', 13, '13-month')}${tile('grr', 'bob', 'All-time')}
       </div>
-      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="">Team cohort analysis</button>
+      <div class="loop-actions"><button type="button" class="loop-btn" id="csmRefresh">↻ Refresh</button><button type="button" class="loop-btn" data-csm-cohort="">Team cohort analysis</button>${CSM.data.health.hasDone ? `<button type="button" class="loop-btn" data-csm-fresh="">Team first 90 days · ${csmFresh(null).firms.length}</button>` : ''}
         <span class="mrr-sync">${hist.checkpoint ? `6- and 13-month: firms that signed up in ${esc(mrrYmLabel(hist.cohort6))} and ${esc(mrrYmLabel(hist.cohort13))}, as of the end of ${esc(mrrYmLabel(hist.checkpoint))} · All-time: every firm since ${esc(mrrYmLabel(hist.first))}, as of now` : esc(hist.error || '')}</span></div>
     </div>
     <div class="fa-hero-art">
@@ -199,6 +213,7 @@ function renderCsm() {
     const h = csmHealth(rep);
     const total = h.good.length + h.okay.length + h.bad.length + h.none.length;
     const pct = Math.min(100, (m.aiAdded / CSM_AI_TARGET) * 100);
+    const fresh = csmFresh(rep);
     const ai = csmAiHealth(rep);
     const aiTotal = ai.good.length + ai.okay.length + ai.bad.length + ai.none.length;
     return `<article class="csm-card${solo ? ' csm-solo' : ''}">
@@ -219,6 +234,9 @@ function renderCsm() {
       <button type="button" class="csm-row" data-csm-health="${esc(rep)}">
         <span>Account health</span><b>${total} <small>accounts</small></b>
         ${csmHealthBar(h, 'unscored')}</button>
+      <button type="button" class="csm-row" data-csm-fresh="${esc(rep)}">
+        <span>First 90 days</span><b>${CSM.data.health.hasDone ? fresh.firms.length : '—'} <small>accounts</small></b>
+        <small>${CSM.data.health.hasDone ? `${fresh.bands[0]} in days 1–30 · ${fresh.bands[1]} in 31–60 · ${fresh.bands[2]} in 61–90${fresh.firms.length ? ` · ${mrrMoney(fresh.mrr)} MRR` : ''}` : 'Fills in after the next ChurnZero sync.'}</small></button>
       <button type="button" class="csm-row" data-csm-aihealth="${esc(rep)}">
         <span>Merlin AI health</span><b>${aiTotal} <small>AI firms</small></b>
         ${!CSM.data.ai ? '<small>Loading…</small>' : CSM.data.ai.error ? `<small>${esc(CSM.data.ai.error)}</small>` : aiTotal ? csmHealthBar(ai, `under ${CSM.data.ai.minLeads || 5} leads`) : '<small>No firms with the AI credits add-on.</small>'}</button>
@@ -230,7 +248,7 @@ function renderCsm() {
       ${isManager() ? `<label class="csm-rep-pick">Rep <select class="fb-select" id="csmRep"><option value="">Whole team</option>${allReps.map((r) => `<option value="${esc(r)}"${r === view ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>` : ''}
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>Growth &amp; AI · ${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid${solo ? ' csm-grid-solo' : ''}">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
-    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
+    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms. First 90 days counts active accounts whose ChurnZero onboarding completed date was in the last 90 days.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
 }
 
 /* ---------- pop-ups ---------- */
@@ -265,6 +283,19 @@ function csmHealthDrill(rep) {
     `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th><th>Health</th><th>Churn score</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
       ${rows.map(({ a, k, l }) => `<tr><td>${esc(a[0])}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${a[2] == null ? '—' : Math.round(a[2])}</td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>`);
+}
+
+function csmFreshDrill(rep) {
+  const r = csmFresh(rep || null);
+  const team = !rep;
+  rep = rep || 'Team';
+  const fmt = (d) => new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  const grade = (a) => (a[2] == null ? ['none', 'Unscored'] : a[2] < CSM_HEALTH.good ? ['good', 'Good'] : a[2] < CSM_HEALTH.bad ? ['okay', 'Okay'] : ['bad', 'Bad']);
+  MRR.drill = null;
+  mrrModal(`${rep} — first 90 days`, `${mrrPlural(r.firms.length, 'account')} finished onboarding in the last ${CSM_FRESH_DAYS} days · ${r.bands[0]} in days 1–30 · ${r.bands[1]} in 31–60 · ${r.bands[2]} in 61–90 · newest first`,
+    r.firms.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th>${team ? '<th>Rep</th>' : ''}<th>Onboarding completed</th><th>Day</th><th>Days left</th><th>Health</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${r.firms.map(({ a, age }) => { const [k, l] = grade(a); return `<tr><td>${esc(a[0])}</td>${team ? `<td>${esc(a[1])}</td>` : ''}<td>${esc(fmt(a[5]))}</td><td>${age + 1} of ${CSM_FRESH_DAYS}</td><td>${CSM_FRESH_DAYS - age - 1}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
+    </tbody></table></div>` : '<div class="empty-note">No active accounts finished onboarding in the last 90 days.</div>');
 }
 
 function csmAiHealthDrill(rep) {
@@ -419,6 +450,8 @@ function setupCsm() {
     if (a) { csmWithEvents(() => csmAiDrill(a.dataset.csmAi)); return; }
     const h = t.closest('[data-csm-health]');
     if (h) { csmHealthDrill(h.dataset.csmHealth); return; }
+    const fr = t.closest('[data-csm-fresh]');
+    if (fr) { if (CSM.data.health.hasDone) csmFreshDrill(fr.dataset.csmFresh); return; }
     const ah = t.closest('[data-csm-aihealth]');
     if (ah && CSM.data.ai && !CSM.data.ai.error) csmAiHealthDrill(ah.dataset.csmAihealth);
   });
