@@ -121,6 +121,7 @@ function syncAccounts_() {
   // Related custom tables, grouped by internal ChurnZero AccountId.
   var ctx = {
     cbMrr: readSnapshotMrr_(),
+    repName: czRepNamer_(base, headers),
     addOns: groupBy_(fetchAllCZ_(base + '/CustomListSubscriptionAddOn?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
     subs:   groupBy_(fetchAllCZ_(base + '/CustomListChargebeeSubscription?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
     legacy: groupBy_(fetchAllCZ_(base + '/CustomListLegacyContracts?$top=' + CZ_PAGE_SIZE, headers), 'AccountId'),
@@ -151,7 +152,7 @@ function accountToRow_(a, ctx) {
     Name: a.Name || '',
     FirmId: a.ExternalId || cf.FirmId || '',
     PracticeArea: cf.PrimaryPracticeArea || firstOf_(cf.PracticeArea) || '',
-    AccountManager: cf.AccountManager || '',
+    AccountManager: ctx.repName(cf.AccountManager),
     MRR: mrr.value,
     MRRSource: mrr.source,
     TotalContract: numOr_(a.TotalContractAmount, ''),
@@ -184,8 +185,8 @@ function accountToRow_(a, ctx) {
     ChurnCategory: cf.ChurnCategory || '',
     ChurnDetails: String(cf.ChurnDetails || '').slice(0, 600),
     AvgLeadsMonthly: leadAvg == null || leadAvg === '' ? '' : String(Math.round(leadAvg)),
-    ImplementationManager: cfAny_(cf, 'ImplementationManager'),
-    CustomerSuccessManager: cfAny_(cf, 'CustomerSuccessManager'),
+    ImplementationManager: ctx.repName(cfAny_(cf, 'ImplementationManager')),
+    CustomerSuccessManager: ctx.repName(cfAny_(cf, 'CustomerSuccessManager')),
   };
   return CZ_COLUMNS.map(function (c) { return map[c]; });
 }
@@ -360,6 +361,24 @@ function cfAny_(cf, name) {
   var want = name.toLowerCase();
   for (var k in cf) if (k.toLowerCase() === want) return cf[k] == null ? '' : String(cf[k]).trim();
   return '';
+}
+
+// Rep names compared without accents, case or extra spaces: the IM / CSM picklists come from
+// Salesforce, which spells Admir's name with an accent (Karamović); his ChurnZero user doesn't.
+function repKey_(v) {
+  return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+// name or email → the ChurnZero user's spelling, so a rep is written one way on every tab
+// (unknown names pass through trimmed). Also used by implementation-sync.gs.
+function czRepNamer_(base, headers) {
+  var by = {};
+  fetchAllCZ_(base + '/UserAccount?$top=' + CZ_PAGE_SIZE + '&$select=FirstName,LastName,Email', headers).forEach(function (u) {
+    var name = (String(u.FirstName || '').trim() + ' ' + String(u.LastName || '').trim()).trim();
+    if (!name) return;
+    if (!by[repKey_(name)]) by[repKey_(name)] = name;
+    if (u.Email && !by[repKey_(u.Email)]) by[repKey_(u.Email)] = name;
+  });
+  return function (v) { return by[repKey_(v)] || String(v || '').trim(); };
 }
 
 function groupBy_(list, key) {

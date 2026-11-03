@@ -450,7 +450,10 @@ function money_(v) {
 }
 function num_(v) { var n = Number(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
 function truthy_(v) { return /^true$/i.test(String(v).trim()); }
-function name_(v) { return String(v || '').trim().replace(/^Swetha Devakuma$/, 'Swetha Devakumar'); }
+// A rep's name. Accents dropped, so Salesforce's "Karamović" and ChurnZero's "Karamovic" are one rep.
+function name_(v) {
+  return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').replace(/^Swetha Devakuma$/, 'Swetha Devakumar');
+}
 
 /* ---------- IM/CSM split: who a firm's MRR counts for ----------
    The Chargebee sheets' "Account Manager" mirrors the ChurnZero owner, which is the IM while a

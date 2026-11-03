@@ -77,6 +77,8 @@ function syncImplementation() {
       return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true &&
         start && start >= IMPL_MIN_START && !excluded[excludedFirmKey_(a.ExternalId || cf.FirmId)];
     });
+  var repName = czRepNamer_(base, headers);   // sync-accounts.gs
+  var implRep_ = function (cf) { return repName(implRepRaw_(cf)); };
   var activeIds = {}, repOf = {}, byId = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {
     activeIds[String(a.Id)] = implStart_(a);
@@ -219,8 +221,9 @@ function syncImplementation() {
 }
 
 // The firm's IM: the ImplementationManager field (IM/CSM split), else the AccountManager
-// (firms from before the split). '' when neither is set. cfAny_ lives in sync-accounts.gs.
-function implRep_(cf) {
+// (firms from before the split). '' when neither is set. cfAny_ lives in sync-accounts.gs; the
+// sync passes it through czRepNamer_ so the two fields' spellings of a rep match.
+function implRepRaw_(cf) {
   return cfAny_(cf, 'ImplementationManager') || cf.AccountManager || '';
 }
 

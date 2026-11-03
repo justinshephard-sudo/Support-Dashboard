@@ -65,8 +65,8 @@ function handoffCanClose_(who, acct, users) {
   if (!me) return false;
   var cf = acct.Cf || {};
   var im = cfGet_(cf, IM_FIELD);
-  if (im) return im === me.name;
-  return String(cf.AccountManager || '').trim() === me.name || acct.UserAccountId === me.id;
+  if (im) return (userFor_(users, im) || {}).id === me.id;
+  return nameKey_(cf.AccountManager) === nameKey_(me.name) || acct.UserAccountId === me.id;
 }
 
 function handoffStart_(b, who) {
@@ -91,8 +91,8 @@ function handoffStart_(b, who) {
   var dm = contacts.filter(function (c) { return c.dm; })[0];
   if (dm) values.decisionMaker = String(dm.id);
   return {
-    ok: true, firm: { firmId: String(cf.FirmId || acct.ExternalId), name: acct.Name, mrr: mrr, im: im || String(cf.AccountManager || ''),
-      csm: cfGet_(cf, CSM_FIELD), owner: (users[acct.UserAccountId] || {}).name || '',
+    ok: true, firm: { firmId: String(cf.FirmId || acct.ExternalId), name: acct.Name, mrr: mrr, im: repLabel_(users, im || cf.AccountManager),
+      csm: repLabel_(users, cfGet_(cf, CSM_FIELD)), owner: (users[acct.UserAccountId] || {}).name || '',
       // New-model firms (IM field set): the Owner moves to the CSM if there is one, else to Support.
       ownerTo: !im ? '' : cfGet_(cf, CSM_FIELD) ? 'csm' : 'support' },
     outcomes: HANDOFF_OUTCOMES, sections: HANDOFF_SECTIONS, contacts: contacts, values: values,
@@ -129,7 +129,7 @@ function closeOnboarding_(b, who) {
   var support = null, csmName = cfGet_(cf, CSM_FIELD);
   if (im) {
     var all = Object.keys(users).map(function (k) { return users[k]; }).filter(function (u) { return u.active; });
-    support = csmName ? all.filter(function (u) { return u.name === csmName; })[0]
+    support = csmName ? userFor_(users, csmName)
       : all.filter(function (u) { return String(u.email || '').toLowerCase() === SUPPORT_EMAIL; })[0];
     if (!support) throw new Error((csmName || SUPPORT_EMAIL) + ' isn’t an active ChurnZero user, so the Owner can’t move.');
   }
@@ -153,7 +153,7 @@ function closeOnboarding_(b, who) {
     confirmed = !!after && acf.OnboardingStatus === outcome.status && String(acf.OnboardingCompletedDate || '').slice(0, 10) === today &&
       (!support || after.UserAccountId === support.id);
   }
-  handoffLog_({ by: who.email, acct: acct, outcome: outcome.status, im: im || String(cf.AccountManager || ''), mrr: mrr,
+  handoffLog_({ by: who.email, acct: acct, outcome: outcome.status, im: repLabel_(users, im || cf.AccountManager), mrr: mrr,
     owner: support ? support.name : '', answers: clean, confirmed: confirmed });
   return { ok: true, confirmed: confirmed, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
     unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
@@ -234,8 +234,8 @@ function recentHandoffs_(b) {
     });
     return { firmId: firmId, name: a.Name, mrr: Number(a.TotalContractAmount) || 0,
       completed: String(cf.OnboardingCompletedDate).slice(0, 10), outcome: String(cf.OnboardingStatus || ''),
-      im: cfGet_(cf, IM_FIELD) || String(cf.AccountManager || '').trim(), csm: cfGet_(cf, CSM_FIELD),
-      am: String(cf.AccountManager || '').trim(), owner: (users[a.UserAccountId] || {}).name || '',
+      im: repLabel_(users, cfGet_(cf, IM_FIELD) || cf.AccountManager), csm: repLabel_(users, cfGet_(cf, CSM_FIELD)),
+      am: repLabel_(users, cf.AccountManager), owner: (users[a.UserAccountId] || {}).name || '',
       closedBy: log.by || '', decisionMakers: dms[a.Id] || [], answers: answers };
   }).sort(function (x, y) { return y.completed.localeCompare(x.completed) || x.name.localeCompare(y.name); });
   return { ok: true, days: days, since: since, sections: HANDOFF_SECTIONS,

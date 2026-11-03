@@ -266,7 +266,8 @@ function myRepName(names) {
   if (REP_EMAILS[email]) return REP_EMAILS[email];
   const local = email.split('@')[0];
   return names.filter((r) => r && r !== 'Unassigned').find((rep) => {
-    const parts = rep.toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
+    // Accents dropped first, so "Karamović" still matches admir.karamovic@.
+    const parts = rep.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
     const first = parts[0], last = parts[parts.length - 1];
     return [first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local);
   }) || null;

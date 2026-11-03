@@ -247,8 +247,8 @@ function buildLoad_() {
   owned.forEach(function (a) {
     var cf = a.Cf || {};
     var im = cfGet_(cf, IM_FIELD), csm = cfGet_(cf, CSM_FIELD);
-    add(imStat, im ? byName[im] : a.UserAccountId, a, cf);
-    add(csmStat, csm ? byName[csm] : a.UserAccountId, a, cf);
+    add(imStat, im ? byName[nameKey_(im)] : a.UserAccountId, a, cf);
+    add(csmStat, csm ? byName[nameKey_(csm)] : a.UserAccountId, a, cf);
   });
 
   // Assignments made from this page count as the rep's most recent assignment too.
@@ -263,7 +263,7 @@ function buildLoad_() {
   var tier = tier_();
   var roster = function (names, stats, role) {
     return names.map(function (n) {
-      var id = byName[n];
+      var id = byName[nameKey_(n)];
       if (!id) return null;
       var r = stats[id] || blank();
       return { id: id, name: users[id].name, email: users[id].email, role: role, included: !skipped[id], high: role === 'IM' && !!tier.reps[id],
@@ -426,14 +426,37 @@ function setCsmBands_(b) {
 }
 
 // Active ChurnZero users by full name (Kennedy has a duplicate user; the partner rep wins).
+// Active users by nameKey_ (and by email, since a field may hold one) → user id.
 function usersByName_(users) {
   var by = {};
   Object.keys(users).forEach(function (id) {
-    var u = users[id];
-    if (u.active && u.name && (!by[u.name] || Number(id) === PARTNER_REP_ID)) by[u.name] = Number(id);
+    var u = users[id], k = nameKey_(u.name);
+    if (u.active && k && (!by[k] || Number(id) === PARTNER_REP_ID)) by[k] = Number(id);
+    if (u.active && u.email && !by[nameKey_(u.email)]) by[nameKey_(u.email)] = Number(id);
   });
   return by;
 }
+
+/* Rep names are compared without accents, case or extra spaces. The IM / CSM picklists come from
+   Salesforce, which spells Admir's name with an accent (Karamović); his ChurnZero user doesn't. A
+   field may also hold the rep's email (older test writes did). */
+function nameKey_(v) {
+  return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+// The active ChurnZero user a name or email refers to, or null. users: the users_() map.
+function userFor_(users, v) {
+  var id = usersByName_(users)[nameKey_(v)];
+  return id ? users[id] : null;
+}
+// A rep as the page shows it: the ChurnZero user's spelling, so one rep never splits in two.
+function repLabel_(users, v) {
+  var u = v ? userFor_(users, v) : null;
+  return u ? u.name : String(v || '').trim();
+}
+// What goes into the IM / CSM picklist for a user: Salesforce's spelling when it differs from the
+// ChurnZero user's (FIELD_SPELLING, user name → picklist value), else the user's name.
+var FIELD_SPELLING = {};
+function fieldName_(u) { return FIELD_SPELLING[u.name] || u.name; }
 
 // ChurnZero hands custom field keys back in whatever case they were first created in.
 function cfGet_(cf, name) {
@@ -536,8 +559,8 @@ function assign_(b, by) {
   var typeAttr = props.getProperty('CZ_TYPE_ATTR') || 'ImplementationType';
   czSet_(appKey, acct.ExternalId, ownerAttr, owner.email);
   czSet_(appKey, acct.ExternalId, typeAttr, PREMIUM);
-  czSet_(appKey, acct.ExternalId, IM_FIELD, im.name);
-  if (csm) czSet_(appKey, acct.ExternalId, CSM_FIELD, csm.name);
+  czSet_(appKey, acct.ExternalId, IM_FIELD, fieldName_(im));
+  if (csm) czSet_(appKey, acct.ExternalId, CSM_FIELD, fieldName_(csm));
 
   if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, owner: owner.name, im: im.name, csm: csm ? csm.name : '' };
   // ChurnZero applies writes asynchronously; check back a few times.
@@ -547,7 +570,7 @@ function assign_(b, by) {
     after = czGet_('/Account', { $filter: 'Id eq ' + Number(b.czId), $select: 'Id,UserAccountId,Cf/ImplementationType,Cf/' + IM_FIELD + ',Cf/' + CSM_FIELD })[0];
     var cf = (after && after.Cf) || {};
     confirmed = !!after && after.UserAccountId === owner.id && cf.ImplementationType === PREMIUM &&
-      cfGet_(cf, IM_FIELD) === im.name && (!csm || cfGet_(cf, CSM_FIELD) === csm.name);
+      nameKey_(cfGet_(cf, IM_FIELD)) === nameKey_(fieldName_(im)) && (!csm || nameKey_(cfGet_(cf, CSM_FIELD)) === nameKey_(fieldName_(csm)));
   }
   clearLoadCache_();
   appendLog_({
