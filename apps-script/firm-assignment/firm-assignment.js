@@ -455,7 +455,7 @@ function repLabel_(users, v) {
 }
 // What goes into the IM / CSM picklist for a user: Salesforce's spelling when it differs from the
 // ChurnZero user's (FIELD_SPELLING, user name → picklist value), else the user's name.
-var FIELD_SPELLING = {};
+var FIELD_SPELLING = { 'Admir Karamovic': 'Admir Karamović' };
 function fieldName_(u) { return FIELD_SPELLING[u.name] || u.name; }
 
 // ChurnZero hands custom field keys back in whatever case they were first created in.
