@@ -43,7 +43,6 @@ async function initFirmLookup() {
       fetchSheetByTitle(CONTRACTS_TAB).catch(() => []),
     ]);
     FIRMS.list = parseAccounts(rows);
-    if (typeof spAddTestFirm === 'function') FIRMS.list = spAddTestFirm(FIRMS.list);
     FIRMS.contracts = parseContracts(contractRows);
     FIRMS.loaded = true;
     if (cnt) cnt.textContent = FIRMS.list.length ? `${FIRMS.list.length} firms` : '';
@@ -118,13 +117,14 @@ function parseContracts(rows) {
   const header = rows[0].map((h) => String(h || '').trim());
   const col = (name) => header.indexOf(name);
   const iFirm = col('FirmId'), iName = col('AccountName'), iDoc = col('ContentDocumentId'), iTitle = col('Title'), iAt = col('UploadedAt');
-  // Indexed by Firm ID, and by name too: some Salesforce accounts have no Firm ID.
+  // Indexed by Firm ID. Only contracts whose Salesforce account has no Firm ID are indexed by name too,
+  // so two firms with the same name (e.g. two "Acorn Law"s) never get each other's contract.
   const add = (key, entry) => { if (!map.has(key)) map.set(key, []); map.get(key).push(entry); };
   rows.slice(1).forEach((r) => {
     if (!r[iDoc]) return;
     const entry = { docId: String(r[iDoc]), title: String(r[iTitle] || ''), at: String(r[iAt] || '') };
     const firm = normId(r[iFirm]);
-    if (firm) add('id:' + firm, entry);
+    if (firm) { add('id:' + firm, entry); return; }
     const name = normFirmName(r[iName]);
     if (name) add('name:' + name, entry);
   });
@@ -136,20 +136,31 @@ function normFirmName(s) {
     .replace(/\b(llc|pllc|llp|pc|p c|pa|inc|ltd|the)\b/g, ' ').replace(/\s+/g, ' ').trim();
 }
 function contractsFor(f) {
-  return FIRMS.contracts.get('id:' + normId(f.firmId)) || FIRMS.contracts.get('name:' + normFirmName(f.name)) || [];
+  const byId = FIRMS.contracts.get('id:' + normId(f.firmId));
+  if (byId) return byId;
+  // By name only when no other firm has the same name; otherwise we can't tell whose contract it is.
+  const name = normFirmName(f.name);
+  if (!name || FIRMS.list.filter((x) => normFirmName(x.name) === name).length > 1) return [];
+  return FIRMS.contracts.get('name:' + name) || [];
 }
 function fmtContractDate(s) {
   const d = new Date(String(s).replace(/\+0000$/, 'Z'));
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
+// Signed documents are merged_quote files (contracts, renewals, wet-signed addendums); files with
+// "addendum" in the name are verbally approved addendums. Newest first, every one openable.
+const isVerbalAddendum = (c) => /addendum/i.test(c.title) && !/^merged_quote_/i.test(c.title);
 function contractRowHtml(f) {
   const list = contractsFor(f);
   if (!list.length) return pfRow('Signed contract', 'None on file');
-  const newest = list[0];
-  const date = fmtContractDate(newest.at);
-  const more = list.length > 1 ? `<div class="pf-flag">⚠ ${list.length} contracts on file — showing newest</div>` : '';
-  return `<div class="pf-row"><span class="k">Signed contract</span><span class="v">`
-    + `<button type="button" class="pf-link" data-contract="${esc(newest.docId)}">View PDF${date ? ' · ' + esc(date) : ''}</button>${more}</span></div>`;
+  const link = (c) => {
+    const date = fmtContractDate(c.at);
+    const label = isVerbalAddendum(c) ? 'Verbal addendum' : 'Signed';
+    return `<button type="button" class="pf-link${isVerbalAddendum(c) ? ' alt' : ''}" data-contract="${esc(c.docId)}">${label}${date ? ' · ' + esc(date) : ''}</button>`;
+  };
+  const shown = list.slice(0, 4), rest = list.slice(4);
+  const more = rest.length ? `<details class="pf-more"><summary>${rest.length} older</summary>${rest.map(link).join('')}</details>` : '';
+  return `<div class="pf-row"><span class="k">Contract${list.length > 1 ? 's' : ''}</span><span class="v pf-docs">${shown.map(link).join('')}${more}</span></div>`;
 }
 // Opens the window synchronously (so popup blockers allow it), then fills it with the PDF
 // once the contracts web app has verified the viewer and returned the file.

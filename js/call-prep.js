@@ -33,6 +33,29 @@ function callPrepCard([key, icon, title, tone, empty], p) {
     ${items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : `<p class="cp-none">${esc(empty)}</p>`}</section>`;
 }
 
+// The firm's Asana tasks (any task with the firm's name in the title): open ones up front, finished ones folded away.
+function callPrepAsana(a) {
+  if (!a) return '';
+  if (!a.ok) return `<section class="cp-asana"><h4><span>📋</span>Asana tasks</h4><p class="cp-none">Couldn’t load Asana tasks (${esc(a.error || 'unknown error')}).</p></section>`;
+  const open = a.tasks.filter((t) => !t.completed), done = a.tasks.filter((t) => t.completed);
+  const today = new Date().toISOString().slice(0, 10);
+  const day = (s) => (s ? new Date(s.length === 10 ? s + 'T12:00:00' : s).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '');
+  const row = (t) => {
+    const late = !t.completed && t.dueOn && t.dueOn < today;
+    const meta = t.completed
+      ? [t.completedAt && `done ${day(t.completedAt)}`, t.assignee]
+      : [t.dueOn && `<span class="${late ? 'cp-late' : ''}">${late ? 'overdue · ' : 'due '}${day(t.dueOn)}</span>`, t.section && esc(t.section), t.assignee && esc(t.assignee)];
+    return `<li class="${t.completed ? 'is-done' : ''}"><span class="cp-task-dot">${t.completed ? '✓' : ''}</span>
+      <a href="${safeUrl(t.url)}" target="_blank" rel="noopener">${esc(t.name)}</a>
+      <small>${meta.filter(Boolean).map((x) => (t.completed ? esc(x) : x)).join(' · ')}</small></li>`;
+  };
+  if (!a.tasks.length) return `<section class="cp-asana"><h4><span>📋</span>Asana tasks</h4><p class="cp-none">No Asana tasks with this firm’s name in the title.</p></section>`;
+  return `<section class="cp-asana"><h4><span>📋</span>Asana tasks<em>${open.length} open · ${done.length} done</em></h4>
+    ${open.length ? `<ul class="cp-tasks">${open.map(row).join('')}</ul>` : '<p class="cp-none">Nothing open — every task is done. 🎉</p>'}
+    ${done.length ? `<details class="cp-done"><summary>Completed (${done.length})</summary><ul class="cp-tasks">${done.map(row).join('')}</ul></details>` : ''}
+  </section>`;
+}
+
 function callPrepBody(d) {
   const p = d.prep || {};
   const when = (s) => (s ? new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '');
@@ -54,6 +77,7 @@ function callPrepBody(d) {
     ${p.agenda && p.agenda.length ? `<section class="cp-agenda"><h4><span>🗺️</span>Game plan</h4><ol>${p.agenda.map((a) => `<li><b>${esc(a.item)}</b>${a.why ? `<span>${esc(a.why)}</span>` : ''}</li>`).join('')}</ol></section>` : ''}
     ${p.attendees && p.attendees.length ? `<div class="cp-who"><span class="cp-who-label">👥 Who should be there</span>${p.attendees.map((a) => `<span class="cp-chip">${esc(a)}</span>`).join('')}</div>` : ''}
     <div class="cp-grid">${CP_SECTIONS.map((sec) => callPrepCard(sec, p)).join('')}</div>
+    ${callPrepAsana(d.asana)}
     <p class="cp-foot"><span>✨ Written by AI from the Gong call ${esc(new Date(d.generated).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${d.cached ? ' (saved copy)' : ''} — double-check anything important against the recording.</span>
       <button type="button" class="cp-btn" data-cp-regen>↻ Regenerate</button></p>`;
 }

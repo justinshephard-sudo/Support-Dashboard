@@ -118,7 +118,7 @@ function faPicker(f, kind) {
   if (!top) return `<div class="fa-why">No ${kind === 'csm' ? 'CSM' : 'IM'} is in the rotation. Add someone below.</div>`;
   const why = kind === 'csm' ? faCsmWhy : faWhy;
   const tip = kind === 'csm' ? faCsmTip : faScoreTip;
-  const label = (r) => (r.partnerRule ? 'partner rule' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score);
+  const label = (r) => (r.partnerRule ? 'partner rule' : r.partnerOnly ? 'partner firms only' : r.outside ? (f.high ? 'standard tier' : 'high-MRR tier') : r.score);
   return `<div class="fa-sugg-lbl">Suggested ${kind === 'csm' ? 'CSM' : 'IM'}</div>
     <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span>${top.partnerRule
       ? '<span class="fa-score fa-partner-rule">Partner rule</span>'

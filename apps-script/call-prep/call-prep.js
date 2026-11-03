@@ -25,6 +25,7 @@
      ZAPIER_HOOK_URL        optional, overrides the workflow's catch-hook URL below
      ANTHROPIC_API_KEY      optional (direct Claude instead of Zapier)
      CZ_APP_KEY             ChurnZero write key (Admin → Application Keys), for "Onboarding complete"
+     ASANA_TOKEN            Asana personal access token (read), for the firm's build tasks in the prep
 
    Deploy: Web app · Execute as: Me · Who has access: Anyone. Each request must carry a
    Google access token issued to the dashboard client (shared/dash-auth.js).
@@ -34,6 +35,7 @@ var CZ_BASE = 'https://lawmatics.us1app.churnzero.net/public/v1';
 var CLAUDE_MODEL = 'claude-opus-5-5';
 var GONG_LOOKBACK_DAYS = 150;
 var CACHE_HOURS = 12;
+var ASANA_WORKSPACE = '1199511629835021';
 // Catch hook of the Zapier workflow "CS Dashboard – Call Prep" (ZAPIER_HOOK_URL overrides it).
 // Where Zapier posts the finished prep: this web app's public /exec address. (ScriptApp.getService().getUrl()
 // can give a lawmatics.com-only or /dev address, which Zapier can't reach.)
@@ -101,7 +103,8 @@ function prep_(b, who) {
   var cache = CacheService.getScriptCache();
   if (!b.regenerate) {
     var hit = cache.get(key);
-    if (hit) { var c = JSON.parse(hit); c.cached = true; return c; }
+    // The AI's prep keeps for 12 hours; the Asana list is always fresh.
+    if (hit) { var c = JSON.parse(hit); c.cached = true; c.asana = asanaTasksSafe_(acct.Name); return c; }
   }
 
   var transcript = last ? gongTranscript_(last) : '';
@@ -114,8 +117,12 @@ function prep_(b, who) {
     challenges: String(cf.KeyChallenges || '').slice(0, 1500),
     contacts: contacts.map(function (c) { return (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() + (c.Cf && c.Cf.IncludeInOnboarding ? ' (onboarding contact)' : ''); }).filter(String).slice(0, 15),
   };
+  var asana = asanaTasksSafe_(acct.Name);
+  firm.asanaTasks = asana.tasks.map(function (t) {
+    return t.name + ' — ' + (t.completed ? 'done ' + String(t.completedAt || '').slice(0, 10) : 'open' + (t.dueOn ? ', due ' + t.dueOn : '') + (t.section ? ', ' + t.section : ''));
+  }).slice(0, 25);
   var out = {
-    ok: true, firm: { name: firm.name, firmId: firmId, im: repName, stage: firm.stage, nextMeeting: firm.nextMeeting, mrr: firm.mrr },
+    ok: true, asana: asana, firm: { name: firm.name, firmId: firmId, im: repName, stage: firm.stage, nextMeeting: firm.nextMeeting, mrr: firm.mrr },
     lastCall: last ? { title: last.title, date: last.started, url: last.url, minutes: Math.round((last.duration || 0) / 60) } : null,
     priorCalls: calls.length, prep: null, generated: null,
   };
@@ -230,7 +237,9 @@ function prepPrompt_(firm, last, calls) {
     'Be specific and practical: names, dates, documents and automations from the transcript, not generic advice. ' +
     'This is read in the minute before a call, so be brief: at most 5 bullets per list and at most 6 agenda items, ' +
     'each bullet under 15 words, the agenda "why" under 12 words, the one-liner under 30 words. Keep only what matters for the next call. ' +
-    'Leave a list empty rather than guessing. Never invent what was said.\n\n' +
+    'Leave a list empty rather than guessing. Never invent what was said. ' +
+    'The firm\'s Asana tasks (asanaTasks) show what our build team has finished and what is still open; ' +
+    'use them to say what is ready to show and what is still being built.\n\n' +
     'Our standard onboarding plan:\n' + CALL_PLAN;
   var context = 'Firm: ' + JSON.stringify(firm) + '\n\n' +
     (last ? 'Most recent Gong call with this firm: "' + last.title + '" on ' + last.started + ' (' + Math.round((last.duration || 0) / 60) + ' min). ' +
@@ -381,6 +390,63 @@ function czUsers_() {
   return map;
 }
 
+/* ---------- Asana ---------- */
+
+// Lowercase words only, so "Garcia-Sheppard, L.L.P." and "garcia sheppard llp" compare equal.
+function asanaNorm_(name) {
+  return String(name || '').toLowerCase().replace(/[’'.]/g, '').replace(/[^a-z0-9&]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// "Garcia Sheppard, LLP" → "garcia sheppard": the part of the firm name the build team puts in task titles.
+// Entity endings always go; "Law Group", "& Associates" and the like only while two or more words remain.
+function firmCore_(name) {
+  var s = asanaNorm_(name).replace(/^(the )?(law offices? of )?/, '');
+  for (var i = 0; i < 4; i++) {
+    s = s.replace(/ (llp|pllc|llc|pc|pa|apc|aplc|plc|ltd|inc|esq)$/, '');
+    var t = s.replace(/ (attorneys?( at law)?|law( firm| group| office| offices| center| partners)?|& associates|and associates|group|firm)$/, '');
+    if (t.split(' ').length >= 2) s = t;
+  }
+  return s;
+}
+
+// Every Asana task with the firm's name in its title, open ones first (by due date), then completed (newest first).
+function asanaTasks_(firmName) {
+  var token = PropertiesService.getScriptProperties().getProperty('ASANA_TOKEN');
+  if (!token) return { ok: false, error: 'not set up', tasks: [] };
+  var core = firmCore_(firmName);
+  if (core.length < 3) return { ok: true, tasks: [] };
+  var url = 'https://app.asana.com/api/1.0/workspaces/' + ASANA_WORKSPACE + '/tasks/search?limit=100&sort_by=modified_at' +
+    '&text=' + encodeURIComponent(core) +
+    '&opt_fields=' + encodeURIComponent('name,completed,completed_at,due_on,assignee.name,memberships.section.name,memberships.project.name,permalink_url');
+  var res = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) {
+    console.error('Asana ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300));
+    return { ok: false, error: 'Asana HTTP ' + res.getResponseCode(), tasks: [] };
+  }
+  // Search also matches descriptions and comments; keep only tasks with the firm in the title.
+  var tasks = (JSON.parse(res.getContentText()).data || []).filter(function (t) {
+    return (' ' + asanaNorm_(t.name) + ' ').indexOf(' ' + core + ' ') >= 0;
+  }).map(function (t) {
+    var m = (t.memberships || [])[0] || {};
+    return {
+      name: t.name, completed: !!t.completed, completedAt: t.completed_at || '', dueOn: t.due_on || '',
+      assignee: (t.assignee && t.assignee.name) || '', section: (m.section && m.section.name) || '',
+      project: (m.project && m.project.name) || '', url: t.permalink_url || '',
+    };
+  });
+  tasks.sort(function (a, b) {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    if (!a.completed) return (a.dueOn || '9999') < (b.dueOn || '9999') ? -1 : 1;
+    return a.completedAt < b.completedAt ? 1 : -1;
+  });
+  return { ok: true, tasks: tasks };
+}
+
+// The prep still works if Asana is down or not set up; the pop-up just says so.
+function asanaTasksSafe_(firmName) {
+  try { return asanaTasks_(firmName); } catch (e) { console.error('Asana: ' + e); return { ok: false, error: 'Asana didn’t answer', tasks: [] }; }
+}
+
 /* ---------- checks (run from the editor) ---------- */
 
 // Confirms the setup: Gong answers, and the Zapier hook is set.
@@ -390,6 +456,8 @@ function checkKeys() {
   var p = PropertiesService.getScriptProperties();
   Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
   Logger.log('Zapier posts results to: ' + CALLBACK_URL);
+  var a = asanaTasks_('Garcia Sheppard');
+  Logger.log('Asana: ' + (a.ok ? a.tasks.length + ' task(s) for Garcia Sheppard: ' + a.tasks.map(function (t) { return (t.completed ? '✓ ' : '○ ') + t.name; }).join(' | ') : a.error));
   var ping = UrlFetchApp.fetch(CALLBACK_URL, { muteHttpExceptions: true, followRedirects: true });
   Logger.log('That address answers: HTTP ' + ping.getResponseCode() + ' ' + ping.getContentText().slice(0, 120));
 }

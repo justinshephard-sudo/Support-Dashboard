@@ -118,6 +118,8 @@ function mockSuggest(queue) {
       open: s.open, daysSince: mockDays(s.lastStart), firms: s.firms, openMrr: Math.round(s.openMrr),
     })).sort((x, y) => y.score - x.score || x.open - y.open || y.daysSince - x.daysSince);
     all.forEach((s) => { if (!sim.includes(s)) ranked.push({ userId: s.r.id, name: s.r.name, score: null, outside: true, open: s.open, daysSince: mockDays(s.lastStart), firms: s.firms, openMrr: Math.round(s.openMrr) }); });
+    // Kennedy only takes partner-sourced firms; for the rest she's pickable at the bottom, unscored.
+    if (!f.partner) ranked.push({ userId: partner.id, name: partner.name, score: null, partnerOnly: true, open: partner.open, daysSince: mockDays(partner.lastStart), firms: partner.firms, openMrr: partner.openMrr });
     if (f.partner) {
       ranked = ranked.filter((x) => x.userId !== partner.id);
       ranked.unshift({ userId: partner.id, name: partner.name, score: null, partnerRule: true, open: partner.open, daysSince: mockDays(partner.lastStart), firms: partner.firms, openMrr: partner.openMrr });

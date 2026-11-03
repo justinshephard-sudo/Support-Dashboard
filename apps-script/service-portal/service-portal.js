@@ -12,13 +12,13 @@
    quote   → new add-ons: Chargebee quote on the existing subscription, attached to a
              new Opportunity on the firm's Account → MattSign emails the picked contact
 
-   Who can use it: PORTAL_USERS (Script Property, comma-separated emails).
-   Default = Justin only while it's being tested.
+   Who can use it: every signed-in @lawmatics.com dashboard user (dashAuth_), unless the
+   PORTAL_USERS Script Property (comma-separated emails) narrows it.
 
    Salesforce sign-in: External Client App "CS Dashboard Service Portal",
    client credentials flow (runs as the app's run-as user).
    Script Properties:
-     SF_LOGIN_URL      My Domain URL (default: the lmtest sandbox)
+     SF_LOGIN_URL      My Domain URL (default: production)
      SF_CLIENT_ID      the app's Consumer Key
      SF_CLIENT_SECRET  the app's Consumer Secret
      PORTAL_USERS      optional, who may use the portal
@@ -27,8 +27,7 @@
    carry a Google access token issued to the dashboard client for an allowed user.
    ========================================================================== */
 
-var SP_DEFAULT_LOGIN_URL = 'https://lawmatics2020--lmtest.sandbox.my.salesforce.com';
-var SP_DEFAULT_USERS = ['justin.shephard@lawmatics.com'];
+var SP_DEFAULT_LOGIN_URL = 'https://lawmatics2020.my.salesforce.com';
 var SP_ACTIONS = { load: 1, preview: 1, apply: 1, quote: 1 };
 
 function authorize() {
@@ -48,7 +47,8 @@ function doPost(e) {
   try {
     var who = dashAuth_(b.token);
     if (!who.ok) return dashJson_(who);
-    if (spUsers_().indexOf(who.email) < 0) return dashJson_({ ok: false, error: 'The Service Portal isn\'t open to you yet.' });
+    var users = spUsers_();
+    if (users && users.indexOf(who.email) < 0) return dashJson_({ ok: false, error: 'The Service Portal isn\'t open to you yet.' });
     if (b.action === 'access') return dashJson_({ ok: true });
     if (!SP_ACTIONS[b.action]) return dashJson_({ ok: false, error: 'unknown action' });
     var payload = {
@@ -76,9 +76,10 @@ function doPost(e) {
   }
 }
 
+/** null = everyone the dashboard signs in; otherwise only these emails. */
 function spUsers_() {
   var raw = PropertiesService.getScriptProperties().getProperty('PORTAL_USERS');
-  if (!raw) return SP_DEFAULT_USERS;
+  if (!raw) return null;
   return raw.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(function (s) { return /@lawmatics\.com$/.test(s); });
 }
 
@@ -91,7 +92,17 @@ function spLines_(list) {
   if (!Array.isArray(list)) return [];
   return list.slice(0, 50).map(function (l) {
     var q = l && l.quantity != null && l.quantity !== '' ? Math.floor(Number(l.quantity)) : null;
-    return { itemPriceId: String((l && l.itemPriceId) || ''), quantity: isFinite(q) ? q : null };
+    var out = { itemPriceId: String((l && l.itemPriceId) || ''), quantity: isFinite(q) ? q : null };
+    // Discount on a new add-on (Salesforce validates it).
+    var v = l && Number(l.discountValue);
+    if (v > 0 && isFinite(v)) {
+      out.discountType = l.discountType === 'Amount' ? 'Amount' : 'Percent';
+      out.discountValue = Math.round(v * 100) / 100;
+      out.discountDuration = ['One time', 'Forever', 'Limited'].indexOf(l.discountDuration) > -1 ? l.discountDuration : 'One time';
+      var m = Math.floor(Number(l.discountMonths));
+      out.discountMonths = out.discountDuration === 'Limited' && isFinite(m) ? m : null;
+    }
+    return out;
   }).filter(function (l) { return l.itemPriceId; });
 }
 

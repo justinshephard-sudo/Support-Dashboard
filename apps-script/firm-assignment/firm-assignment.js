@@ -319,7 +319,8 @@ function buildLoad_() {
    rep for the next firm, so a batch of three new firms spreads out. */
 
 function suggest_(queue, reps, highMin, partnerRep) {
-  var all = reps.filter(function (r) { return r.included; })
+  // Kennedy only takes partner-sourced firms, so she's never scored for the rest.
+  var all = reps.filter(function (r) { return r.included && r.id !== partnerRep.id; })
     .map(function (r) { return { r: r, open: r.open, openMrr: r.openMrr, firms: r.firms, lastStart: r.lastStart }; });
   var today = new Date();
   queue.forEach(function (f) {
@@ -352,6 +353,12 @@ function suggest_(queue, reps, highMin, partnerRep) {
       if (sim.indexOf(s) === -1) ranked.push({ userId: s.r.id, name: s.r.name, score: null, outside: true,
         open: s.open, daysSince: days(s), firms: s.firms, openMrr: Math.round(s.openMrr) });
     });
+    // Kennedy stays pickable at the bottom (unscored) in case a manager wants her anyway.
+    if (!f.partner && reps.some(function (r) { return r.id === partnerRep.id; })) {
+      ranked.push({ userId: partnerRep.id, name: partnerRep.name, score: null, partnerOnly: true,
+        open: partnerRep.open, daysSince: partnerRep.lastStart ? Math.max(0, Math.round((today - new Date(partnerRep.lastStart + 'T12:00:00')) / 864e5)) : 365,
+        firms: partnerRep.firms, openMrr: partnerRep.openMrr });
+    }
     f.ranking = ranked;
     if (f.partner) {
       ranked = ranked.filter(function (x) { return x.userId !== partnerRep.id; });
