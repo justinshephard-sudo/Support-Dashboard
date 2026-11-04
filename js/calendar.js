@@ -87,7 +87,7 @@ async function calLoadRep(email) {
       const items = (d.items || []).filter((e) => e.status !== 'cancelled' && e.eventType !== 'workingLocation'
         && !(e.attendees || []).some((a) => (a.email || '').toLowerCase() === email && a.responseStatus === 'declined'));
       out = { at: Date.now(), items: items.map((e) => ({ title: e.summary || '(no title)', start: e.start.dateTime || e.start.date, end: e.end.dateTime || e.end.date,
-        allDay: !e.start.dateTime, link: e.htmlLink || '', attendees: (e.attendees || []).map((a) => (a.email || '').toLowerCase()) })) };
+        allDay: !e.start.dateTime, ooo: e.eventType === 'outOfOffice', link: e.htmlLink || '', attendees: (e.attendees || []).map((a) => (a.email || '').toLowerCase()) })) };
     } catch (e) {
       if (e.status !== 404 && e.status !== 403 || /insufficient|scope|accessNotConfigured|SERVICE_DISABLED/i.test(e.reason || '')) throw e;
       // Not shared with details: fall back to the free/busy view everyone in the company can see.
@@ -121,6 +121,22 @@ function calMatchFirm(title, rep) {
 }
 
 /* ---- render ---- */
+// "Customer calls" (default on the whole-team view): meetings with someone outside Lawmatics, plus
+// any that name an open-onboarding firm and out-of-office days. "All meetings" (default for one rep).
+const CAL_MODE_STORE = 'cs-cal-mode';
+function calMode(team) {
+  let m = {};
+  try { m = JSON.parse(localStorage.getItem(CAL_MODE_STORE) || '{}'); } catch (e) { /* private mode */ }
+  return m[team ? 'team' : 'solo'] || (team ? 'customer' : 'all');
+}
+function calSetMode(team, mode) {
+  let m = {};
+  try { m = JSON.parse(localStorage.getItem(CAL_MODE_STORE) || '{}'); } catch (e) { /* private mode */ }
+  m[team ? 'team' : 'solo'] = mode;
+  try { localStorage.setItem(CAL_MODE_STORE, JSON.stringify(m)); } catch (e) { /* private mode */ }
+}
+const calExternal = (e) => (e.attendees || []).some((a) => a && !a.endsWith('@' + CONFIG.ALLOWED_DOMAIN) && !/calendar\.google\.com$/.test(a));
+
 const calTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
 
 // reps: whose rows to show ([] = the viewer isn't a rep and isn't a manager → nothing).
@@ -134,7 +150,9 @@ async function renderCalendar(elId, reps) {
   const days = [...Array(5)].map((_, i) => { const d = new Date(wk.start); d.setDate(d.getDate() + i); return d; });
   const today = new Date().toDateString();
   const team = reps.length > 1;
-  const head = `<div class="section-head"><h2>This week’s calendar</h2><span class="rule"></span><span class="note">${team ? 'Every rep · ' : esc(reps[0]) + ' · '}${days[0].toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${days[4].toLocaleDateString([], { month: 'short', day: 'numeric' })} · from Google Calendar</span></div>`;
+  const mode = calMode(team);
+  const seg = `<div class="mrr-seg cal-seg">${[['customer', 'Customer calls'], ['all', 'All meetings']].map(([k, l]) => `<button type="button" data-cal-mode="${k}" data-cal-team="${team ? 1 : ''}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>`;
+  const head = `<div class="section-head"><h2>This week’s calendar</h2><span class="rule"></span><span class="note">${team ? 'Every rep · ' : esc(reps[0]) + ' · '}${days[0].toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${days[4].toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>${seg}</div>`;
   if (!el.innerHTML) el.innerHTML = head + '<div class="panel cal-panel"><div class="res-loading">Loading calendars…</div></div>';
 
   let rows;
@@ -160,14 +178,16 @@ async function renderCalendar(elId, reps) {
   const dayCell = (row, day) => {
     if (row.missing) return '';
     if (row.failed) return '';
-    const items = row.data.items.filter((e) => (e.allDay ? new Date(e.start + 'T00:00:00') : new Date(e.start)).toDateString() === day.toDateString());
+    const items = row.data.items.filter((e) => (e.allDay ? new Date(e.start + 'T00:00:00') : new Date(e.start)).toDateString() === day.toDateString())
+      .map((e) => ({ e, firm: e.busy ? null : calMatchFirm(e.title, row.rep) }))
+      .filter(({ e, firm }) => mode === 'all' || firm || e.ooo || (!e.busy && calExternal(e)));
     if (!items.length) return '<span class="cal-free">—</span>';
-    return items.map((e) => {
-      const firm = e.busy ? null : calMatchFirm(e.title, row.rep);
-      const prep = firm && canCallPrep(firm) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(firm.FirmId)}">Call prep</button>` : '';
-      const when = e.allDay ? 'All day' : `${calTime(e.start)}–${calTime(e.end)}`;
+    return items.map(({ e, firm }) => {
+      const prep = firm && canCallPrep(firm) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(firm.FirmId)}" title="Call prep for ${esc(firm.Name)}">Prep</button>` : '';
+      const when = e.allDay ? (e.ooo ? 'OOO' : 'All day') : calTime(e.start);
+      const full = e.allDay ? e.title : `${calTime(e.start)}–${calTime(e.end)} · ${e.title}`;
       const title = e.link ? `<a href="${esc(safeUrl(e.link))}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title);
-      return `<div class="cal-ev${e.busy ? ' cal-busy' : ''}${firm ? ' cal-firm' : ''}${e.allDay ? ' cal-allday' : ''}"><span class="cal-when">${when}</span><span class="cal-title">${title}</span>${prep}</div>`;
+      return `<div class="cal-ev${e.busy ? ' cal-busy' : ''}${firm ? ' cal-firm' : ''}${e.allDay ? ' cal-allday' : ''}" title="${esc(full)}"><span class="cal-when">${when}</span><span class="cal-title">${title}</span>${prep}</div>`;
     }).join('');
   };
   const note = (row) => (row.missing ? `<div class="cal-note">Couldn’t find ${esc(row.rep)}’s calendar.</div>`
@@ -192,6 +212,13 @@ function setupCalendar() {
     if (e.target.closest('[data-cal-connect]')) {
       AUTH.calPending = true;
       AUTH.tokenClient.requestAccessToken({ prompt: '', hint: AUTH.email });
+      return;
+    }
+    const m = e.target.closest('[data-cal-mode]');
+    if (m) {
+      calSetMode(!!m.dataset.calTeam, m.dataset.calMode);
+      const sec = m.closest('.cal-section');
+      if (sec && sec.dataset.reps) renderCalendar(sec.id, JSON.parse(sec.dataset.reps));
       return;
     }
     const p = e.target.closest('.cal-panel [data-prep-firm]');
