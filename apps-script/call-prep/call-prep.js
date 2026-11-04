@@ -514,3 +514,22 @@ function checkPrep(firmId) {
   var out = prep_({ firmId: firmId || '5447', stage: '' }, { ok: true, manager: true, email: '' });
   Logger.log(JSON.stringify(out, null, 2));
 }
+
+// Run from the editor: lists the workspace's Gong trackers and checks whether this script's Gong key can
+// read tracker hits on calls (for the planned Call signals panel). Logs names and counts only.
+function checkGongTrackers() {
+  try {
+    var t = gongFetch_('/v2/settings/trackers');
+    var list = (t && (t.keywordTrackers || t.trackers)) || [];
+    Logger.log('Trackers readable: %s found', list.length);
+    list.forEach(function (x) { Logger.log(' - %s%s', x.trackerName || x.name, x.enabled === false ? ' (off)' : ''); });
+  } catch (e) { Logger.log('Tracker list: %s', e.message); }
+  try {
+    var to = new Date(), from = new Date(to.getTime() - 7 * 864e5);
+    var c = gongFetch_('/v2/calls/extensive', { filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
+      contentSelector: { exposedFields: { content: { trackers: true } } } });
+    var calls = (c && c.calls) || [];
+    var hits = calls.reduce(function (n, x) { return n + ((x.content || {}).trackers || []).filter(function (k) { return k.count > 0; }).length; }, 0);
+    Logger.log('Tracker hits on calls: readable · %s calls in the last 7 days (first page) · %s tracker hits', calls.length, hits);
+  } catch (e) { Logger.log('Tracker hits on calls: %s', e.message); }
+}
