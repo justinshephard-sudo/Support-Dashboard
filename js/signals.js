@@ -8,7 +8,7 @@ const SIG = { rows: null, loading: null, error: '', days: 7, tracker: '', all: f
 const SIG_TOP = 5;   // calls shown before "Show all"
 // Most serious first; also the order of the filter chips.
 const SIG_TRACKERS = [
-  ['Churn', 'Churn', 'bad'],
+  ['Onboarding – Churn risk', 'Churn risk', 'bad'],
   ['Product Bugs', 'Product bug', 'bad'],
   ['Implementation Objection', 'Implementation objection', 'okay'],
   ['Competitors', 'Competitor', 'okay'],

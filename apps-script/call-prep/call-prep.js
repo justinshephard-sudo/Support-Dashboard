@@ -544,8 +544,9 @@ var SIGNAL_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
 var SIGNAL_TAB = 'Call Signals';
 // Only what the customer says counts (a hit by our IM is ignored), and only on calls with someone from outside.
 // Feature Request was dropped 2026-11-04 as noise.
-var SIGNAL_TRACKERS = ['Churn', 'Product Bugs', 'Implementation Objection', 'Competitors'];
-var SIGNAL_VERSION = '3';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+// Names are matched ignoring case and dash style. 2026-11-04: Churn → Justin's tighter "Onboarding – Churn risk".
+var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Product Bugs', 'Implementation Objection', 'Competitors'];
+var SIGNAL_VERSION = '4';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
@@ -599,7 +600,7 @@ function syncCallSignals() {
     var external = {};
     (c.parties || []).forEach(function (p) { if (p.affiliation === 'External' && p.speakerId) external[p.speakerId] = true; });
     var hits = ((c.content || {}).trackers || []).filter(function (t) {
-      return SIGNAL_TRACKERS.indexOf(t.name) >= 0 && (t.occurrences || []).some(function (o) { return external[o.speakerId]; });
+      return signalTracker_(t.name) && (t.occurrences || []).some(function (o) { return external[o.speakerId]; });
     });
     if (!hits.length) return;
     var firm = signalFirm_(c, open, match);
@@ -607,7 +608,7 @@ function syncCallSignals() {
       var occ = (t.occurrences || []).filter(function (o) { return external[o.speakerId]; }).sort(function (a, b) { return a.startTime - b.startTime; });
       var row = { CallId: m.id, Date: String(m.started || '').slice(0, 19), Rep: repByGong[m.primaryUserId] || '', FirmId: firm ? firm.FirmId : '',
         Firm: firm ? firm.Name : '', CallTitle: m.title || 'Call', CallUrl: m.url || '', Minutes: Math.round((m.duration || 0) / 60),
-        Tracker: t.name, Count: occ.length, CustomerCount: occ.length,
+        Tracker: signalTracker_(t.name), Count: occ.length, CustomerCount: occ.length,
         _occ: occ.slice(0, 3), _ext: external };
       rows.push(row);
       if (needQuotes.indexOf(m.id) < 0) needQuotes.push(m.id);
@@ -648,6 +649,12 @@ function syncCallSignals() {
   console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all)');
 }
 
+// Gong tracker name → our SIGNAL_TRACKERS spelling (ignoring case, spaces and -/–/—), or ''.
+function signalTracker_(name) {
+  var key = function (s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); };
+  return SIGNAL_TRACKERS.filter(function (n) { return key(n) === key(name); })[0] || '';
+}
+
 // The call's onboarding firm: a firm contact on the call, then their email domain, then the call's
 // Salesforce account name, then a contact's or the firm's name in the title.
 function signalFirm_(c, open, match) {
@@ -685,7 +692,7 @@ function debugSignalSpeakers() {
     contentSelector: { exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
   var shown = 0;
   ((r && r.calls) || []).some(function (c) {
-    var hits = ((c.content || {}).trackers || []).filter(function (t) { return SIGNAL_TRACKERS.indexOf(t.name) >= 0 && t.count > 0; });
+    var hits = ((c.content || {}).trackers || []).filter(function (t) { return signalTracker_(t.name) && t.count > 0; });
     if (!hits.length) return false;
     Logger.log('Call %s · parties: %s', ++shown, JSON.stringify((c.parties || []).map(function (p) {
       return { affiliation: p.affiliation, speakerId: p.speakerId ? String(p.speakerId).slice(0, 6) + '…' : null, keys: Object.keys(p).join(',') };
