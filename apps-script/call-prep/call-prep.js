@@ -527,7 +527,7 @@ function checkGongTrackers() {
   try {
     var to = new Date(), from = new Date(to.getTime() - 7 * 864e5);
     var c = gongFetch_('/v2/calls/extensive', { filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
-      contentSelector: { exposedFields: { content: { trackers: true } } } });
+      contentSelector: { exposedFields: { content: { trackers: true, trackerOccurrences: true } } } });
     var calls = (c && c.calls) || [];
     var hits = calls.reduce(function (n, x) { return n + ((x.content || {}).trackers || []).filter(function (k) { return k.count > 0; }).length; }, 0);
     Logger.log('Tracker hits on calls: readable · %s calls in the last 7 days (first page) · %s tracker hits', calls.length, hits);
@@ -545,7 +545,7 @@ var SIGNAL_TAB = 'Call Signals';
 // Only what the customer says counts (a hit by our IM is ignored), and only on calls with someone from outside.
 // Feature Request was dropped 2026-11-04 as noise.
 var SIGNAL_TRACKERS = ['Churn', 'Product Bugs', 'Implementation Objection', 'Competitors'];
-var SIGNAL_VERSION = '2';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_VERSION = '3';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
@@ -587,7 +587,7 @@ function syncCallSignals() {
   do {
     var r = gongFetch_('/v2/calls/extensive', { cursor: cursor || undefined,
       filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString(), primaryUserIds: ids },
-      contentSelector: { context: 'Extended', exposedFields: { parties: true, content: { trackers: true } } } });
+      contentSelector: { context: 'Extended', exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
     calls = calls.concat((r && r.calls) || []);
     cursor = r && r.records && r.records.cursor;
   } while (cursor && guard++ < 30);
@@ -675,4 +675,28 @@ function sheetRows_(sh) {
   var v = sh.getDataRange().getDisplayValues();
   var head = v[0] || [];
   return v.slice(1).map(function (r) { var o = {}; head.forEach(function (h, i) { o[String(h).trim()] = r[i]; }); return o; });
+}
+
+// Run from the editor: shows how Gong labels speakers on a few recent calls with tracker hits
+// (field names, affiliations, speaker-id formats only — no names, emails or quotes).
+function debugSignalSpeakers() {
+  var to = new Date(), from = new Date(to.getTime() - 7 * 864e5);
+  var r = gongFetch_('/v2/calls/extensive', { filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
+    contentSelector: { exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
+  var shown = 0;
+  ((r && r.calls) || []).some(function (c) {
+    var hits = ((c.content || {}).trackers || []).filter(function (t) { return SIGNAL_TRACKERS.indexOf(t.name) >= 0 && t.count > 0; });
+    if (!hits.length) return false;
+    Logger.log('Call %s · parties: %s', ++shown, JSON.stringify((c.parties || []).map(function (p) {
+      return { affiliation: p.affiliation, speakerId: p.speakerId ? String(p.speakerId).slice(0, 6) + '…' : null, keys: Object.keys(p).join(',') };
+    })));
+    var t = hits[0];
+    Logger.log('  tracker keys: %s', Object.keys(t).join(','));
+    Logger.log('  occurrence sample: %s', JSON.stringify((t.occurrences || []).slice(0, 2).map(function (o) {
+      var x = {}; Object.keys(o).forEach(function (k) { x[k] = k === 'speakerId' ? String(o[k]).slice(0, 6) + '…' : o[k]; }); return x;
+    })));
+    Logger.log('  phrases sample: %s', JSON.stringify((t.phrases || []).slice(0, 1).map(function (p) { return { keys: Object.keys(p).join(','), occ: (p.occurrences || []).slice(0, 1) }; })));
+    return shown >= 2;
+  });
+  if (!shown) Logger.log('No calls with these trackers in the last 7 days (first page).');
 }
