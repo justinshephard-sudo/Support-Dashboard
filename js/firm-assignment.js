@@ -123,7 +123,7 @@ function faPicker(f, kind) {
     <div class="fa-sugg"><span class="fa-sugg-name">${esc(top.name)}</span>${top.partnerRule
       ? '<span class="fa-score fa-partner-rule">Partner rule</span>'
       : `<span class="fa-score" tabindex="0" aria-describedby="fa-tip-${kind}-${f.czId}">${top.score}<span class="fa-tip" role="tooltip" id="fa-tip-${kind}-${f.czId}">${tip(top, f)}</span></span>`}</div>
-    <div class="fa-why">${top.partnerRule ? `Partner-sourced firm${f.leadSourceDetail ? ' (' + esc(f.leadSourceDetail) + ')' : ''}: partner firms always go to ${esc(top.name.split(' ')[0])}. ` : ''}${esc(why(top))}</div>
+    <div class="fa-why">${top.partnerRule ? `${f.affiliate ? 'Affiliate partner firm' : `Partner-sourced firm${f.leadSourceDetail ? ' (' + esc(f.leadSourceDetail) + ')' : ''}`}: partner firms always go to ${esc(top.name.split(' ')[0])}. ` : ''}${esc(why(top))}</div>
     <label class="fa-change">${kind === 'csm' ? 'CSM' : 'IM'}
       <select class="fa-select" data-kind="${kind}" data-cz="${f.czId}">
         ${list.map((r, i) => `<option value="${r.userId}"${i === 0 ? ' selected' : ''}>${esc(r.name)} — ${label(r)}${i === 0 ? ' (suggested)' : ''}</option>`).join('')}
@@ -181,7 +181,7 @@ function faFirmCard(f) {
       <div class="fa-left">
         <div class="fa-firm-head">
           <h3>${esc(f.name)}</h3>
-          ${f.partner ? `<span class="fa-flag fa-partner">Partner: ${esc(f.leadSourceDetail || 'not named in Salesforce')}</span>` : ''}
+          ${f.partner ? `<span class="fa-flag fa-partner">${f.affiliate && !/^partner/i.test(f.leadSource || '') ? 'Affiliate partner' : `Partner: ${esc(f.leadSourceDetail || 'not named in Salesforce')}`}</span>` : ''}
           ${f.high ? `<span class="fa-flag fa-high">High MRR${f.tierFallback ? ' · no high-MRR IM in rotation' : ''}</span>` : ''}
           ${f.flags.map((x) => `<span class="fa-flag">${esc(x)}</span>`).join('')}
         </div>

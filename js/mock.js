@@ -45,7 +45,7 @@ function mockSeed() {
       firm(1, 'Test – Harbor Point Injury Law', 1450, 1, { practice: 'Personal Injury, Workers Comp', flags: ['Consultant'] }),
       firm(2, 'Test – Ridgeway Family Law', 920, 2, { practice: 'Family Law' }),
       firm(3, 'Test – Cedar & Stone Estate Planning', 780, 2, { practice: 'Estate Planning', leadSource: 'Partner', leadSourceDetail: 'Referral partner: LawPay', partner: true }),
-      firm(4, 'Test – Alvarez Immigration Group', 610, 3, { practice: 'Immigration' }),
+      firm(4, 'Test – Alvarez Immigration Group', 610, 3, { practice: 'Immigration', flags: ['Affiliate'], affiliate: true, partner: true }),
       firm(5, 'Test – Blue Mesa Criminal Defense', 425, 4, { practice: 'Criminal Defense' }),
       firm(6, 'Test – Oakline Bankruptcy', 349, 5, { practice: 'Bankruptcy' }),
       firm(7, 'Test – Summit Employment Law', 289, 6, { practice: 'Employment', contacts: [c('Priya', 'Shah', false, 'Partner')] }),
