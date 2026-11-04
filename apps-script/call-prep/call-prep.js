@@ -533,3 +533,140 @@ function checkGongTrackers() {
     Logger.log('Tracker hits on calls: readable · %s calls in the last 7 days (first page) · %s tracker hits', calls.length, hits);
   } catch (e) { Logger.log('Tracker hits on calls: %s', e.message); }
 }
+
+/* ---------- Call signals ----------
+   Hourly (installCallSignalsTrigger): the IMs' Gong calls from the last few days, with hits on
+   the Gong trackers in SIGNAL_TRACKERS, matched to their onboarding firm, into the "Call Signals"
+   tab of the Support Team Report sheet (one row per call × tracker, kept SIGNAL_KEEP_DAYS). The
+   Implementation tab shows them to managers. Gong keeps processing calls for a while after they
+   end, so every run re-reads the last SIGNAL_WINDOW_DAYS and replaces those calls' rows. */
+var SIGNAL_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
+var SIGNAL_TAB = 'Call Signals';
+var SIGNAL_TRACKERS = ['Churn', 'Product Bugs', 'Implementation Objection', 'Competitors', 'Feature Request (from Customer)'];
+var SIGNAL_WINDOW_DAYS = 3;
+var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
+var SIGNAL_KEEP_DAYS = 90;
+var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes'];
+
+// Run once from the editor: authorizes the sheet access, installs the hourly run, and fills the tab.
+function installCallSignalsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'syncCallSignals') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('syncCallSignals').timeBased().everyHours(1).create();
+  syncCallSignals();
+}
+
+function syncCallSignals() {
+  var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+  var sh = ss.getSheetByName(SIGNAL_TAB) || ss.insertSheet(SIGNAL_TAB);
+  var old = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, SIGNAL_COLUMNS.length).getDisplayValues() : [];
+  var days = old.length ? SIGNAL_WINDOW_DAYS : SIGNAL_FIRST_DAYS;
+  var to = new Date(), from = new Date(to.getTime() - days * 864e5);
+
+  // The IMs: whoever owns an open onboarding (Impl - Open Firms), as Gong users.
+  var open = sheetRows_(ss.getSheetByName('Impl - Open Firms'));
+  var users = czUsers_(), byName = {};
+  Object.keys(users).forEach(function (k) { if (users[k].name) byName[users[k].name] = users[k]; });
+  var gongIds = {}, repByGong = {};
+  open.forEach(function (f) {
+    var u = byName[f.AccountManager];
+    if (!u || gongIds[f.AccountManager] !== undefined) return;
+    var id = gongUserId_(u.email);
+    gongIds[f.AccountManager] = id;
+    if (id) repByGong[id] = f.AccountManager;
+  });
+  var ids = Object.keys(repByGong);
+  if (!ids.length) throw new Error('No IMs found in Gong.');
+  var match = calendarMatch_({ firmIds: open.map(function (f) { return f.FirmId; }) }).firms;
+
+  var calls = [], cursor = null, guard = 0;
+  do {
+    var r = gongFetch_('/v2/calls/extensive', { cursor: cursor || undefined,
+      filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString(), primaryUserIds: ids },
+      contentSelector: { context: 'Extended', exposedFields: { parties: true, content: { trackers: true } } } });
+    calls = calls.concat((r && r.calls) || []);
+    cursor = r && r.records && r.records.cursor;
+  } while (cursor && guard++ < 30);
+
+  var rows = [], seen = {}, needQuotes = [];
+  calls.forEach(function (c) {
+    var m = c.metaData || {};
+    seen[m.id] = true;
+    var hits = ((c.content || {}).trackers || []).filter(function (t) { return SIGNAL_TRACKERS.indexOf(t.name) >= 0 && t.count > 0; });
+    if (!hits.length) return;
+    var external = {};
+    (c.parties || []).forEach(function (p) { if (p.affiliation === 'External') external[p.speakerId] = true; });
+    var firm = signalFirm_(c, open, match);
+    hits.forEach(function (t) {
+      var occ = (t.occurrences || []).concat([]).sort(function (a, b) {
+        return (external[b.speakerId] ? 1 : 0) - (external[a.speakerId] ? 1 : 0) || a.startTime - b.startTime;
+      });
+      var row = { CallId: m.id, Date: String(m.started || '').slice(0, 19), Rep: repByGong[m.primaryUserId] || '', FirmId: firm ? firm.FirmId : '',
+        Firm: firm ? firm.Name : '', CallTitle: m.title || 'Call', CallUrl: m.url || '', Minutes: Math.round((m.duration || 0) / 60),
+        Tracker: t.name, Count: t.count, CustomerCount: occ.filter(function (o) { return external[o.speakerId]; }).length,
+        _occ: occ.slice(0, 3), _ext: external };
+      rows.push(row);
+      if (needQuotes.indexOf(m.id) < 0) needQuotes.push(m.id);
+    });
+  });
+
+  // The sentence at each hit, from the transcripts (20 calls per request).
+  var quotes = {};
+  for (var i = 0; i < needQuotes.length; i += 20) {
+    var tr = gongFetch_('/v2/calls/transcript', { filter: { callIds: needQuotes.slice(i, i + 20) } });
+    ((tr && tr.callTranscripts) || []).forEach(function (x) {
+      var sents = [];
+      (x.transcript || []).forEach(function (seg) { (seg.sentences || []).forEach(function (s) { sents.push({ start: s.start, end: s.end, text: s.text, who: seg.speakerId }); }); });
+      quotes[x.callId] = sents;
+    });
+  }
+  rows.forEach(function (row) {
+    var sents = quotes[row.CallId] || [];
+    row.Quotes = JSON.stringify(row._occ.map(function (o) {
+      var ms = o.startTime * 1000;   // tracker hits are in seconds, transcript sentences in ms
+      var k = -1;
+      sents.forEach(function (s, j) { if (s.start <= ms + 500 && (k < 0 || s.start > sents[k].start)) k = j; });
+      if (k < 0) return null;
+      var text = sents[k].text + (sents[k + 1] && sents[k + 1].who === sents[k].who ? ' ' + sents[k + 1].text : '');
+      return { t: Math.round(o.startTime), customer: !!row._ext[o.speakerId], text: text.slice(0, 280) };
+    }).filter(Boolean));
+  });
+
+  // Keep older rows for calls this run didn't re-read; drop anything past SIGNAL_KEEP_DAYS.
+  var cutoff = new Date(to.getTime() - SIGNAL_KEEP_DAYS * 864e5).toISOString().slice(0, 19);
+  var keep = old.filter(function (r) { return !seen[r[0]] && r[1] >= cutoff; });
+  var out = keep.concat(rows.map(function (r) { return SIGNAL_COLUMNS.map(function (c) { return r[c] === undefined ? '' : r[c]; }); }))
+    .sort(function (a, b) { return a[1] < b[1] ? 1 : -1; });
+  sh.clearContents();
+  var all = [SIGNAL_COLUMNS].concat(out).map(function (r) { return r.map(function (v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }); });
+  sh.getRange(1, 1, all.length, SIGNAL_COLUMNS.length).setNumberFormat('@').setValues(all);
+  console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all)');
+}
+
+// The call's onboarding firm: a firm contact on the call, then their email domain, then the call's
+// Salesforce account name, then a contact's or the firm's name in the title.
+function signalFirm_(c, open, match) {
+  var norm = function (s) { return ' ' + String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' '; };
+  var emails = (c.parties || []).map(function (p) { return String(p.emailAddress || '').toLowerCase(); }).filter(Boolean);
+  var title = norm((c.metaData || {}).title);
+  var crm = [];
+  (c.context || []).forEach(function (ctx) { (ctx.objects || []).forEach(function (o) {
+    if (o.objectType === 'Account') (o.fields || []).forEach(function (f) { if (f.name === 'Name') crm.push(norm(f.value)); });
+  }); });
+  var info = function (f) { return match[String(f.FirmId)] || { names: [], emails: [], domains: [] }; };
+  var tests = [
+    function (f) { return emails.some(function (e) { return info(f).emails.indexOf(e) >= 0; }); },
+    function (f) { return emails.some(function (e) { return info(f).domains.indexOf(e.split('@')[1]) >= 0; }); },
+    function (f) { return crm.indexOf(norm(f.Name)) >= 0; },
+    function (f) { return info(f).names.some(function (n) { return norm(n).trim().indexOf(' ') > 0 && title.indexOf(norm(n)) >= 0; }); },
+    function (f) { var k = norm(firmCore_(f.Name)); return k.trim().length >= 4 && title.indexOf(k) >= 0; },
+  ];
+  for (var i = 0; i < tests.length; i++) { var hit = open.filter(tests[i])[0]; if (hit) return hit; }
+  return null;
+}
+
+function sheetRows_(sh) {
+  if (!sh) return [];
+  var v = sh.getDataRange().getDisplayValues();
+  var head = v[0] || [];
+  return v.slice(1).map(function (r) { var o = {}; head.forEach(function (h, i) { o[String(h).trim()] = r[i]; }); return o; });
+}

@@ -1096,3 +1096,21 @@ tr.sp-disc-row td{padding-top:0}
 .cal-ev.cal-extra{display:none}
 .cal-open .cal-ev.cal-extra{display:flex}
 .cal-more{font:600 11.5px var(--font);color:var(--lm-blue);background:none;border:none;padding:2px 4px;cursor:pointer}
+
+/* Call signals (js/signals.js) */
+.sig-chips{margin:0 0 12px;width:fit-content;max-width:100%}
+.sig-chips button b{font-weight:700;color:var(--text-3);margin-left:2px}
+.sig-table td{vertical-align:top}
+.sig-table .csm-pill{margin:0 4px 4px 0;display:inline-block}
+.sig-title{font-size:12px;margin-top:2px}
+.sig-title a{color:inherit}
+.sig-quote{max-width:440px;font-size:13px;line-height:1.45}
+.sig-quote details{margin-top:4px}
+.sig-quote summary{cursor:pointer;color:var(--lm-blue);font-size:12px;font-weight:600}
+.sig-quote p{margin:6px 0 0}
+.sig-who{display:block;font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.03em}
+.sig-mark{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+.sig-mark.h-bad{background:color-mix(in srgb,var(--st-critical) 14%,transparent);color:var(--st-critical)}
+.sig-mark.h-okay{background:color-mix(in srgb,var(--st-warn) 16%,transparent);color:var(--st-warn)}
+.sig-mark.h-none{background:var(--surface-2);color:var(--text-3)}
+.nowrap{white-space:nowrap}

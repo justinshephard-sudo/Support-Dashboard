@@ -184,6 +184,7 @@ function renderImplTeam(label) {
   document.getElementById('impl-tiles-title').textContent = isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
   // This week's calendar: the rep's own; a manager sees the picked rep, or every rep on the whole-team view.
   renderCalendar('implCal', IMPL.rep === IMPL_NONE ? [] : IMPL.rep ? [IMPL.rep] : isManager() ? csmReps() : []);
+  renderSignals();   // managers only
   const m = IMPL.byLabel.get(label);
   if (!m) return;
   const v = (d) => {
@@ -398,7 +399,7 @@ function openImplDrill(col, label) {
   const doneCol = spec.prep && spec.rows && spec.rows.some(canCallPrep);
   const body = spec.rows && spec.rows.length
     ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}${doneCol ? '<th></th>' : ''}</tr></thead>`
-      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${doneCol ? `<td class="ob-done-cell">${canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Onboarding complete</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
+      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' ? implSignalMark(r) : ''}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${doneCol ? `<td class="ob-done-cell">${canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Onboarding complete</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
   back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
