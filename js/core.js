@@ -74,7 +74,7 @@ const MANAGER_EMAILS = [
 const CONFIG = {
   CLIENT_ID: '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com',
   ALLOWED_DOMAIN: 'lawmatics.com',
-  SCOPES: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email',
+  SCOPES: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly',
 };
 const ACCOUNTS_TAB = 'Accounts';   // tab the ChurnZero sync writes (see apps-script/sync-accounts.gs)
 // Signed contracts: metadata in the "Contracts" tab (written by apps-script/contracts), PDFs served
@@ -196,7 +196,7 @@ function initAuth(onReady) {
       AUTH.token = resp.access_token;
       AUTH.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
       // Renewing an expired session: keep the page as it is, just swap the token.
-      if (AUTH.email) { hideSessionBanner(); saveAuth(readSavedAuth() || {}); return; }
+      if (AUTH.email) { hideSessionBanner(); saveAuth(readSavedAuth() || {}); if (AUTH.calPending) { AUTH.calPending = false; refreshCalendars(); } return; }
       let info;
       try {
         info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {

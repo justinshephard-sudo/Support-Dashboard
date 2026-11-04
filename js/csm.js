@@ -63,7 +63,7 @@ function prefetchCsm() {
 
 function openCsm() {
   const root = document.getElementById('csm');
-  if (!root.innerHTML) root.innerHTML = '<div class="mrr-hero" id="csmHero"></div><div id="csmError" class="error-banner" hidden></div><div id="csmBody"><div class="res-loading">Pulling each rep’s book…</div></div>';
+  if (!root.innerHTML) root.innerHTML = '<div class="mrr-hero" id="csmHero"></div><div id="csmError" class="error-banner" hidden></div><section class="section cal-section" id="csmCal" hidden></section><div id="csmBody"><div class="res-loading">Pulling each rep’s book…</div></div>';
   if (!CSM.data) prefetchCsm();
   // Draw straight away from the saved copy (once Implementation's reps are in), then refresh behind it.
   if (CSM.data) Promise.all([ensureTabData('impl'), loadManagerList()]).then(renderCsm);
@@ -180,10 +180,12 @@ function renderCsm() {
     document.getElementById('csmHero').innerHTML = `<div class="fa-hero-text"><div class="loop-eyebrow">Customer Success Managers</div><h2>CSM <span>Scorecard</span></h2>
       <p>This tab shows your own book. We couldn’t match your sign-in to an account manager in ChurnZero yet. Ask a manager to add you.</p></div>`;
     document.getElementById('csmBody').innerHTML = '';
+    renderCalendar('csmCal', []);
     return;
   }
   const reps = view ? [view] : allReps;
   const who = view || null;
+  renderCalendar('csmCal', reps);
   // The hero always shows the whole team, so everyone sees the team's goals; the cards below are the rep's own.
   const team = { 6: csmRetention(6), 13: csmRetention(13), bob: csmRetention('bob') };
   const tile = (metric, kind, label) => `<button type="button" class="mrr-kpi ${csmTo(metric, kind, team[kind][metric])}" data-csm-ret="${metric}" data-kind="${kind}"><span>${label} ${metric.toUpperCase()}</span><b>${csmPct(team[kind][metric])}</b><small>Team · ${mrrPlural(team[kind].book.length, 'firm')} · how ⓘ</small></button>`;

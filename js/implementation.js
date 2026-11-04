@@ -182,6 +182,8 @@ function renderImplTeam(label) {
   const mine = !!IMPL.rep && IMPL.rep !== IMPL_NONE;
   document.getElementById('impl-tiles-section').hidden = !mine;
   document.getElementById('impl-tiles-title').textContent = isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
+  // This week's calendar: the rep's own; a manager sees the picked rep, or every rep on the whole-team view.
+  renderCalendar('implCal', IMPL.rep === IMPL_NONE ? [] : IMPL.rep ? [IMPL.rep] : isManager() ? csmReps() : []);
   const m = IMPL.byLabel.get(label);
   if (!m) return;
   const v = (d) => {
