@@ -1121,3 +1121,8 @@ tr.sp-disc-row td{padding-top:0}
 .cal-week-btn{padding:4px 10px;font-size:12px}
 .sig-line{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sig-all{display:block;margin:6px 12px 10px}
+.sig-table td{white-space:normal}
+.sig-table td:first-child{white-space:nowrap}
+.sig-table td:nth-last-child(2){white-space:nowrap}
+.sig-quote{min-width:260px;overflow-wrap:anywhere}
+.sig-quote mark{background:color-mix(in srgb,var(--st-warn) 28%,transparent);color:inherit;border-radius:3px;padding:0 2px}

@@ -70,6 +70,16 @@ function implSignalMark(row) {
   return ` <span class="sig-mark h-${tone}" title="Call signals in the last 30 days: ${esc(list.map((x) => sigInfo(x)[1]).join(', '))}">⚑ ${list.length}</span>`;
 }
 
+// The quote with the phrase that set it off highlighted (each word may carry an ending: cancel → cancelling).
+function sigQuote(q) {
+  const text = String(q.text || '');
+  if (!q.phrase) return esc(text);
+  const re = new RegExp(q.phrase.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "[a-z']*").join("[^a-z0-9']+"), 'i');
+  const m = text.replace(/[’‘]/g, "'").match(re);
+  if (!m) return esc(text);
+  return esc(text.slice(0, m.index)) + '<mark>' + esc(text.slice(m.index, m.index + m[0].length)) + '</mark>' + esc(text.slice(m.index + m[0].length));
+}
+
 const sigClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 async function renderSignals() {
@@ -103,8 +113,8 @@ async function renderSignals() {
           <td>${c.firm ? `<b>${esc(c.firm)}</b>` : '<span class="muted">No firm matched</span>'}<div class="muted sig-title">${c.url ? `<a href="${esc(safeUrl(c.url))}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)} · ${esc(c.minutes)} min</div>
             ${firmRow && canCallPrep(firmRow) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(firmRow.FirmId)}">Call prep</button>` : ''}</td>
           <td>${c.hits.map((h) => `<span class="csm-pill h-${sigInfo(h.Tracker)[2]}">${esc(sigInfo(h.Tracker)[1])}${h.count > 1 ? ' ×' + h.count : ''}</span>`).join(' ')}</td>
-          <td class="sig-quote">${first ? `<span class="sig-line" title="${esc(first.text)}"><span class="sig-who">${sigClock(first.t)}</span> “${esc(first.text)}”</span>` : '<span class="muted">Transcript not ready yet</span>'}
-            ${q.length > 1 ? `<details><summary>${q.length - 1} more</summary>${q.slice(1).map((x) => `<p><span class="sig-who">${esc(sigInfo(x.tracker)[1])} · ${sigClock(x.t)}</span> “${esc(x.text)}”</p>`).join('')}</details>` : ''}</td>
+          <td class="sig-quote">${first ? `<span class="sig-line" title="${esc(first.text)}"><span class="sig-who">${sigClock(first.t)}</span> “${sigQuote(first)}”</span>` : '<span class="muted">Transcript not ready yet</span>'}
+            ${q.length > 1 ? `<details><summary>${q.length - 1} more</summary>${q.slice(1).map((x) => `<p><span class="sig-who">${esc(sigInfo(x.tracker)[1])} · ${sigClock(x.t)}</span> “${sigQuote(x)}”</p>`).join('')}</details>` : ''}</td>
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 4 : 5}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
     </table></div>${matching.length > SIG_TOP ? `<button type="button" class="cal-more sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>

@@ -524,7 +524,8 @@ function checkGongTrackers() {
     Logger.log('Trackers in Gong: %s', list.length);
     list.forEach(function (x) {
       var n = x.trackerName || x.name;
-      Logger.log(' - "%s"%s%s', n, x.enabled === false ? ' (off)' : '', signalTracker_(n) ? '  ← dashboard uses this as ' + signalTracker_(n) : '');
+      var nk = 0; (x.languageKeywords || []).forEach(function (l) { nk += (l.keywords || []).length; });
+      Logger.log(' - "%s"%s · %s phrases%s', n, x.enabled === false ? ' (off)' : '', nk, signalTracker_(n) ? '  ← dashboard uses this as ' + signalTracker_(n) : '');
     });
   } catch (e) { Logger.log('Tracker list: %s', e.message); }
   // Hits per tracker on the last 7 days of calls (all reps), and how many the customer said.
@@ -566,15 +567,16 @@ var SIGNAL_TAB = 'Call Signals';
 var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug', 'Onboarding – Pushback'];
 var SIGNAL_ALIASES = {
   // Justin tightened the existing Churn / Product Bugs / Implementation Objection trackers in place (2026-11-04).
-  'Onboarding – Churn risk': ['Onboarding – Churn risk', 'Churn', 'At risk'],   // "At risk" = an existing Gong AI tracker
+  // ("At risk", a Gong AI tracker, was tried and dropped: it flagged happy customers.)
+  'Onboarding – Churn risk': ['Onboarding – Churn risk', 'Churn'],
   'Onboarding – Blocked by a bug': ['Onboarding – Blocked by a bug', 'Product Bugs'],
   'Onboarding – Pushback': ['Onboarding – Pushback', 'Implementation Objection'],
 };
-var SIGNAL_VERSION = '7';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_VERSION = '8';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
-var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes'];
+var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes', 'GongTracker'];
 
 // Run once from the editor: authorizes the sheet access, installs the hourly run, and fills the tab.
 function installCallSignalsTrigger() {
@@ -636,8 +638,8 @@ function syncCallSignals() {
       var occ = (t.occurrences || []).filter(function (o) { return external[o.speakerId]; }).sort(function (a, b) { return a.startTime - b.startTime; });
       var row = { CallId: m.id, Date: String(m.started || '').slice(0, 19), Rep: repByGong[m.primaryUserId] || '', FirmId: firm ? firm.FirmId : '',
         Firm: firm ? firm.Name : '', CallTitle: m.title || 'Call', CallUrl: m.url || '', Minutes: Math.round((m.duration || 0) / 60),
-        Tracker: signalTracker_(t.name), Count: occ.length, CustomerCount: occ.length,
-        _occ: occ.slice(0, 3), _ext: external };
+        Tracker: signalTracker_(t.name), Count: occ.length, CustomerCount: occ.length, GongTracker: t.name,
+        _occ: occ, _ext: external };
       rows.push(row);
       if (needQuotes.indexOf(m.id) < 0) needQuotes.push(m.id);
     });
@@ -653,16 +655,31 @@ function syncCallSignals() {
       quotes[x.callId] = sents;
     });
   }
-  rows.forEach(function (row) {
+  // Each hit is checked against the tracker's own phrases: the customer must have said one of them within a
+  // few seconds of the hit, and that sentence becomes the quote. Hits that don't check out are dropped as
+  // false alarms. (Trackers with no phrase list in Gong, e.g. AI trackers, keep the sentence at the hit.)
+  var phrases = signalKeywords_();
+  rows = rows.filter(function (row) {
     var sents = quotes[row.CallId] || [];
-    row.Quotes = JSON.stringify(row._occ.map(function (o) {
+    var list = phrases[signalKey_(row.GongTracker)] || [];
+    var found = row._occ.map(function (o) {
       var ms = o.startTime * 1000;   // tracker hits are in seconds, transcript sentences in ms
+      var near = sents.filter(function (s) { return s.who === o.speakerId && s.end >= ms - 3000 && s.start <= ms + 8000; });
+      if (list.length) {
+        for (var i = 0; i < near.length; i++) {
+          var hit = signalPhraseIn_(near[i].text, list);
+          if (hit) return { t: Math.round(near[i].start / 1000), customer: true, text: near[i].text.slice(0, 280), phrase: hit };
+        }
+        return null;
+      }
       var k = -1;
       sents.forEach(function (s, j) { if (s.start <= ms + 500 && (k < 0 || s.start > sents[k].start)) k = j; });
-      if (k < 0) return null;
-      var text = sents[k].text + (sents[k + 1] && sents[k + 1].who === sents[k].who ? ' ' + sents[k + 1].text : '');
-      return { t: Math.round(o.startTime), customer: !!row._ext[o.speakerId], text: text.slice(0, 280) };
-    }).filter(Boolean));
+      return k < 0 ? null : { t: Math.round(o.startTime), customer: true, text: sents[k].text.slice(0, 280) };
+    }).filter(Boolean);
+    if (!found.length && (list.length || !sents.length)) return false;
+    row.Count = row.CustomerCount = found.length || row.Count;
+    row.Quotes = JSON.stringify(found.slice(0, 3));
+    return true;
   });
 
   // Keep older rows for calls this run didn't re-read; drop anything past SIGNAL_KEEP_DAYS.
@@ -675,6 +692,36 @@ function syncCallSignals() {
   sh.getRange(1, 1, all.length, SIGNAL_COLUMNS.length).setNumberFormat('@').setValues(all);
   props.setProperty('SIGNAL_VERSION', SIGNAL_VERSION);
   console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all)');
+}
+
+// Gong tracker name → its keyword phrases (lowercase), from Gong's tracker settings. {} if unavailable.
+function signalKeywords_() {
+  var out = {};
+  try {
+    var t = gongFetch_('/v2/settings/trackers');
+    ((t && (t.keywordTrackers || t.trackers)) || []).forEach(function (x) {
+      var words = [];
+      (x.languageKeywords || []).forEach(function (l) { words = words.concat(l.keywords || []); });
+      words = words.concat(x.keywords || []);
+      out[signalKey_(x.trackerName || x.name)] = words.map(function (w) { return signalNorm_(w); }).filter(Boolean);
+    });
+  } catch (e) { console.error('Tracker phrases: ' + e.message); }
+  return out;
+}
+function signalKey_(s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); }
+function signalNorm_(s) { return String(s || '').toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+// The first phrase said in the text, word by word (each word may carry an ending: cancel → cancelling), or ''.
+function signalPhraseIn_(text, phrases) {
+  var words = signalNorm_(text).split(' ');
+  for (var p = 0; p < phrases.length; p++) {
+    var pw = phrases[p].split(' ');
+    for (var i = 0; i + pw.length <= words.length; i++) {
+      var ok = true;
+      for (var j = 0; j < pw.length && ok; j++) ok = words[i + j] === pw[j] || (pw[j].length >= 4 && words[i + j].indexOf(pw[j]) === 0);
+      if (ok) return phrases[p];
+    }
+  }
+  return '';
 }
 
 // Gong tracker name → our SIGNAL_TRACKERS spelling (ignoring case, spaces and -/–/—), or ''.
