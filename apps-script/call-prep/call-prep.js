@@ -10,6 +10,10 @@
                 returns { pending, requestId }.
    prepStatus → { requestId } — the dashboard polls this until the prep arrives.
    prepResult → from the Zapier workflow (no Google sign-in; checked against a one-time token).
+   calendarMatch → { firmIds } — for the dashboard's weekly calendar: each open-onboarding firm's
+                contacts (names, emails, email domains) so a meeting titled with the client's name
+                ("Onboarding – Jane Doe") or with them invited finds its firm, plus rep name → email
+                from ChurnZero users (whose calendars to read). Cached 3 hours.
    complete   → { firmId } — the "Onboarding complete" button: sets the firm's Onboarding Status to
                 Complete in ChurnZero (the firm's IM / account manager or a manager). Until the IM/CSM
                 split's handoff form goes live, that's all it does. dryRun: true (local test) writes nothing.
@@ -65,11 +69,53 @@ function doPost(e) {
     if (b.action === 'prep') return dashJson_(prep_(b, who));
     if (b.action === 'prepStatus') return dashJson_(prepStatus_(b));
     if (b.action === 'complete') return dashJson_(complete_(b, who));
+    if (b.action === 'calendarMatch') return dashJson_(calendarMatch_(b));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
     return dashJson_({ ok: false, error: String((err && err.message) || err) });
   }
+}
+
+/* ---------- calendar matching ---------- */
+
+var FREE_MAIL = /^(gmail|googlemail|yahoo|ymail|hotmail|outlook|icloud|aol|live|msn|me|mac|comcast|att|sbcglobal|verizon|protonmail|proton)\./;
+
+function calendarMatch_(b) {
+  var ids = (b.firmIds || []).map(function (x) { return String(x).replace(/[^\d]/g, ''); }).filter(Boolean)
+    .filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 400).sort();
+  var cache = CacheService.getScriptCache();
+  var key = 'calm_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, ids.join(','))).slice(0, 22);
+  var hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+
+  var byAcct = {};   // ChurnZero account Id → Firm ID
+  for (var i = 0; i < ids.length; i += 15) {
+    var f = ids.slice(i, i + 15).map(function (id) { return "Cf/FirmId eq '" + id + "'"; }).join(' or ');
+    czGet_('/Account', { $filter: f, $select: 'Id,Cf/FirmId' }).forEach(function (a) { byAcct[a.Id] = String((a.Cf || {}).FirmId || ''); });
+  }
+  var firms = {};
+  var acctIds = Object.keys(byAcct);
+  for (var j = 0; j < acctIds.length; j += 15) {
+    var g = acctIds.slice(j, j + 15).map(function (id) { return 'AccountId eq ' + id; }).join(' or ');
+    czGet_('/Contact', { $filter: g, $select: 'AccountId,FirstName,LastName,Email' }).forEach(function (c) {
+      var firmId = byAcct[c.AccountId];
+      if (!firmId) return;
+      var x = firms[firmId] = firms[firmId] || { names: [], emails: [], domains: [] };
+      var name = (String(c.FirstName || '').trim() + ' ' + String(c.LastName || '').trim()).trim();
+      if (name && name.indexOf(' ') > 0 && x.names.indexOf(name) < 0) x.names.push(name);   // first + last only; one word is too loose
+      var email = String(c.Email || '').trim().toLowerCase();
+      if (email && x.emails.indexOf(email) < 0) x.emails.push(email);
+      var d = email.split('@')[1];
+      if (d && !FREE_MAIL.test(d) && !/lawmatics\.com$/.test(d) && x.domains.indexOf(d) < 0) x.domains.push(d);
+    });
+  }
+  var reps = {};
+  var users = czUsers_();
+  Object.keys(users).forEach(function (k) { var u = users[k]; if (u.name && u.email && u.active !== false) reps[u.name] = String(u.email).toLowerCase(); });
+  var out = { ok: true, firms: firms, reps: reps };
+  try { cache.put(key, JSON.stringify(out), 3 * 3600); } catch (e) { /* too big to cache */ }
+  return out;
 }
 
 /* ---------- the prep ---------- */

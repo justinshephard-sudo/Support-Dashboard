@@ -4,12 +4,14 @@
    sees every rep's (one row each), or one rep when they pick one — never their own.
    Read straight from Google Calendar with the viewer's sign-in (calendar.readonly), so it shows
    exactly what Google lets that person see: full events where a calendar is shared with
-   details, "Busy" blocks where it's free/busy only. Meetings whose title names a firm in open
-   onboarding get the Call prep button.
-   Rep emails: REP_EMAILS (core.js) first, else worked out from the name (first.last@,
+   details, "Busy" blocks where it's free/busy only. Meetings that belong to a firm in open
+   onboarding get the Call prep button: one of the firm's contacts is invited (or someone from
+   their email domain), the title names a contact ("Onboarding – Jane Doe"), or it names the firm.
+   Contacts and reps' emails come from ChurnZero through the call-prep backend (calendarMatch).
+   Rep emails: REP_EMAILS (core.js), then ChurnZero, else worked out from the name (first.last@,
    firstlast@, flast@, first_last@, first@) with one free/busy lookup, remembered in this browser.
    ========================================================================== */
-const CAL = { events: {}, loading: {}, emails: null, resolving: null, error: '', needsAccess: false };
+const CAL = { events: {}, loading: {}, emails: null, resolving: null, error: '', needsAccess: false, match: null, matchLoad: null };
 const CAL_EMAIL_STORE = 'cs-cal-emails';
 const CAL_API = 'https://www.googleapis.com/calendar/v3';
 
@@ -49,9 +51,25 @@ function calCandidates(rep) {
   return [...new Set(locals)].map((l) => `${l}@${CONFIG.ALLOWED_DOMAIN}`);
 }
 
+// Firm contacts + ChurnZero users, once per page load (the backend caches it for 3 hours).
+function calLoadMatch() {
+  if (CAL.matchLoad) return CAL.matchLoad;
+  CAL.matchLoad = (async () => {
+    try {
+      const res = await fetch(CALL_PREP_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ token: AUTH.token, action: 'calendarMatch', firmIds: IMPL.open.map((f) => f.FirmId).filter(Boolean) }) });
+      const d = await res.json();
+      if (d.ok) CAL.match = d;
+    } catch (e) { /* firm-name matching still works without it */ }
+  })();
+  return CAL.matchLoad;
+}
+
 // rep name → calendar email. One free/busy call covers every guess; addresses that don't exist come back "notFound".
 async function calResolve(reps) {
   if (!CAL.emails) { try { CAL.emails = JSON.parse(localStorage.getItem(CAL_EMAIL_STORE) || '{}'); } catch (e) { CAL.emails = {}; } }
+  await calLoadMatch();
+  reps.forEach((r) => { if (CAL.match && CAL.match.reps && CAL.match.reps[r]) CAL.emails[r] = CAL.match.reps[r]; });
   Object.entries(REP_EMAILS).forEach(([email, rep]) => { CAL.emails[rep] = email; });
   const todo = reps.filter((r) => !(r in CAL.emails));
   if (!todo.length) return;
@@ -109,30 +127,43 @@ function calFirmKey(name) {
   const core = calWords(name).filter((w) => !CAL_FIRM_NOISE.has(w));
   return core.join(' ').length >= 4 ? core : null;   // "The Law Firm" alone is too vague to match
 }
-function calMatchFirm(title, rep) {
-  const words = calWords(title);
-  if (!words.length) return null;
-  const hay = ` ${words.join(' ')} `;
-  // Longest firm name first, so "Smith Jones" wins over "Smith"; the rep's own firms before anyone else's.
-  const firms = IMPL.open.map((f) => ({ f, key: calFirmKey(f.Name) })).filter((x) => x.key)
-    .sort((a, b) => (b.f.AccountManager === rep) - (a.f.AccountManager === rep) || b.key.join(' ').length - a.key.join(' ').length);
-  const hit = firms.find(({ key }) => hay.includes(` ${key.join(' ')} `));
-  return hit ? hit.f : null;
+// Strongest evidence first: a firm contact is invited, then someone from the firm's email domain,
+// then the title names a contact, then the title names the firm. The rep's own firms win ties.
+function calMatchFirm(ev, rep) {
+  const hay = ` ${calWords(ev.title).join(' ')} `;
+  const att = (ev.attendees || []).filter((a) => a && !a.endsWith('@' + CONFIG.ALLOWED_DOMAIN));
+  const info = (f) => (CAL.match && CAL.match.firms && CAL.match.firms[String(f.FirmId)]) || { names: [], emails: [], domains: [] };
+  // Longest name first, so "Smith Jones" wins over "Smith"; the rep's own firms before anyone else's.
+  const firms = IMPL.open.map((f) => ({ f, key: calFirmKey(f.Name), c: info(f) }))
+    .sort((a, b) => (b.f.AccountManager === rep) - (a.f.AccountManager === rep) || (b.key || []).join(' ').length - (a.key || []).join(' ').length);
+  const tests = [
+    ({ c }) => att.some((a) => c.emails.includes(a)),
+    ({ c }) => att.some((a) => c.domains.includes(a.split('@')[1])),
+    ({ c }) => c.names.some((n) => { const w = calWords(n); return w.length > 1 && hay.includes(` ${w.join(' ')} `); }),
+    ({ key }) => !!key && hay.includes(` ${key.join(' ')} `),
+  ];
+  for (const t of tests) { const hit = firms.find(t); if (hit) return hit.f; }
+  return null;
 }
 
 /* ---- render ---- */
 // "Customer calls" (default on the whole-team view): meetings with someone outside Lawmatics, plus
 // any that name an open-onboarding firm and out-of-office days. "All meetings" (default for one rep).
 const CAL_MODE_STORE = 'cs-cal-mode';
-function calMode(team) {
+// "Onboarding calls" (Implementation only): just the meetings matched to an open-onboarding firm.
+// Defaults: Implementation team → onboarding, CSM team → customer, one rep → all. Each view remembers its own choice.
+const calModes = (elId) => (elId === 'implCal' ? [['onboarding', 'Onboarding calls'], ['customer', 'Customer calls'], ['all', 'All meetings']] : [['customer', 'Customer calls'], ['all', 'All meetings']]);
+function calMode(elId, team) {
   let m = {};
   try { m = JSON.parse(localStorage.getItem(CAL_MODE_STORE) || '{}'); } catch (e) { /* private mode */ }
-  return m[team ? 'team' : 'solo'] || (team ? 'customer' : 'all');
+  const pick = m[elId + (team ? ':team' : ':solo')];
+  if (pick && calModes(elId).some(([k]) => k === pick)) return pick;
+  return team ? (elId === 'implCal' ? 'onboarding' : 'customer') : 'all';
 }
-function calSetMode(team, mode) {
+function calSetMode(elId, team, mode) {
   let m = {};
   try { m = JSON.parse(localStorage.getItem(CAL_MODE_STORE) || '{}'); } catch (e) { /* private mode */ }
-  m[team ? 'team' : 'solo'] = mode;
+  m[elId + (team ? ':team' : ':solo')] = mode;
   try { localStorage.setItem(CAL_MODE_STORE, JSON.stringify(m)); } catch (e) { /* private mode */ }
 }
 const calExternal = (e) => (e.attendees || []).some((a) => a && !a.endsWith('@' + CONFIG.ALLOWED_DOMAIN) && !/calendar\.google\.com$/.test(a));
@@ -150,8 +181,8 @@ async function renderCalendar(elId, reps) {
   const days = [...Array(5)].map((_, i) => { const d = new Date(wk.start); d.setDate(d.getDate() + i); return d; });
   const today = new Date().toDateString();
   const team = reps.length > 1;
-  const mode = calMode(team);
-  const seg = `<div class="mrr-seg cal-seg">${[['customer', 'Customer calls'], ['all', 'All meetings']].map(([k, l]) => `<button type="button" data-cal-mode="${k}" data-cal-team="${team ? 1 : ''}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>`;
+  const mode = calMode(elId, team);
+  const seg = `<div class="mrr-seg cal-seg">${calModes(elId).map(([k, l]) => `<button type="button" data-cal-mode="${k}" data-cal-team="${team ? 1 : ''}" aria-pressed="${mode === k}">${l}</button>`).join('')}</div>`;
   const head = `<div class="section-head"><h2>This week’s calendar</h2><span class="rule"></span><span class="note">${team ? 'Every rep · ' : esc(reps[0]) + ' · '}${days[0].toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${days[4].toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>${seg}</div>`;
   if (!el.innerHTML) el.innerHTML = head + '<div class="panel cal-panel"><div class="res-loading">Loading calendars…</div></div>';
 
@@ -179,16 +210,18 @@ async function renderCalendar(elId, reps) {
     if (row.missing) return '';
     if (row.failed) return '';
     const items = row.data.items.filter((e) => (e.allDay ? new Date(e.start + 'T00:00:00') : new Date(e.start)).toDateString() === day.toDateString())
-      .map((e) => ({ e, firm: e.busy ? null : calMatchFirm(e.title, row.rep) }))
-      .filter(({ e, firm }) => mode === 'all' || firm || e.ooo || (!e.busy && calExternal(e)));
+      .map((e) => ({ e, firm: e.busy ? null : calMatchFirm(e, row.rep) }))
+      .filter(({ e, firm }) => mode === 'all' || firm || e.ooo || (mode === 'customer' && !e.busy && calExternal(e)));
     if (!items.length) return '<span class="cal-free">—</span>';
-    return items.map(({ e, firm }) => {
+    // Whole team: three per day, the rest behind "+N more".
+    const cap = team && items.length > 4 ? 3 : Infinity;
+    return items.map(({ e, firm }, i) => {
       const prep = firm && canCallPrep(firm) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(firm.FirmId)}" title="Call prep for ${esc(firm.Name)}">Prep</button>` : '';
       const when = e.allDay ? (e.ooo ? 'OOO' : 'All day') : calTime(e.start);
       const full = e.allDay ? e.title : `${calTime(e.start)}–${calTime(e.end)} · ${e.title}`;
       const title = e.link ? `<a href="${esc(safeUrl(e.link))}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title);
-      return `<div class="cal-ev${e.busy ? ' cal-busy' : ''}${firm ? ' cal-firm' : ''}${e.allDay ? ' cal-allday' : ''}" title="${esc(full)}"><span class="cal-when">${when}</span><span class="cal-title">${title}</span>${prep}</div>`;
-    }).join('');
+      return `<div class="cal-ev${e.busy ? ' cal-busy' : ''}${firm ? ' cal-firm' : ''}${e.allDay ? ' cal-allday' : ''}${i >= cap ? ' cal-extra' : ''}" title="${esc(full)}"><span class="cal-when">${when}</span><span class="cal-title">${title}</span>${prep}</div>`;
+    }).join('') + (items.length > cap ? `<button type="button" class="cal-more" data-cal-more>+${items.length - cap} more</button>` : '');
   };
   const note = (row) => (row.missing ? `<div class="cal-note">Couldn’t find ${esc(row.rep)}’s calendar.</div>`
     : row.failed ? `<div class="cal-note">Couldn’t load ${esc(row.rep)}’s calendar.</div>`
@@ -216,11 +249,13 @@ function setupCalendar() {
     }
     const m = e.target.closest('[data-cal-mode]');
     if (m) {
-      calSetMode(!!m.dataset.calTeam, m.dataset.calMode);
       const sec = m.closest('.cal-section');
+      calSetMode(sec.id, !!m.dataset.calTeam, m.dataset.calMode);
       if (sec && sec.dataset.reps) renderCalendar(sec.id, JSON.parse(sec.dataset.reps));
       return;
     }
+    const more = e.target.closest('[data-cal-more]');
+    if (more) { more.closest('td').classList.add('cal-open'); more.remove(); return; }
     const p = e.target.closest('.cal-panel [data-prep-firm]');
     if (p) openCallPrep(IMPL.open.find((f) => String(f.FirmId) === p.dataset.prepFirm));
   });

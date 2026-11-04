@@ -1093,3 +1093,6 @@ tr.sp-disc-row td{padding-top:0}
 .cal-note{font-size:11.5px;font-weight:500;color:var(--text-3);margin-top:3px}
 .cal-panel>.cal-note{padding:8px 12px}
 .cal-solo td{min-height:120px}
+.cal-ev.cal-extra{display:none}
+.cal-open .cal-ev.cal-extra{display:flex}
+.cal-more{font:600 11.5px var(--font);color:var(--lm-blue);background:none;border:none;padding:2px 4px;cursor:pointer}
