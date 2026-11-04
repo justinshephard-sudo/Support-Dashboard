@@ -1,7 +1,7 @@
 /* ==========================================================================
    Call signals — managers only, on the Implementation tab under the calendar. The IMs' Gong calls
-   where the customer set off one of the tracked Gong trackers (churn talk, product bugs,
-   implementation objections, competitors), with the firm, the rep and what they said.
+   where the customer set off one of the tracked Gong trackers (churn risk, blocked by a bug,
+   pushback on the onboarding), with the firm, the rep and what they said.
    Data: the "Call Signals" tab, refreshed hourly by syncCallSignals in apps-script/call-prep.
    ========================================================================== */
 const SIG = { rows: null, loading: null, error: '', days: 7, tracker: '', all: false };
@@ -9,9 +9,8 @@ const SIG_TOP = 5;   // calls shown before "Show all"
 // Most serious first; also the order of the filter chips.
 const SIG_TRACKERS = [
   ['Onboarding – Churn risk', 'Churn risk', 'bad'],
-  ['Product Bugs', 'Product bug', 'bad'],
-  ['Implementation Objection', 'Implementation objection', 'okay'],
-  ['Competitors', 'Competitor', 'okay'],
+  ['Onboarding – Blocked by a bug', 'Blocked by a bug', 'bad'],
+  ['Onboarding – Pushback', 'Pushback', 'okay'],
 ];
 const sigInfo = (name) => SIG_TRACKERS.find(([k]) => k === name) || [name, name, 'none'];
 const sigRank = (name) => { const i = SIG_TRACKERS.findIndex(([k]) => k === name); return i < 0 ? 99 : i; };

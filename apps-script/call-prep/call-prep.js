@@ -544,9 +544,15 @@ var SIGNAL_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
 var SIGNAL_TAB = 'Call Signals';
 // Only what the customer says counts (a hit by our IM is ignored), and only on calls with someone from outside.
 // Feature Request was dropped 2026-11-04 as noise.
-// Names are matched ignoring case and dash style. 2026-11-04: Churn → Justin's tighter "Onboarding – Churn risk".
-var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Product Bugs', 'Implementation Objection', 'Competitors'];
-var SIGNAL_VERSION = '4';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+// Each signal and the Gong tracker names that feed it, preferred first (matched ignoring case and dash
+// style). 2026-11-04: tightened onboarding trackers; Competitors and Feature Request dropped as noise.
+var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug', 'Onboarding – Pushback'];
+var SIGNAL_ALIASES = {
+  'Onboarding – Churn risk': ['Onboarding – Churn risk'],
+  'Onboarding – Blocked by a bug': ['Onboarding – Blocked by a bug', 'Product Bugs'],
+  'Onboarding – Pushback': ['Onboarding – Pushback', 'Implementation Objection'],
+};
+var SIGNAL_VERSION = '5';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
@@ -602,6 +608,10 @@ function syncCallSignals() {
     var hits = ((c.content || {}).trackers || []).filter(function (t) {
       return signalTracker_(t.name) && (t.occurrences || []).some(function (o) { return external[o.speakerId]; });
     });
+    // Where both the new and the old tracker fired for the same signal, keep only the preferred one.
+    hits = hits.filter(function (t) {
+      return !hits.some(function (u) { return u !== t && signalTracker_(u.name) === signalTracker_(t.name) && signalAliasRank_(u.name) < signalAliasRank_(t.name); });
+    });
     if (!hits.length) return;
     var firm = signalFirm_(c, open, match);
     hits.forEach(function (t) {
@@ -652,7 +662,13 @@ function syncCallSignals() {
 // Gong tracker name → our SIGNAL_TRACKERS spelling (ignoring case, spaces and -/–/—), or ''.
 function signalTracker_(name) {
   var key = function (s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); };
-  return SIGNAL_TRACKERS.filter(function (n) { return key(n) === key(name); })[0] || '';
+  return SIGNAL_TRACKERS.filter(function (n) { return SIGNAL_ALIASES[n].some(function (a) { return key(a) === key(name); }); })[0] || '';
+}
+// Rank of a Gong tracker name among its signal's aliases (0 = preferred).
+function signalAliasRank_(name) {
+  var key = function (s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); };
+  var sig = signalTracker_(name);
+  return sig ? SIGNAL_ALIASES[sig].map(key).indexOf(key(name)) : 99;
 }
 
 // The call's onboarding firm: a firm contact on the call, then their email domain, then the call's
