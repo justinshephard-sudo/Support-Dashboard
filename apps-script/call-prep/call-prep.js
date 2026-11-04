@@ -565,11 +565,12 @@ var SIGNAL_TAB = 'Call Signals';
 // style). 2026-11-04: tightened onboarding trackers; Competitors and Feature Request dropped as noise.
 var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug', 'Onboarding – Pushback'];
 var SIGNAL_ALIASES = {
-  'Onboarding – Churn risk': ['Onboarding – Churn risk', 'At risk'],   // "At risk" = an existing Gong AI tracker
+  // Justin tightened the existing Churn / Product Bugs / Implementation Objection trackers in place (2026-11-04).
+  'Onboarding – Churn risk': ['Onboarding – Churn risk', 'Churn', 'At risk'],   // "At risk" = an existing Gong AI tracker
   'Onboarding – Blocked by a bug': ['Onboarding – Blocked by a bug', 'Product Bugs'],
   'Onboarding – Pushback': ['Onboarding – Pushback', 'Implementation Objection'],
 };
-var SIGNAL_VERSION = '6';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_VERSION = '7';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
