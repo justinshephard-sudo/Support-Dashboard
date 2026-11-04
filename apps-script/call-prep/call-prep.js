@@ -521,16 +521,33 @@ function checkGongTrackers() {
   try {
     var t = gongFetch_('/v2/settings/trackers');
     var list = (t && (t.keywordTrackers || t.trackers)) || [];
-    Logger.log('Trackers readable: %s found', list.length);
-    list.forEach(function (x) { Logger.log(' - %s%s', x.trackerName || x.name, x.enabled === false ? ' (off)' : ''); });
+    Logger.log('Trackers in Gong: %s', list.length);
+    list.forEach(function (x) {
+      var n = x.trackerName || x.name;
+      Logger.log(' - "%s"%s%s', n, x.enabled === false ? ' (off)' : '', signalTracker_(n) ? '  ← dashboard uses this as ' + signalTracker_(n) : '');
+    });
   } catch (e) { Logger.log('Tracker list: %s', e.message); }
+  // Hits per tracker on the last 7 days of calls (all reps), and how many the customer said.
   try {
-    var to = new Date(), from = new Date(to.getTime() - 7 * 864e5);
-    var c = gongFetch_('/v2/calls/extensive', { filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
-      contentSelector: { exposedFields: { content: { trackers: true, trackerOccurrences: true } } } });
-    var calls = (c && c.calls) || [];
-    var hits = calls.reduce(function (n, x) { return n + ((x.content || {}).trackers || []).filter(function (k) { return k.count > 0; }).length; }, 0);
-    Logger.log('Tracker hits on calls: readable · %s calls in the last 7 days (first page) · %s tracker hits', calls.length, hits);
+    var to = new Date(), from = new Date(to.getTime() - 7 * 864e5), tally = {}, calls = 0, cursor = null, guard = 0;
+    do {
+      var c = gongFetch_('/v2/calls/extensive', { cursor: cursor || undefined, filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
+        contentSelector: { exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
+      ((c && c.calls) || []).forEach(function (x) {
+        calls++;
+        var ext = {};
+        (x.parties || []).forEach(function (p) { if (p.affiliation === 'External') ext[p.speakerId] = true; });
+        ((x.content || {}).trackers || []).forEach(function (k) {
+          if (!k.count) return;
+          var e = tally[k.name] = tally[k.name] || { calls: 0, hits: 0, customer: 0 };
+          e.calls++; e.hits += k.count;
+          e.customer += (k.occurrences || []).filter(function (o) { return ext[o.speakerId]; }).length;
+        });
+      });
+      cursor = c && c.records && c.records.cursor;
+    } while (cursor && guard++ < 10);
+    Logger.log('Last 7 days: %s calls', calls);
+    Object.keys(tally).sort().forEach(function (n) { var e = tally[n]; Logger.log(' - "%s": %s calls, %s hits, %s by the customer', n, e.calls, e.hits, e.customer); });
   } catch (e) { Logger.log('Tracker hits on calls: %s', e.message); }
 }
 
