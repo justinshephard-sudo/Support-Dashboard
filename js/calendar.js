@@ -170,6 +170,18 @@ const calExternal = (e) => (e.attendees || []).some((a) => a && !a.endsWith('@' 
 
 const calTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(/\s/g, '').toLowerCase();
 
+const calNote = (row) => (row.missing ? `<div class="cal-note">Couldn’t find ${esc(row.rep)}’s calendar.</div>`
+  : row.failed ? `<div class="cal-note">Couldn’t load ${esc(row.rep)}’s calendar.</div>`
+  : row.data.busyOnly ? '<div class="cal-note">Free/busy only — their calendar isn’t shared with details.</div>' : '');
+
+// One rep's meetings on one day that the current view keeps, each with its matched firm.
+function calDayItems(row, day, mode) {
+  if (!row.data) return [];
+  return row.data.items.filter((e) => (e.allDay ? new Date(e.start + 'T00:00:00') : new Date(e.start)).toDateString() === day.toDateString())
+    .map((e) => ({ e, firm: e.busy ? null : calMatchFirm(e, row.rep) }))
+    .filter(({ e, firm }) => mode === 'all' || firm || e.ooo || (mode === 'customer' && !e.busy && calExternal(e)));
+}
+
 // reps: whose rows to show ([] = the viewer isn't a rep and isn't a manager → nothing).
 async function renderCalendar(elId, reps) {
   const el = document.getElementById(elId);
@@ -209,9 +221,7 @@ async function renderCalendar(elId, reps) {
   const dayCell = (row, day) => {
     if (row.missing) return '';
     if (row.failed) return '';
-    const items = row.data.items.filter((e) => (e.allDay ? new Date(e.start + 'T00:00:00') : new Date(e.start)).toDateString() === day.toDateString())
-      .map((e) => ({ e, firm: e.busy ? null : calMatchFirm(e, row.rep) }))
-      .filter(({ e, firm }) => mode === 'all' || firm || e.ooo || (mode === 'customer' && !e.busy && calExternal(e)));
+    const items = calDayItems(row, day, mode);
     if (!items.length) return '<span class="cal-free">—</span>';
     // Whole team: three per day, the rest behind "+N more".
     const cap = team && items.length > 4 ? 3 : Infinity;
@@ -223,9 +233,24 @@ async function renderCalendar(elId, reps) {
       return `<div class="cal-ev${e.busy ? ' cal-busy' : ''}${firm ? ' cal-firm' : ''}${e.allDay ? ' cal-allday' : ''}${i >= cap ? ' cal-extra' : ''}" title="${esc(full)}"><span class="cal-when">${when}</span><span class="cal-title">${title}</span>${prep}</div>`;
     }).join('') + (items.length > cap ? `<button type="button" class="cal-more" data-cal-more>+${items.length - cap} more</button>` : '');
   };
-  const note = (row) => (row.missing ? `<div class="cal-note">Couldn’t find ${esc(row.rep)}’s calendar.</div>`
-    : row.failed ? `<div class="cal-note">Couldn’t load ${esc(row.rep)}’s calendar.</div>`
-    : row.data.busyOnly ? '<div class="cal-note">Free/busy only — their calendar isn’t shared with details.</div>' : '');
+  // Whole team: one line per rep — today's calls, how many more this week and the next one, and a
+  // button to that rep's full week (it switches the page's rep picker).
+  if (team) {
+    const todayIdx = days.findIndex((d) => d.toDateString() === today);
+    const later = (row) => days.slice(todayIdx + 1).flatMap((d) => calDayItems(row, d, mode));
+    el.innerHTML = head + `<div class="panel cal-panel"><div class="table-wrap"><table class="cal-table cal-compact">
+      <thead><tr><th>Rep</th><th class="cal-today">Today${todayIdx < 0 ? '' : ' · ' + days[todayIdx].toLocaleDateString([], { weekday: 'short' })}</th><th>Rest of the week</th><th></th></tr></thead>
+      <tbody>${rows.map((row) => {
+        const rest = row.data ? later(row) : [];
+        const next = rest.find(({ e }) => !e.allDay);
+        return `<tr><th scope="row" title="${esc(row.email || '')}">${esc(row.rep)}${calNote(row)}</th>
+          <td class="cal-today">${todayIdx < 0 ? '<span class="cal-free">Weekend</span>' : dayCell(row, days[todayIdx])}</td>
+          <td class="cal-rest">${row.data ? (rest.length ? `<b>${rest.length}</b> more${next ? ` · next ${esc(new Date(next.e.start).toLocaleDateString([], { weekday: 'short' }))} ${calTime(next.e.start)} <span class="cal-next">${esc(next.e.title)}</span>` : ''}` : '<span class="cal-free">Nothing else</span>') : ''}</td>
+          <td><button type="button" class="loop-btn cal-week-btn" data-cal-rep="${esc(row.rep)}">Week ›</button></td></tr>`;
+      }).join('')}</tbody></table></div></div>`;
+    return;
+  }
+  const note = calNote;
   el.innerHTML = head + `<div class="panel cal-panel"><div class="table-wrap"><table class="cal-table${team ? '' : ' cal-solo'}">
     <thead><tr>${team ? '<th>Rep</th>' : ''}${days.map((d) => `<th class="${d.toDateString() === today ? 'cal-today' : ''}">${d.toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' })}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((row) => `<tr>${team ? `<th scope="row" title="${esc(row.email || '')}">${esc(row.rep)}${note(row)}</th>` : ''}${days.map((d) => `<td class="${d.toDateString() === today ? 'cal-today' : ''}">${dayCell(row, d)}</td>`).join('')}</tr>`).join('')}</tbody>
@@ -252,6 +277,12 @@ function setupCalendar() {
       const sec = m.closest('.cal-section');
       calSetMode(sec.id, !!m.dataset.calTeam, m.dataset.calMode);
       if (sec && sec.dataset.reps) renderCalendar(sec.id, JSON.parse(sec.dataset.reps));
+      return;
+    }
+    const wk = e.target.closest('[data-cal-rep]');
+    if (wk) {
+      const sel = document.getElementById(wk.closest('#csmCal') ? 'csmRep' : 'impl-rep');
+      if (sel) { sel.value = wk.dataset.calRep; sel.dispatchEvent(new Event('change', { bubbles: true })); }
       return;
     }
     const more = e.target.closest('[data-cal-more]');

@@ -542,7 +542,10 @@ function checkGongTrackers() {
    end, so every run re-reads the last SIGNAL_WINDOW_DAYS and replaces those calls' rows. */
 var SIGNAL_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
 var SIGNAL_TAB = 'Call Signals';
-var SIGNAL_TRACKERS = ['Churn', 'Product Bugs', 'Implementation Objection', 'Competitors', 'Feature Request (from Customer)'];
+// Only what the customer says counts (a hit by our IM is ignored), and only on calls with someone from outside.
+// Feature Request was dropped 2026-11-04 as noise.
+var SIGNAL_TRACKERS = ['Churn', 'Product Bugs', 'Implementation Objection', 'Competitors'];
+var SIGNAL_VERSION = '2';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
@@ -558,7 +561,9 @@ function installCallSignalsTrigger() {
 function syncCallSignals() {
   var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
   var sh = ss.getSheetByName(SIGNAL_TAB) || ss.insertSheet(SIGNAL_TAB);
-  var old = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, SIGNAL_COLUMNS.length).getDisplayValues() : [];
+  var props = PropertiesService.getScriptProperties();
+  var rebuild = props.getProperty('SIGNAL_VERSION') !== SIGNAL_VERSION;
+  var old = !rebuild && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, SIGNAL_COLUMNS.length).getDisplayValues() : [];
   var days = old.length ? SIGNAL_WINDOW_DAYS : SIGNAL_FIRST_DAYS;
   var to = new Date(), from = new Date(to.getTime() - days * 864e5);
 
@@ -591,18 +596,18 @@ function syncCallSignals() {
   calls.forEach(function (c) {
     var m = c.metaData || {};
     seen[m.id] = true;
-    var hits = ((c.content || {}).trackers || []).filter(function (t) { return SIGNAL_TRACKERS.indexOf(t.name) >= 0 && t.count > 0; });
-    if (!hits.length) return;
     var external = {};
-    (c.parties || []).forEach(function (p) { if (p.affiliation === 'External') external[p.speakerId] = true; });
+    (c.parties || []).forEach(function (p) { if (p.affiliation === 'External' && p.speakerId) external[p.speakerId] = true; });
+    var hits = ((c.content || {}).trackers || []).filter(function (t) {
+      return SIGNAL_TRACKERS.indexOf(t.name) >= 0 && (t.occurrences || []).some(function (o) { return external[o.speakerId]; });
+    });
+    if (!hits.length) return;
     var firm = signalFirm_(c, open, match);
     hits.forEach(function (t) {
-      var occ = (t.occurrences || []).concat([]).sort(function (a, b) {
-        return (external[b.speakerId] ? 1 : 0) - (external[a.speakerId] ? 1 : 0) || a.startTime - b.startTime;
-      });
+      var occ = (t.occurrences || []).filter(function (o) { return external[o.speakerId]; }).sort(function (a, b) { return a.startTime - b.startTime; });
       var row = { CallId: m.id, Date: String(m.started || '').slice(0, 19), Rep: repByGong[m.primaryUserId] || '', FirmId: firm ? firm.FirmId : '',
         Firm: firm ? firm.Name : '', CallTitle: m.title || 'Call', CallUrl: m.url || '', Minutes: Math.round((m.duration || 0) / 60),
-        Tracker: t.name, Count: t.count, CustomerCount: occ.filter(function (o) { return external[o.speakerId]; }).length,
+        Tracker: t.name, Count: occ.length, CustomerCount: occ.length,
         _occ: occ.slice(0, 3), _ext: external };
       rows.push(row);
       if (needQuotes.indexOf(m.id) < 0) needQuotes.push(m.id);
@@ -639,6 +644,7 @@ function syncCallSignals() {
   sh.clearContents();
   var all = [SIGNAL_COLUMNS].concat(out).map(function (r) { return r.map(function (v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }); });
   sh.getRange(1, 1, all.length, SIGNAL_COLUMNS.length).setNumberFormat('@').setValues(all);
+  props.setProperty('SIGNAL_VERSION', SIGNAL_VERSION);
   console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all)');
 }
 

@@ -1,17 +1,17 @@
 /* ==========================================================================
    Call signals — managers only, on the Implementation tab under the calendar. The IMs' Gong calls
-   where one of the tracked Gong trackers fired (churn talk, product bugs, implementation objections,
-   competitors, feature requests), with the firm, the rep and the sentence that set it off.
+   where the customer set off one of the tracked Gong trackers (churn talk, product bugs,
+   implementation objections, competitors), with the firm, the rep and what they said.
    Data: the "Call Signals" tab, refreshed hourly by syncCallSignals in apps-script/call-prep.
    ========================================================================== */
-const SIG = { rows: null, loading: null, error: '', days: 7, tracker: '' };
+const SIG = { rows: null, loading: null, error: '', days: 7, tracker: '', all: false };
+const SIG_TOP = 5;   // calls shown before "Show all"
 // Most serious first; also the order of the filter chips.
 const SIG_TRACKERS = [
   ['Churn', 'Churn', 'bad'],
   ['Product Bugs', 'Product bug', 'bad'],
   ['Implementation Objection', 'Implementation objection', 'okay'],
   ['Competitors', 'Competitor', 'okay'],
-  ['Feature Request (from Customer)', 'Feature request', 'none'],
 ];
 const sigInfo = (name) => SIG_TRACKERS.find(([k]) => k === name) || [name, name, 'none'];
 const sigRank = (name) => { const i = SIG_TRACKERS.findIndex(([k]) => k === name); return i < 0 ? 99 : i; };
@@ -83,7 +83,8 @@ async function renderSignals() {
   const calls = sigCalls();
   const counts = {};
   calls.forEach((c) => c.hits.forEach((h) => { counts[h.Tracker] = (counts[h.Tracker] || 0) + 1; }));
-  const shown = SIG.tracker ? calls.filter((c) => c.hits.some((h) => h.Tracker === SIG.tracker)) : calls;
+  const matching = SIG.tracker ? calls.filter((c) => c.hits.some((h) => h.Tracker === SIG.tracker)) : calls;
+  const shown = SIG.all ? matching : matching.slice(0, SIG_TOP);
   const chip = (k, label, n) => `<button type="button" data-sig-tracker="${esc(k)}" aria-pressed="${SIG.tracker === k}">${esc(label)}${n != null ? ` <b>${n}</b>` : ''}</button>`;
   const rep = IMPL.rep && IMPL.rep !== IMPL_NONE ? IMPL.rep : '';
   el.innerHTML = `<div class="section-head"><h2>Call signals</h2><span class="rule"></span>
@@ -102,13 +103,13 @@ async function renderSignals() {
           ${rep ? '' : `<td>${esc(c.rep)}</td>`}
           <td>${c.firm ? `<b>${esc(c.firm)}</b>` : '<span class="muted">No firm matched</span>'}<div class="muted sig-title">${c.url ? `<a href="${esc(safeUrl(c.url))}" target="_blank" rel="noopener">${esc(c.title)}</a>` : esc(c.title)} · ${esc(c.minutes)} min</div>
             ${firmRow && canCallPrep(firmRow) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(firmRow.FirmId)}">Call prep</button>` : ''}</td>
-          <td>${c.hits.map((h) => `<span class="csm-pill h-${sigInfo(h.Tracker)[2]}" title="${h.customer} of ${h.count} said by the customer">${esc(sigInfo(h.Tracker)[1])}${h.count > 1 ? ' ×' + h.count : ''}</span>`).join(' ')}</td>
-          <td class="sig-quote">${first ? `<span class="sig-who">${first.customer ? 'Customer' : 'Lawmatics'} · ${sigClock(first.t)}</span> “${esc(first.text)}”` : '<span class="muted">Transcript not ready yet</span>'}
-            ${q.length > 1 ? `<details><summary>${q.length - 1} more</summary>${q.slice(1).map((x) => `<p><span class="sig-who">${esc(sigInfo(x.tracker)[1])} · ${x.customer ? 'Customer' : 'Lawmatics'} · ${sigClock(x.t)}</span> “${esc(x.text)}”</p>`).join('')}</details>` : ''}</td>
+          <td>${c.hits.map((h) => `<span class="csm-pill h-${sigInfo(h.Tracker)[2]}">${esc(sigInfo(h.Tracker)[1])}${h.count > 1 ? ' ×' + h.count : ''}</span>`).join(' ')}</td>
+          <td class="sig-quote">${first ? `<span class="sig-line" title="${esc(first.text)}"><span class="sig-who">${sigClock(first.t)}</span> “${esc(first.text)}”</span>` : '<span class="muted">Transcript not ready yet</span>'}
+            ${q.length > 1 ? `<details><summary>${q.length - 1} more</summary>${q.slice(1).map((x) => `<p><span class="sig-who">${esc(sigInfo(x.tracker)[1])} · ${sigClock(x.t)}</span> “${esc(x.text)}”</p>`).join('')}</details>` : ''}</td>
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 4 : 5}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
-    </table></div></div>
-    <p class="impl-note">Flagged by the Gong trackers ${SIG_TRACKERS.map(([k]) => `“${esc(k)}”`).join(', ')} on calls the IMs led. Refreshed hourly; Gong finishes processing a call a few hours after it ends. ⚑ on a firm’s row means it had signals in the last 30 days.</p>`}`;
+    </table></div>${matching.length > SIG_TOP ? `<button type="button" class="cal-more sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
+    <p class="impl-note">What customers said that set off the Gong trackers ${SIG_TRACKERS.map(([k]) => `“${esc(k)}”`).join(', ')} on the IMs’ calls. Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days.</p>`}`;
 }
 
 function setupSignals() {
@@ -117,6 +118,7 @@ function setupSignals() {
     if (!sec) return;
     const d = e.target.closest('[data-sig-days]');
     if (d) { SIG.days = Number(d.dataset.sigDays); renderSignals(); return; }
+    if (e.target.closest('[data-sig-all]')) { SIG.all = !SIG.all; renderSignals(); return; }
     const t = e.target.closest('[data-sig-tracker]');
     if (t) { SIG.tracker = t.dataset.sigTracker; renderSignals(); return; }
     const p = e.target.closest('[data-prep-firm]');

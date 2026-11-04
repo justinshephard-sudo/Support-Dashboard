@@ -1114,3 +1114,10 @@ tr.sp-disc-row td{padding-top:0}
 .sig-mark.h-okay{background:color-mix(in srgb,var(--st-warn) 16%,transparent);color:var(--st-warn)}
 .sig-mark.h-none{background:var(--surface-2);color:var(--text-3)}
 .nowrap{white-space:nowrap}
+.cal-compact tbody th{width:170px}
+.cal-compact td.cal-rest{font-size:12.5px;color:var(--text-2);width:34%}
+.cal-compact .cal-next{color:var(--text-3)}
+.cal-compact td:last-child{width:84px;text-align:right}
+.cal-week-btn{padding:4px 10px;font-size:12px}
+.sig-line{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sig-all{display:block;margin:6px 12px 10px}
