@@ -1824,6 +1824,7 @@ async function refreshSupport() {
 async function main() {
   try {
     setupCelebrate();
+    loadManagerList().then(updatePartnersTab);   // Partnerships tab: managers + PARTNER_VIEWERS only
     // Warm up Additional Services in the background (its backend is slow to start), so the
     // tab is usually ready by the time someone clicks it.
     const warmServices = () => mountServices();

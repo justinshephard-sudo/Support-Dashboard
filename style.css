@@ -1126,3 +1126,9 @@ tr.sp-disc-row td{padding-top:0}
 .sig-table td:nth-last-child(2){white-space:nowrap}
 .sig-quote{min-width:260px;overflow-wrap:anywhere}
 .sig-quote mark{background:color-mix(in srgb,var(--st-warn) 28%,transparent);color:inherit;border-radius:3px;padding:0 2px}
+
+/* Partnerships (js/partners.js) */
+.partners-hero{grid-template-columns:minmax(0,1fr) 260px}
+.partners-hero .fa-hero-art img{width:100%;max-height:300px;object-fit:contain;display:block;margin:-12px 0 -28px auto}
+.partners-soon{margin-top:24px}
+@media (max-width:720px){.partners-hero{grid-template-columns:1fr}.partners-hero .fa-hero-art{display:none}}
