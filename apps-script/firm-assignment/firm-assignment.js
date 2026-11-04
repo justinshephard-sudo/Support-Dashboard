@@ -44,7 +44,8 @@ var PREMIUM = 'Premium Onboarding';
 var WEIGHTS = { open: 40, since: 30, book: 15, value: 15 };
 // High-MRR tier: these AMs only get firms at or above the threshold, and those
 // firms go only to them. Both are editable on the page (stored in TIER).
-// Partner-sourced firms (closed-won opp Lead Source starts with "Partner") always go to Kennedy.
+// Partner firms always go to Kennedy: the closed-won opp's Lead Source starts with "Partner", or the
+// ChurnZero account's Partner Type is Affiliate.
 var PARTNER_REP_ID = 11; // Kennedy Wickham's ChurnZero user (not the duplicate #120)
 var TIER_DEFAULT = { reps: { 7: true, 71: true }, min: 1000 }; // Elliott Jones, Julio Ortiz
 
@@ -251,7 +252,8 @@ function buildLoad_() {
         aiDemo: cf.AiDemoNotes || '',
       },
       links: { deck: cf.OnboardingDeckLink || '', docs: cf.OnboardingDocumentsFolder || '' },
-      leadSource: '', leadSourceDetail: '', partner: false, contacts: [], onboardingContacts: [],
+      affiliate: /affiliate/i.test(String(cf.PartnerType || '')),
+      leadSource: '', leadSourceDetail: '', partner: /affiliate/i.test(String(cf.PartnerType || '')), contacts: [], onboardingContacts: [],
     };
   }).sort(function (a, b) { return (a.start || '9999') < (b.start || '9999') ? -1 : 1; });   // no start date yet = newest
 
@@ -354,7 +356,7 @@ function applyLeadSource_(queue, opps) {
     if (!o) return;
     f.leadSource = o.LeadSource || '';
     f.leadSourceDetail = o.LeadSourceDetail || '';
-    f.partner = /^partner/i.test(f.leadSource);
+    f.partner = f.affiliate || /^partner/i.test(f.leadSource);
   });
 }
 
