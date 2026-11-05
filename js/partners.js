@@ -14,6 +14,8 @@ const PT_GROUPS = [
 ];
 const PT_NONE = 'No partner listed';
 const PT_TOP = 8;
+// SELNA's firms are left off the whole page (the SELNA agency itself and every firm it referred).
+const PT_EXCLUDE = /\bselna\b/i;
 const PT_THIRD_PARTY = 'Onboarded by Third Party';
 // New agency-client firms whose onboarding is still open can be closed as onboarded by their agency.
 const ptCanClose = (f) => f.agencyClient && f.active && f.czId && ['', 'Pre-Kickoff', 'Open'].includes(f.onboarding) && f.start >= ptDaysAgo(30);
@@ -37,6 +39,7 @@ function ptLoad(force) {
         body: JSON.stringify({ token: AUTH.token, action: 'partners', force: !!force }) });
       const d = await res.json();
       if (!d.ok) throw new Error(d.error || 'no data');
+      d.firms = d.firms.filter((f) => !PT_EXCLUDE.test(f.partner) && !PT_EXCLUDE.test(f.name));
       PT.data = d;
       PT.error = '';
     } catch (e) {
@@ -163,7 +166,7 @@ function ptRender() {
         </div>
       </section>`;
     }).join('')}
-    <p class="impl-note">Live from ChurnZero. Agency: Agency Firm or Agency Client Firm is checked. Affiliate: Partner Type is Affiliate (a firm can be in both). Partner = the Referral Partner field. New = Start Date. MRR = ChurnZero contract amount. Click a number, bar or partner to see the firms.</p>`;
+    <p class="impl-note">Live from ChurnZero. Agency: Agency Firm or Agency Client Firm is checked. Affiliate: Partner Type is Affiliate (a firm can be in both). Partner = the Referral Partner field. New = Start Date. MRR = ChurnZero contract amount. SELNA firms are left out. Click a number, bar or partner to see the firms.</p>`;
 
   if (typeof Chart === 'undefined') return;
   const months = ptMonths();
