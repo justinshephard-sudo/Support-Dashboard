@@ -1128,8 +1128,8 @@ tr.sp-disc-row td{padding-top:0}
 .sig-quote mark{background:color-mix(in srgb,var(--st-warn) 28%,transparent);color:inherit;border-radius:3px;padding:0 2px}
 
 /* Partnerships (js/partners.js) */
-.partners-hero{grid-template-columns:minmax(0,1fr) 340px;gap:24px;padding-right:56px}
-.partners-hero .fa-hero-art{margin:-14px 0 -30px;text-align:center}
+.partners-hero{grid-template-columns:minmax(0,1fr) 390px;gap:24px;padding-right:56px}
+.partners-hero .fa-hero-art{margin:4px 0 -28px;text-align:center}
 .partners-hero .fa-hero-art img{width:auto;max-width:100%;height:300px;object-fit:contain;display:block;margin:0 auto}
 .pt-dance{cursor:pointer;position:relative}
 .pt-dance video{position:absolute;left:50%;top:0;height:300px;width:auto;max-width:100%;transform:translateX(-50%);opacity:0;pointer-events:none;filter:drop-shadow(0 12px 22px rgba(0,0,0,.35))}

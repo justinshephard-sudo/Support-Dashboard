@@ -102,9 +102,9 @@ async function openPartners(force) {
         <p>Agency and affiliate firms, who referred them, and what’s new this week.</p>
       </div>
       <div class="fa-hero-art pt-dance" role="button" tabindex="0" title="Click for a dance">
-        <img src="assets/merlin-partnerships.webp?v=2" alt="Merlin in a suit shaking hands with Kennedy, with her dog beside them" loading="lazy">
+        <img src="assets/merlin-partnerships.webp?v=3" alt="Merlin in a suit shaking hands with Kennedy, with her dog beside them" loading="lazy">
         <video muted playsinline preload="none" aria-hidden="true">
-          <source src="assets/merlin-partnerships-dance.mov?v=1" type='video/quicktime; codecs="hvc1"'><source src="assets/merlin-partnerships-dance.webm?v=1" type="video/webm"></video>
+          <source src="assets/merlin-partnerships-dance.mov?v=2" type='video/quicktime; codecs="hvc1"'><source src="assets/merlin-partnerships-dance.webm?v=2" type="video/webm"></video>
       </div>
     </div>
     <div id="ptBody"><div class="panel"><div class="res-loading">Loading partner firms from ChurnZero…</div></div></div>`;
