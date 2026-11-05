@@ -14,6 +14,10 @@ const PT_GROUPS = [
 ];
 const PT_NONE = 'No partner listed';
 const PT_TOP = 8;
+const PT_THIRD_PARTY = 'Onboarded by Third Party';
+// New agency-client firms whose onboarding is still open can be closed as onboarded by their agency.
+const ptCanClose = (f) => f.agencyClient && f.active && f.czId && ['', 'Pre-Kickoff', 'Open'].includes(f.onboarding) && f.start >= ptDaysAgo(30);
+const ptCloseBtn = (f) => (ptCanClose(f) ? `<button type="button" class="cp-btn pt-close" data-pt-close="${esc(f.czId)}" title="Set Onboarding Status to ${PT_THIRD_PARTY}">Close</button>` : '');
 
 function canSeePartners() {
   return isManager() || PARTNER_VIEWERS.includes(String(AUTH.email || '').toLowerCase());
@@ -73,7 +77,7 @@ function ptFirmTable(firms, withGroup) {
   return `<div class="table-wrap"><table class="drill-table pt-table"><thead><tr><th>Firm</th>${withGroup ? '<th>Type</th>' : ''}<th>Referral partner</th><th>Start</th><th class="num">MRR</th><th>Status</th></tr></thead><tbody>
     ${firms.map((f) => `<tr><td><b>${esc(f.name)}</b>${f.id ? ` <span class="muted">#${esc(f.id)}</span>` : ''}</td>${withGroup ? `<td>${esc(ptKind(f))}</td>` : ''}
       <td>${esc(ptPartner(f))}</td><td class="nowrap">${esc(ptDate(f.start))}</td><td class="num">${ptMoney(f.mrr)}</td>
-      <td>${f.active ? (f.onboarding && f.onboarding !== 'Complete' ? `Onboarding · ${esc(f.onboarding)}` : 'Active') : '<span class="muted">Inactive</span>'}</td></tr>`).join('')}
+      <td>${f.active ? (f.onboarding && f.onboarding !== 'Complete' ? `Onboarding · ${esc(f.onboarding)}` : 'Active') : '<span class="muted">Inactive</span>'} ${ptCloseBtn(f)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 
@@ -125,7 +129,7 @@ function ptRender() {
     <div class="panel pt-new">${fresh.length ? `<ul class="pt-new-list">${fresh.map((f) => `
       <li><span class="pt-when">${esc(ptDate(f.start))}</span><b>${esc(f.name)}</b>
         ${PT_GROUPS.filter((g) => g.test(f)).map((g) => `<span class="pt-tag pt-${g.key}">${g.title}</span>`).join('')}
-        <span class="muted">${esc(ptPartner(f))}</span><span class="pt-mrr">${ptMoney(f.mrr)}</span></li>`).join('')}</ul>`
+        <span class="muted">${esc(ptPartner(f))}</span>${f.onboarding ? `<span class="muted">· ${esc(f.onboarding)}</span>` : ''}<span class="pt-mrr">${ptMoney(f.mrr)}</span>${ptCloseBtn(f)}</li>`).join('')}</ul>`
       : `<div class="empty-note">No new agency or affiliate firms in the last 7 days.${lastNew ? ` Latest: <b>${esc(lastNew.name)}</b> (${esc(ptDate(lastNew.start))}).` : ''}</div>`}</div>
 
     ${PT_GROUPS.map((g) => {
@@ -195,8 +199,31 @@ function ptOpenPartner(key, name) {
   ptOpenFirms(`${name}`, `${g.title} · ${mrrPlural(act.length, 'active firm')} · ${ptMoney(act.reduce((s, f) => s + f.mrr, 0))} MRR · ${firms.length - act.length} inactive`, firms);
 }
 
+async function ptClose(btn) {
+  const f = PT.data.firms.find((x) => String(x.czId) === btn.dataset.ptClose);
+  if (!f || !confirm(`Close ${f.name}'s onboarding?\n\nThis sets its ChurnZero Onboarding Status to “${PT_THIRD_PARTY}”.`)) return;
+  btn.disabled = true;
+  btn.textContent = 'Closing…';
+  try {
+    const res = await fetch(CALL_PREP_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ token: AUTH.token, action: 'closeThirdParty', czId: f.czId }) });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'failed');
+    if (d.dryRun) { btn.textContent = 'Dry run ✓'; return; }
+    f.onboarding = PT_THIRD_PARTY;
+    btn.replaceWith(Object.assign(document.createElement('span'), { className: 'pt-closed', textContent: d.confirmed ? 'Closed ✓' : 'Closed · ChurnZero catching up' }));
+    if (!document.getElementById('mrrDrill')) ptRender();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Close';
+    alert('Couldn’t close it: ' + e.message);
+  }
+}
+
 function setupPartners() {
   document.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-pt-close]');
+    if (c) { ptClose(c); return; }
     if (!e.target.closest('#ptBody')) return;
     const a = e.target.closest('[data-pt-active]');
     if (a) { PT.active = a.dataset.ptActive === 'true'; ptRender(); return; }

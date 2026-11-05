@@ -143,7 +143,7 @@ async function openCallPrep(row) {
 
 /* ---------- "Onboarding complete" (current flow until the IM/CSM handoff form goes live) ----------
    Sets the firm's Onboarding Status to Complete in ChurnZero, then Johnny and Merlin dance. */
-DRY_RUN_OK[CALL_PREP_URL] = ['complete'];   // local test: the backend checks everything but writes nothing
+DRY_RUN_OK[CALL_PREP_URL] = ['complete', 'closeThirdParty'];   // local test: the backend checks everything but writes nothing
 
 function obDoneClose() {
   document.getElementById('obdone')?.remove();

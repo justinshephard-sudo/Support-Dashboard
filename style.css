@@ -1143,6 +1143,8 @@ tr.sp-disc-row td{padding-top:0}
 .pt-tag{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;color:#fff}
 .pt-tag.pt-agency{background:var(--slot-1)}.pt-tag.pt-affiliate{background:var(--slot-2)}
 .pt-group{margin-bottom:34px}
+.pt-close{margin:0 0 0 8px}
+.pt-closed{margin-left:8px;font-size:12.5px;font-weight:700;color:var(--st-good)}
 .pt-group .section-head{margin-bottom:12px}
 .pt-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
 .pt-stat{display:flex;flex-direction:column;align-items:flex-start;text-align:left;font:inherit;color:inherit;background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:10px 14px;cursor:pointer}

@@ -71,6 +71,7 @@ function doPost(e) {
     if (b.action === 'complete') return dashJson_(complete_(b, who));
     if (b.action === 'calendarMatch') return dashJson_(calendarMatch_(b));
     if (b.action === 'partners') return dashJson_(partners_(b, who));
+    if (b.action === 'closeThirdParty') return dashJson_(closeThirdParty_(b, who));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
@@ -86,19 +87,48 @@ var PARTNER_VIEWERS = ['kennedy@lawmatics.com'];
 function partners_(b, who) {
   if (!who.manager && PARTNER_VIEWERS.indexOf(who.email) < 0) return { ok: false, error: 'Partnerships is for managers and the partnerships team.' };
   var cache = CacheService.getScriptCache();
-  var hit = !b.force && cache.get('partners1');
+  var hit = !b.force && cache.get('partners2');
   if (hit) return JSON.parse(hit);
   var rows = czGet_('/Account', { $filter: "Cf/AgencyFirm eq true or Cf/AgencyClientFirm eq true or Cf/PartnerType eq 'Affiliate'", $top: 100,
     $select: 'Id,Name,StartDate,IsActive,TotalContractAmount,LicenseCount,Cf/FirmId,Cf/ReferralPartner,Cf/PartnerType,Cf/AgencyFirm,Cf/AgencyClientFirm,Cf/OnboardingStatus' });
   var firms = rows.map(function (a) {
     var cf = a.Cf || {};
-    return { id: String(cf.FirmId || ''), name: String(a.Name || ''), start: String(a.StartDate || '').slice(0, 10), active: a.IsActive ? 1 : 0,
+    return { czId: a.Id, id: String(cf.FirmId || ''), name: String(a.Name || ''), start: String(a.StartDate || '').slice(0, 10), active: a.IsActive ? 1 : 0,
       mrr: Math.round(Number(a.TotalContractAmount) || 0), seats: Number(a.LicenseCount) || 0, partner: String(cf.ReferralPartner || '').trim(),
       type: String(cf.PartnerType || ''), agency: cf.AgencyFirm ? 1 : 0, agencyClient: cf.AgencyClientFirm ? 1 : 0, onboarding: String(cf.OnboardingStatus || '') };
   });
   var out = { ok: true, at: new Date().toISOString(), firms: firms };
-  try { cache.put('partners1', JSON.stringify(out), 1800); } catch (e) { /* too big to cache */ }
+  try { cache.put('partners2', JSON.stringify(out), 1800); } catch (e) { /* too big to cache */ }
   return out;
+}
+
+// "Close" on a new agency-client firm: its agency onboards it, so the onboarding is closed as
+// Onboarded by Third Party. Only agency-client firms still open (Pre-Kickoff, Open or blank).
+var THIRD_PARTY_STATUS = 'Onboarded by Third Party';
+function closeThirdParty_(b, who) {
+  if (!who.manager && PARTNER_VIEWERS.indexOf(who.email) < 0) return { ok: false, error: 'Only managers and the partnerships team can close these.' };
+  var id = Number(b.czId);
+  if (!id) throw new Error('missing account');
+  var acct = czGet_('/Account', { $filter: 'Id eq ' + id, $select: 'Id,Name,ExternalId,Cf/AgencyClientFirm,Cf/OnboardingStatus' })[0];
+  if (!acct) throw new Error('That firm wasn’t found in ChurnZero.');
+  var cf = acct.Cf || {};
+  if (!cf.AgencyClientFirm) throw new Error(acct.Name + ' isn’t marked as an agency client firm in ChurnZero.');
+  if (cf.OnboardingStatus && OPEN_STATUSES.indexOf(cf.OnboardingStatus) < 0) throw new Error(acct.Name + '’s onboarding is already ' + cf.OnboardingStatus + '.');
+  if (b.dryRun) return { ok: true, dryRun: true, firm: acct.Name };
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  if (!appKey) throw new Error('The ChurnZero write key (CZ_APP_KEY) isn’t set up yet.');
+  var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', muteHttpExceptions: true, payload: {
+    appKey: appKey, accountExternalId: acct.ExternalId, action: 'setAttribute', entity: 'account', name: 'OnboardingStatus', value: THIRD_PARTY_STATUS } });
+  if (res.getResponseCode() >= 300) { console.error('ChurnZero write ' + res.getResponseCode()); throw new Error('ChurnZero rejected the change (HTTP ' + res.getResponseCode() + ').'); }
+  var confirmed = false;
+  for (var i = 0; i < 4 && !confirmed; i++) {
+    Utilities.sleep(2500);
+    var after = czGet_('/Account', { $filter: 'Id eq ' + id, $select: 'Id,Cf/OnboardingStatus' })[0];
+    confirmed = !!after && (after.Cf || {}).OnboardingStatus === THIRD_PARTY_STATUS;
+  }
+  CacheService.getScriptCache().remove('partners2');
+  console.log('Closed by third party: ' + acct.Name + ' (' + id + ') by ' + who.email + (confirmed ? '' : ' — not confirmed yet'));
+  return { ok: true, firm: acct.Name, status: THIRD_PARTY_STATUS, confirmed: confirmed };
 }
 
 /* ---------- calendar matching ---------- */
