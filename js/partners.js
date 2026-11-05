@@ -101,7 +101,11 @@ async function openPartners(force) {
         <h2>Partner <span>Program</span></h2>
         <p>Agency and affiliate firms, who referred them, and what’s new this week.</p>
       </div>
-      <div class="fa-hero-art"><img src="assets/merlin-partnerships.webp" alt="Merlin in a suit shaking hands with Kennedy, with her dog beside them" loading="lazy"></div>
+      <div class="fa-hero-art pt-dance" role="button" tabindex="0" title="Click for a dance">
+        <img src="assets/merlin-partnerships.webp?v=2" alt="Merlin in a suit shaking hands with Kennedy, with her dog beside them" loading="lazy">
+        <video muted playsinline preload="none" aria-hidden="true">
+          <source src="assets/merlin-partnerships-dance.mov?v=1" type='video/quicktime; codecs="hvc1"'><source src="assets/merlin-partnerships-dance.webm?v=1" type="video/webm"></video>
+      </div>
     </div>
     <div id="ptBody"><div class="panel"><div class="res-loading">Loading partner firms from ChurnZero…</div></div></div>`;
   }
@@ -223,7 +227,21 @@ async function ptClose(btn) {
   }
 }
 
+// Hero art: click → the dance clip plays once (forward then back, so it ends on the same pose as the still).
+function ptDance(box) {
+  const v = box.querySelector('video');
+  if (!v || box.dataset.busy) return;
+  box.dataset.busy = '1';
+  const done = () => { box.classList.remove('playing'); delete box.dataset.busy; };
+  v.onplaying = () => box.classList.add('playing');   // swap only once the first frame is ready (no blank flash)
+  v.onended = done;
+  v.currentTime = 0;
+  v.play().catch(done);
+}
+
 function setupPartners() {
+  document.addEventListener('click', (e) => { const b = e.target.closest('.pt-dance'); if (b) ptDance(b); });
+  document.addEventListener('keydown', (e) => { const b = e.target.closest && e.target.closest('.pt-dance'); if (b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); ptDance(b); } });
   document.addEventListener('click', (e) => {
     const c = e.target.closest('[data-pt-close]');
     if (c) { ptClose(c); return; }
