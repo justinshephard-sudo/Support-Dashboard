@@ -1177,3 +1177,8 @@ tr.sp-disc-row td{padding-top:0}
 .incentive-default-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .incentive-default-save{font-size:12px;padding:6px 12px}
 .incentive-default-msg{font-size:12px;color:var(--text-3)}
+
+/* Call signals: reviewed */
+.sig-reviewed td{opacity:.55}
+.sig-rev-by{font-size:12.5px;font-weight:700;color:var(--st-good)}
+.sig-rev-toggle{margin:0}

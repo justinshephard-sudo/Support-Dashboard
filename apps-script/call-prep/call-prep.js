@@ -72,6 +72,7 @@ function doPost(e) {
     if (b.action === 'calendarMatch') return dashJson_(calendarMatch_(b));
     if (b.action === 'partners') return dashJson_(partners_(b, who));
     if (b.action === 'closeThirdParty') return dashJson_(closeThirdParty_(b, who));
+    if (b.action === 'reviewSignal') return dashJson_(reviewSignal_(b, who));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
@@ -631,6 +632,28 @@ var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
 var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes', 'GongTracker'];
+
+// "Reviewed" on a flagged call (managers): one row per call in the "Call Signal Reviews" tab, which
+// the page reads to hide reviewed calls. undo removes the row.
+var SIGNAL_REVIEW_TAB = 'Call Signal Reviews';
+function reviewSignal_(b, who) {
+  if (!who.manager) return { ok: false, error: 'Only managers can review call signals.' };
+  var callId = String(b.callId || '').replace(/[^\w-]/g, '').slice(0, 40);
+  if (!callId) throw new Error('missing call');
+  if (b.dryRun) return { ok: true, dryRun: true };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+    var sh = ss.getSheetByName(SIGNAL_REVIEW_TAB);
+    if (!sh) { sh = ss.insertSheet(SIGNAL_REVIEW_TAB); sh.getRange(1, 1, 1, 3).setValues([['CallId', 'ReviewedBy', 'ReviewedAt']]).setFontWeight('bold'); }
+    var ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map(function (r) { return r[0]; }) : [];
+    for (var i = ids.length - 1; i >= 0; i--) if (ids[i] === callId) sh.deleteRow(i + 2);
+    var at = new Date().toISOString();
+    if (!b.undo) sh.appendRow(["'" + callId, who.email, at]);
+    return { ok: true, callId: callId, reviewed: !b.undo, by: who.email, at: at };
+  } finally { lock.releaseLock(); }
+}
 
 // Run once from the editor: authorizes the sheet access, installs the hourly run, and fills the tab.
 function installCallSignalsTrigger() {
