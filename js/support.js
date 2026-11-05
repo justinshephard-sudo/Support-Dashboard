@@ -76,11 +76,15 @@ async function loadReportTables() {
   parseResourceFlags(overrideRows);
 
   // Incentive meta (FaceTime title/amount): rows where Table === 'Incentive'.
+  // Rows whose Month is "default:YYYY-MM" are saved default names/prizes, in effect from that month on.
   incentiveMetaMap = new Map();
+  INCENTIVE_DEFAULTS = [];
   (overrideRows || []).slice(1).forEach((row) => {
     const [month, table, rep, column, value] = row.concat(['', '', '', '', '', '']);
     if (String(table).trim().toLowerCase() !== 'incentive') return;
     if (!month || !rep || !column || value === '' || value == null) return;
+    const dm = String(month).trim().match(/^default:(\d{4}-\d{2})$/);
+    if (dm) { INCENTIVE_DEFAULTS.push({ from: dm[1], key: String(rep).trim(), field: String(column).trim(), value: String(value).trim() }); return; }
     incentiveMetaMap.set(`${String(month).trim()}:${String(rep).trim()}:${String(column).trim()}`, String(value).trim());
   });
 }
@@ -601,6 +605,34 @@ let overridesMap = new Map();
 // Keyed `${monthKey}:${incentiveKey}:${field}` -> value.
 let incentiveMetaMap = new Map();
 
+// Default name + prize per incentive, editable in manager mode. Each save starts from the month being
+// viewed and carries forward; earlier months keep what they paid. Without a saved default the card
+// shows its built-in text (index.html / INCENTIVE_DEFS).
+let INCENTIVE_DEFAULTS = [];          // [{ from: 'YYYY-MM', key, field: 'title' | 'amount', value }]
+const INCENTIVE_YEAR = 2026;          // the year of the Support Team Report these month tabs belong to
+function incentiveYm(gid) {
+  const m = MONTH_TABS.find((x) => String(x.gid) === String(gid));
+  return m ? `${INCENTIVE_YEAR}-${String(MONTH_NAMES.indexOf(m.name) + 1).padStart(2, '0')}` : '';
+}
+function incentiveDefault(key, field, gid) {
+  const ym = incentiveYm(gid);
+  const hit = INCENTIVE_DEFAULTS.filter((d) => d.key === key && d.field === field && d.from <= ym).sort((a, b) => (a.from < b.from ? 1 : -1))[0];
+  return hit ? hit.value : '';
+}
+async function saveIncentiveDefault(key, gid, title, amount) {
+  const ym = incentiveYm(gid);
+  if (!ym) throw new Error('Unknown month');
+  const month = `default:${ym}`;
+  const results = await Promise.all([
+    postDataOverride(month, 'Incentive', key, 'title', title, ''),
+    postDataOverride(month, 'Incentive', key, 'amount', amount, ''),
+  ]);
+  if (results.some((r) => !r.ok)) throw new Error('not saved');
+  INCENTIVE_DEFAULTS = INCENTIVE_DEFAULTS.filter((d) => !(d.key === key && d.from === ym));
+  if (title) INCENTIVE_DEFAULTS.push({ from: ym, key, field: 'title', value: title });
+  if (amount) INCENTIVE_DEFAULTS.push({ from: ym, key, field: 'amount', value: amount });
+}
+
 async function postIncentiveMeta(monthKey, incentiveKey, field, value) {
   return postDataOverride(monthKey, 'Incentive', incentiveKey, field, value || '', '');
 }
@@ -635,10 +667,15 @@ function renderIncentives(members, monthKey) {
     const card = document.querySelector(`[data-incentive="${baseDef.key}"]`);
     if (!card) return;
     const def = incentiveDefFor(baseDef, monthKey);
-    if (!def.editableMeta && def.title) {
-      // Fixed card text (the legacy custom award may have changed it for another month).
-      card.querySelector('.incentive-title').textContent = def.title;
-      card.querySelector('.incentive-amount').textContent = def.amount;
+    // The built-in name/prize, captured from the page before anything changes it.
+    if (!card.dataset.builtinTitle) {
+      card.dataset.builtinTitle = baseDef.title || card.querySelector('.incentive-title').textContent.trim();
+      card.dataset.builtinAmount = baseDef.amount || card.querySelector('.incentive-amount').textContent.trim();
+    }
+    if (!def.editableMeta) {
+      // Saved default for this month, else the built-in text (the legacy custom award may have changed it for another month).
+      card.querySelector('.incentive-title').textContent = incentiveDefault(baseDef.key, 'title', monthKey) || card.dataset.builtinTitle;
+      card.querySelector('.incentive-amount').textContent = incentiveDefault(baseDef.key, 'amount', monthKey) || card.dataset.builtinAmount;
     }
     if (def.emoji) card.querySelector('.incentive-emoji').textContent = def.emoji;
     const nameEl = card.querySelector('.incentive-winner');
@@ -723,6 +760,33 @@ function renderOverrideControl(card, def, members, monthKey) {
     amountInput.value = amountOv || def.defaultAmount || '';
     wrap.appendChild(titleInput);
     wrap.appendChild(amountInput);
+  }
+
+  // Default name + prize (every card except a month's legacy custom award): saved from this month on.
+  if (!def.editableMeta) {
+    const monthName = (MONTH_TABS.find((x) => String(x.gid) === String(monthKey)) || {}).name || 'this month';
+    const form = document.createElement('div');
+    form.className = 'incentive-default-form';
+    form.innerHTML = `<div class="incentive-default-head">Name &amp; prize</div>
+      <input type="text" class="incentive-override-stat-input" data-def="title" placeholder="Incentive name">
+      <input type="text" class="incentive-override-stat-input" data-def="amount" placeholder="Prize (e.g. $100)">
+      <div class="incentive-default-actions"><button type="button" class="mgr-btn incentive-default-save">Save as default from ${esc(monthName)} on</button><span class="incentive-default-msg" role="status"></span></div>`;
+    const t = form.querySelector('[data-def="title"]'), a = form.querySelector('[data-def="amount"]');
+    t.value = card.querySelector('.incentive-title').textContent.trim();
+    a.value = card.querySelector('.incentive-amount').textContent.trim();
+    const btn = form.querySelector('.incentive-default-save'), msg = form.querySelector('.incentive-default-msg');
+    btn.addEventListener('click', async () => {
+      const title = t.value.trim(), amount = a.value.trim();
+      if (!title || !amount) { msg.textContent = 'Name and prize are both needed.'; return; }
+      btn.disabled = true; msg.textContent = 'Saving…';
+      try {
+        await saveIncentiveDefault(def.key, monthKey, title, amount);
+        renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey);
+        const again = card.querySelector('.incentive-default-msg');
+        if (again) again.textContent = `Saved — ${monthName} and later months.`;
+      } catch (e) { btn.disabled = false; msg.textContent = 'Couldn’t save.'; }
+    });
+    wrap.appendChild(form);
   }
 
   // Multi-select winners (checkboxes).

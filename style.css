@@ -1136,3 +1136,9 @@ tr.sp-disc-row td{padding-top:0}
 .tabbar{position:relative;z-index:3}
 .hero-merlin{bottom:30px}
 @media(min-width:521px){.tab{padding:10px 17px}}
+/* Manager mode: default name + prize per incentive */
+.incentive-default-form{display:flex;flex-direction:column;gap:6px;padding-bottom:9px;border-bottom:1px dashed var(--border-str)}
+.incentive-default-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)}
+.incentive-default-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.incentive-default-save{font-size:12px;padding:6px 12px}
+.incentive-default-msg{font-size:12px;color:var(--text-3)}
