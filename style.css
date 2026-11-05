@@ -1128,9 +1128,41 @@ tr.sp-disc-row td{padding-top:0}
 .sig-quote mark{background:color-mix(in srgb,var(--st-warn) 28%,transparent);color:inherit;border-radius:3px;padding:0 2px}
 
 /* Partnerships (js/partners.js) */
-.partners-hero{grid-template-columns:minmax(0,1fr) 260px}
-.partners-hero .fa-hero-art img{width:100%;max-height:300px;object-fit:contain;display:block;margin:-12px 0 -28px auto}
-.partners-soon{margin-top:24px}
+.partners-hero{grid-template-columns:minmax(0,1fr) 200px}
+.partners-hero .fa-hero-art img{width:100%;max-height:200px;object-fit:contain;display:block;margin:-12px 0 -28px auto}
+.pt-toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0 22px}
+.pt-toolbar .muted{font-size:13px}
+.pt-toolbar .cal-more{margin:0 0 0 auto}
+.pt-new{padding:12px 18px;margin-bottom:30px}
+.pt-new .empty-note{padding:6px 0}
+.pt-new-list{list-style:none;margin:0;padding:0}
+.pt-new-list li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border)}
+.pt-new-list li:first-child{border-top:0}
+.pt-when{font-size:13px;font-weight:700;color:var(--text-3);min-width:56px}
+.pt-mrr{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums}
+.pt-tag{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;color:#fff}
+.pt-tag.pt-agency{background:var(--slot-1)}.pt-tag.pt-affiliate{background:var(--slot-2)}
+.pt-group{margin-bottom:34px}
+.pt-group .section-head{margin-bottom:12px}
+.pt-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.pt-stat{display:flex;flex-direction:column;align-items:flex-start;text-align:left;font:inherit;color:inherit;background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:10px 14px;cursor:pointer}
+.pt-stat:disabled{cursor:default}
+.pt-stat:not(:disabled):hover{border-color:var(--lm-blue)}
+.pt-stat span{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.pt-stat b{font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--text-1)}
+.pt-stat small{font-size:12.5px;color:var(--text-3)}
+.pt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pt-grid .panel{padding:14px 16px;min-width:0}
+.pt-grid h4{font-size:14px;font-weight:700;margin:0 0 8px}
+.pt-grid h4 .muted{font-weight:600}
+.pt-chart{position:relative;height:220px}
+.pt-partners .pt-table{font-size:13.5px}
+.pt-table td,.pt-table th{padding:6px 8px}
+.pt-table td.num,.pt-table th.num{text-align:right!important;font-variant-numeric:tabular-nums}
+.pt-row{cursor:pointer}.pt-row:hover td{background:var(--surface-2,rgba(0,0,0,.03))}
+.pt-partners .cal-more{margin-top:8px}
+@media (max-width:1100px){.pt-grid{grid-template-columns:1fr 1fr}.pt-partners{grid-column:1/-1}}
+@media (max-width:720px){.pt-grid,.pt-stats{grid-template-columns:1fr 1fr}.pt-grid .panel{grid-column:1/-1}}
 @media (max-width:720px){.partners-hero{grid-template-columns:1fr}.partners-hero .fa-hero-art{display:none}}
 /* Seven tabs: Merlin stands just above the tab bar instead of over its last tab; the bar stays in front, a little tighter */
 .tabbar{position:relative;z-index:3}

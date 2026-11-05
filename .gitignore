@@ -7,3 +7,4 @@ apps-script/*/dash-auth.js
 apps-script/service-portal/secret.js
 
 apps-script/call-prep/secret.js
+.local-test/

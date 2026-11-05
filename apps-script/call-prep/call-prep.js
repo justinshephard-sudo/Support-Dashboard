@@ -70,11 +70,35 @@ function doPost(e) {
     if (b.action === 'prepStatus') return dashJson_(prepStatus_(b));
     if (b.action === 'complete') return dashJson_(complete_(b, who));
     if (b.action === 'calendarMatch') return dashJson_(calendarMatch_(b));
+    if (b.action === 'partners') return dashJson_(partners_(b, who));
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
     return dashJson_({ ok: false, error: String((err && err.message) || err) });
   }
+}
+
+/* ---------- Partnerships tab ---------- */
+// Agency firms (Agency Firm or Agency Client Firm true) and affiliate firms (Partner Type = Affiliate),
+// with their referral partner. Managers and PARTNER_VIEWERS only (same list as js/partners.js).
+var PARTNER_VIEWERS = ['kennedy@lawmatics.com'];
+
+function partners_(b, who) {
+  if (!who.manager && PARTNER_VIEWERS.indexOf(who.email) < 0) return { ok: false, error: 'Partnerships is for managers and the partnerships team.' };
+  var cache = CacheService.getScriptCache();
+  var hit = !b.force && cache.get('partners1');
+  if (hit) return JSON.parse(hit);
+  var rows = czGet_('/Account', { $filter: "Cf/AgencyFirm eq true or Cf/AgencyClientFirm eq true or Cf/PartnerType eq 'Affiliate'", $top: 100,
+    $select: 'Id,Name,StartDate,IsActive,TotalContractAmount,LicenseCount,Cf/FirmId,Cf/ReferralPartner,Cf/PartnerType,Cf/AgencyFirm,Cf/AgencyClientFirm,Cf/OnboardingStatus' });
+  var firms = rows.map(function (a) {
+    var cf = a.Cf || {};
+    return { id: String(cf.FirmId || ''), name: String(a.Name || ''), start: String(a.StartDate || '').slice(0, 10), active: a.IsActive ? 1 : 0,
+      mrr: Math.round(Number(a.TotalContractAmount) || 0), seats: Number(a.LicenseCount) || 0, partner: String(cf.ReferralPartner || '').trim(),
+      type: String(cf.PartnerType || ''), agency: cf.AgencyFirm ? 1 : 0, agencyClient: cf.AgencyClientFirm ? 1 : 0, onboarding: String(cf.OnboardingStatus || '') };
+  });
+  var out = { ok: true, at: new Date().toISOString(), firms: firms };
+  try { cache.put('partners1', JSON.stringify(out), 1800); } catch (e) { /* too big to cache */ }
+  return out;
 }
 
 /* ---------- calendar matching ---------- */
