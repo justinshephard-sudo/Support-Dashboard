@@ -22,7 +22,8 @@ function loadSignals(force) {
     try {
       const rows = await fetchTitleFrom(SHEET_ID, 'Call Signals');
       const head = (rows[0] || []).map((h) => String(h).trim());
-      SIG.rows = rows.slice(1).map((r) => {
+      // Only the Gong AI trackers count (the old keyword-tracker flags were retired 2026-11-06).
+      SIG.rows = rows.slice(1).filter((r) => /^ai\b/i.test(String(r[head.indexOf('GongTracker')] || '').trim())).map((r) => {
         const o = {};
         head.forEach((h, i) => { o[h] = r[i] == null ? '' : String(r[i]); });
         try { o.quotes = JSON.parse(o.Quotes || '[]'); } catch (e) { o.quotes = []; }
@@ -130,7 +131,7 @@ async function renderSignals() {
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 5 : 6}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
     </table></div>${matching.length > SIG_TOP ? `<button type="button" class="pill-btn sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
-    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk”, “Ai Onboarding Bug” and “Ai pushback” on the IMs’ calls (the older keyword trackers count too, as a backup, until the AI ones settle in). Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
+    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk”, “Ai Onboarding Bug” and “Ai pushback” on the IMs’ calls. Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
 }
 
 async function sigReview(btn) {
