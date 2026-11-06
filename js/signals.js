@@ -130,7 +130,7 @@ async function renderSignals() {
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 5 : 6}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
     </table></div>${matching.length > SIG_TOP ? `<button type="button" class="pill-btn sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
-    <p class="impl-note">What customers said that set off the Gong trackers ${SIG_TRACKERS.map(([k]) => `“${esc(k)}”`).join(', ')} on the IMs’ calls. Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
+    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk”, “Ai Onboarding Bug” and “Ai pushback” on the IMs’ calls (the older keyword trackers count too, as a backup, until the AI ones settle in). Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
 }
 
 async function sigReview(btn) {

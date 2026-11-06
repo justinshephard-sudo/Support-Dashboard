@@ -623,11 +623,13 @@ var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a
 var SIGNAL_ALIASES = {
   // Justin tightened the existing Churn / Product Bugs / Implementation Objection trackers in place (2026-11-04).
   // ("At risk", a Gong AI tracker, was tried and dropped: it flagged happy customers.)
-  'Onboarding – Churn risk': ['Onboarding – Churn risk', 'Churn'],
-  'Onboarding – Blocked by a bug': ['Onboarding – Blocked by a bug', 'Product Bugs'],
-  'Onboarding – Pushback': ['Onboarding – Pushback', 'Implementation Objection'],
+  // 2026-11-06: Justin's trained AI trackers come first; the keyword trackers stay as a fallback until the AI
+  // ones have a week of hits (then drop them). Where both fire on one call, only the AI hit is kept.
+  'Onboarding – Churn risk': ['Ai churn risk', 'Onboarding – Churn risk', 'Churn'],
+  'Onboarding – Blocked by a bug': ['Ai Onboarding Bug', 'Onboarding – Blocked by a bug', 'Product Bugs'],
+  'Onboarding – Pushback': ['Ai pushback', 'Onboarding – Pushback', 'Implementation Objection'],
 };
-var SIGNAL_VERSION = '8';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_VERSION = '9';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
@@ -750,7 +752,7 @@ function syncCallSignals() {
         return null;
       }
       var k = -1;
-      sents.forEach(function (s, j) { if (s.start <= ms + 500 && (k < 0 || s.start > sents[k].start)) k = j; });
+      sents.forEach(function (s, j) { if (s.who === o.speakerId && s.start <= ms + 500 && (k < 0 || s.start > sents[k].start)) k = j; });
       return k < 0 ? null : { t: Math.round(o.startTime), customer: true, text: sents[k].text.slice(0, 280) };
     }).filter(Boolean);
     if (!found.length && (list.length || !sents.length)) return false;
