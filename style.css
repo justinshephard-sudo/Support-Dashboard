@@ -1198,3 +1198,4 @@ tr.sp-disc-row td{padding-top:0}
 .pill-btn:disabled{opacity:.6;cursor:default}
 td.txt,th.txt{text-align:left!important}                             /* text columns read left to right */
 p,.mrr-sync,.merlin-bubble,.loop-bubble{text-wrap:pretty}            /* no single word left on the last line */
+#manual-tiles .tile .label{min-height:4.05em}                         /* one label here runs to three lines */
