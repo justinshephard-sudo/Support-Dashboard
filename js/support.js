@@ -1466,7 +1466,8 @@ function drawLineChart(canvasId, labels, datasets, yOpts = {}) {
         },
       },
       scales: {
-        x: { grid: { color: gridColor }, ticks: { color: tickColor } },
+        // Short month names, kept flat (Chart.js skips labels instead of slanting them when space runs out).
+        x: { grid: { color: gridColor }, ticks: { color: tickColor, maxRotation: 0, autoSkip: true, callback(v) { const l = String(this.getLabelForValue(v)); return /^[A-Z][a-z]{3,}$/.test(l) ? l.slice(0, 3) : l; } } },
         y: {
           beginAtZero: true,
           min: yOpts.min ?? 0,

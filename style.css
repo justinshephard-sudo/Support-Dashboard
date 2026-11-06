@@ -109,7 +109,7 @@ h1,h2,h3,h4{font-family:var(--font);color:var(--text-1)}
 .tile:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
 .tile::before{content:"";position:absolute;left:20px;top:0;width:36px;height:4px;border-radius:0 0 4px 4px;background:var(--tile-accent,var(--lm-blue))}
 .tile .icon{display:none}
-.tile .label{font-size:12.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-top:4px}
+.tile .label{font-size:12.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-top:4px;line-height:1.35;min-height:2.7em;display:flex;align-items:flex-end}
 .tile .value{font-size:32px;font-weight:700;letter-spacing:-.3px;color:var(--text-1);margin-top:4px;line-height:1.15;font-variant-numeric:tabular-nums}
 .tile .tile-delta{font-size:13px!important}
 
@@ -154,6 +154,8 @@ tbody tr:hover td{background:var(--surface-2)}
 
 /* ---------- trend charts ---------- */
 .charts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.charts-grid.four{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1200px){.charts-grid.four{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1000px){.charts-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:640px){.charts-grid{grid-template-columns:1fr}}
 .chart-card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px 20px 14px;position:relative}
@@ -294,11 +296,11 @@ body.drill-open{overflow:hidden}
 @keyframes merlinHop{0%{transform:translateY(0)}40%{transform:translateY(-22px) rotate(6deg)}100%{transform:translateY(0)}}
 @media(max-width:1180px){.hero-merlin{width:170px}}
 @media(max-width:900px){.hero-merlin{display:none}}
-.merlin-callout{display:flex;align-items:flex-end;gap:10px;margin-left:auto}
+.merlin-callout{display:flex;align-items:flex-end;gap:10px;margin:-44px 0 -18px auto}
 .merlin-callout img{width:118px;height:auto;filter:drop-shadow(0 8px 12px rgba(31,52,76,.18))}
 .merlin-bubble{position:relative;background:var(--surface-1);border:1px solid var(--border);box-shadow:var(--shadow-sm);color:var(--text-1);font-size:14px;font-weight:600;padding:9px 15px;border-radius:999px;margin-bottom:40px;white-space:nowrap}
 .merlin-bubble::after{content:"";position:absolute;right:-6px;bottom:10px;width:12px;height:12px;background:var(--surface-1);border-right:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg)}
-@media(max-width:640px){.merlin-callout{width:100%;justify-content:flex-end}.merlin-bubble{white-space:normal}}
+@media(max-width:640px){.merlin-callout{width:100%;justify-content:flex-end;margin:0}.merlin-bubble{white-space:normal}}
 .empty .merlin-look{display:block;width:150px;height:auto;margin:0 auto 14px;filter:drop-shadow(0 10px 14px rgba(31,52,76,.18))}
 .gate-card{position:relative;margin-top:96px;padding-top:104px}
 .gate-merlin{position:absolute;left:50%;top:-110px;width:200px;height:auto;margin-left:-100px;filter:drop-shadow(0 14px 20px rgba(0,0,0,.35))}
@@ -745,6 +747,7 @@ body.drill-open{overflow:hidden}
 .save-toast{position:fixed;right:16px;bottom:70px;z-index:1001;max-width:min(420px,calc(100% - 32px));background:#c03636;color:#fff;font-size:14px;font-weight:600;border-radius:14px;padding:10px 16px;box-shadow:0 12px 28px rgba(0,0,0,.25)}
 .sync-note{display:block;font-size:12.5px;color:var(--text-3);margin:8px 2px 0}
 .sync-note.bad{color:#c03636;font-weight:600}
+#firmSync{text-align:center}
 #implSync{display:inline;margin-left:10px}
 #implSync[hidden],#firmSync[hidden]{display:none}
 /* Loop Tracker bubble sits to the left of Merlin's hat, tail pointing at him */
@@ -909,7 +912,7 @@ button.mrr-stat span{color:var(--lm-blue)}
 .coh-back .csm-cohort-btn{margin-left:0}
 .csm-cohort td.coh-na{color:var(--text-3);background:var(--surface-2)}
 .csm-cohort tbody tr:hover td{filter:brightness(.97)}
-.csm-pill{display:inline-block;color:#fff;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px}
+.csm-pill{display:inline-block;white-space:nowrap;color:#fff;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px}
 .csm-foot{margin-top:14px}
 @media (max-width:720px){.csm-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 /* Month arrows: big enough to hit easily (MRR Report + CSM) */
@@ -919,7 +922,7 @@ button.mrr-stat span{color:var(--lm-blue)}
 .csm-head .mrr-step b{font-size:16px}
 
 /* Excluded firms (Manager mode) */
-.excl-btn{font:600 12px/1 inherit;font-family:inherit;color:var(--st-critical);background:transparent;border:1px solid currentColor;border-radius:999px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+.excl-btn{font:600 12px/1 var(--font);color:var(--st-critical);background:transparent;border:1px solid currentColor;border-radius:999px;padding:5px 10px;cursor:pointer;white-space:nowrap}
 .excl-btn:hover{background:color-mix(in srgb,var(--st-critical) 10%,transparent)}
 .excl-btn:disabled{opacity:.6;cursor:default}
 .excl-entry{margin-left:10px;font-size:12px;padding:5px 12px;vertical-align:middle}
@@ -981,7 +984,7 @@ tr.sp-changed td{background:color-mix(in srgb,var(--st-warn) 10%,transparent)}
 .impl-kpi:hover{transform:none;background:rgba(255,255,255,.08)}
 .impl-hero:empty{display:none}
 #impl-tiles-section[hidden]{display:none}
-.impl-kpis .mrr-kpi small em{font-style:normal;font-weight:600}
+.impl-kpis .mrr-kpi small em{font-style:normal;font-weight:600;white-space:nowrap}
 .impl-kpis .mrr-kpi small em.up{color:#5fe0a0}.impl-kpis .mrr-kpi small em.down{color:#ff8a7a}
 /* Local test environment banner */
 .local-banner{position:relative;z-index:60;background:#ffd23f;color:#3a2a00;font:700 13px var(--font);text-align:center;padding:5px 10px;letter-spacing:.02em}
@@ -1119,7 +1122,7 @@ tr.sp-disc-row td{padding-top:0}
 .cal-compact .cal-next{color:var(--text-3)}
 .cal-compact td:last-child{width:84px;text-align:right}
 .cal-week-btn{padding:4px 10px;font-size:12px}
-.sig-line{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sig-line{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal}
 .sig-all{display:block;margin:6px 12px 10px}
 .sig-table td{white-space:normal}
 .sig-table td:first-child{white-space:nowrap}
@@ -1138,7 +1141,7 @@ tr.sp-disc-row td{padding-top:0}
 .pt-dance:focus-visible{outline:2px solid #7fd8ff;outline-offset:4px;border-radius:12px}
 .pt-toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:20px 0 22px}
 .pt-toolbar .muted{font-size:13px}
-.pt-toolbar .cal-more{margin:0 0 0 auto}
+.pt-toolbar .pill-btn{margin:0 0 0 auto}
 .pt-new{padding:12px 18px;margin-bottom:30px}
 .pt-new .empty-note{padding:6px 0}
 .pt-new-list{list-style:none;margin:0;padding:0}
@@ -1168,7 +1171,7 @@ tr.sp-disc-row td{padding-top:0}
 .pt-table td,.pt-table th{padding:6px 8px}
 .pt-table td.num,.pt-table th.num{text-align:right!important;font-variant-numeric:tabular-nums}
 .pt-row{cursor:pointer}.pt-row:hover td{background:var(--surface-2,rgba(0,0,0,.03))}
-.pt-partners .cal-more{margin-top:8px}
+.pt-partners .pill-btn{margin-top:10px}
 @media (max-width:1100px){.pt-grid{grid-template-columns:1fr 1fr}.pt-partners{grid-column:1/-1}}
 @media (max-width:720px){.pt-grid,.pt-stats{grid-template-columns:1fr 1fr}.pt-grid .panel{grid-column:1/-1}}
 @media (max-width:720px){.partners-hero{grid-template-columns:1fr}.partners-hero .fa-hero-art{display:none}}
@@ -1187,3 +1190,11 @@ tr.sp-disc-row td{padding-top:0}
 .sig-reviewed td{opacity:.55}
 .sig-rev-by{font-size:12.5px;font-weight:700;color:var(--st-good)}
 .sig-rev-toggle{margin:0}
+
+/* Visual pass 2026-11-06 */
+.sig-table .cp-btn{margin:4px 0 0}                                   /* Call prep lines up under the call title */
+.pill-btn{font:600 12.5px var(--font);color:var(--lm-blue);background:var(--surface-2);border:1px solid transparent;border-radius:999px;padding:5px 12px;cursor:pointer;white-space:nowrap}
+.pill-btn:hover{border-color:var(--lm-blue)}
+.pill-btn:disabled{opacity:.6;cursor:default}
+td.txt,th.txt{text-align:left!important}                             /* text columns read left to right */
+p,.mrr-sync,.merlin-bubble,.loop-bubble{text-wrap:pretty}            /* no single word left on the last line */

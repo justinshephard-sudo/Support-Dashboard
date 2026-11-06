@@ -129,7 +129,7 @@ function ptRender() {
     <div class="pt-toolbar">
       <div class="mrr-seg">${[[true, 'Active firms'], [false, 'All firms']].map(([v, l]) => `<button type="button" data-pt-active="${v}" aria-pressed="${PT.active === v}">${l}</button>`).join('')}</div>
       <span class="muted">ChurnZero · as of ${esc(updated)}</span>
-      <button type="button" class="cal-more" data-pt-refresh>Refresh</button>
+      <button type="button" class="pill-btn" data-pt-refresh>↻ Refresh</button>
     </div>
 
     <div class="section-head"><h2>New this week</h2><span class="rule"></span><span class="note">Start date in the last 7 days</span></div>
@@ -165,7 +165,7 @@ function ptRender() {
               ${shown.map((p) => `<tr class="pt-row" data-pt-partner="${g.key}" data-name="${esc(p.name)}"><td>${p.name === PT_NONE ? `<span class="muted">${PT_NONE}</span>` : esc(p.name)}</td>
                 <td class="num">${PT.active ? p.active : p.firms.length}</td><td class="num">${ptMoney(p.mrr)}</td><td class="num">${p.recent || '<span class="muted">0</span>'}</td></tr>`).join('')}
             </tbody></table>
-            ${partners.length > PT_TOP ? `<button type="button" class="cal-more" data-pt-all="${g.key}">${PT.all[g.key] ? 'Show fewer' : `Show all ${partners.length}`}</button>` : ''}
+            ${partners.length > PT_TOP ? `<button type="button" class="pill-btn" data-pt-all="${g.key}">${PT.all[g.key] ? 'Show fewer' : `Show all ${partners.length}`}</button>` : ''}
           </div>
         </div>
       </section>`;

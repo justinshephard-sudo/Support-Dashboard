@@ -105,7 +105,7 @@ async function renderSignals() {
   const rep = IMPL.rep && IMPL.rep !== IMPL_NONE ? IMPL.rep : '';
   el.innerHTML = `<div class="section-head"><h2>Call signals</h2><span class="rule"></span>
       <span class="note">${rep ? esc(rep) + ' · ' : 'Every IM · '}Gong trackers on onboarding calls · managers only</span>
-      ${reviewedN ? `<button type="button" class="cal-more sig-rev-toggle" data-sig-showrev>${SIG.showReviewed ? 'Hide reviewed' : `Show reviewed (${reviewedN})`}</button>` : ''}
+      ${reviewedN ? `<button type="button" class="pill-btn sig-rev-toggle" data-sig-showrev>${SIG.showReviewed ? 'Hide reviewed' : `Show reviewed (${reviewedN})`}</button>` : ''}
       <div class="mrr-seg">${[[7, 'This week'], [30, 'Last 30 days']].map(([d, l]) => `<button type="button" data-sig-days="${d}" aria-pressed="${SIG.days === d}">${l}</button>`).join('')}</div></div>
     ${SIG.error ? `<div class="empty-note">${esc(SIG.error)}</div>` : `
     <div class="mrr-seg sig-chips">${chip('', 'All', calls.length)}${SIG_TRACKERS.map(([k, l]) => chip(k, l, counts[k] || 0)).join('')}</div>
@@ -125,11 +125,11 @@ async function renderSignals() {
           <td class="sig-quote">${first ? `<span class="sig-line" title="${esc(first.text)}"><span class="sig-who">${sigClock(first.t)}</span> “${sigQuote(first)}”</span>` : '<span class="muted">Transcript not ready yet</span>'}
             ${q.length > 1 ? `<details><summary>${q.length - 1} more</summary>${q.slice(1).map((x) => `<p><span class="sig-who">${esc(sigInfo(x.tracker)[1])} · ${sigClock(x.t)}</span> “${sigQuote(x)}”</p>`).join('')}</details>` : ''}</td>
           <td class="nowrap">${c.reviewed
-            ? `<span class="sig-rev-by" title="${esc(c.reviewed.by)} · ${esc(c.reviewed.at ? new Date(c.reviewed.at).toLocaleString() : '')}">✓ ${esc(who.charAt(0).toUpperCase() + who.slice(1))}</span> <button type="button" class="cal-more" data-sig-review="${esc(c.id)}" data-undo="1">Undo</button>`
+            ? `<span class="sig-rev-by" title="${esc(c.reviewed.by)} · ${esc(c.reviewed.at ? new Date(c.reviewed.at).toLocaleString() : '')}">✓ ${esc(who.charAt(0).toUpperCase() + who.slice(1))}</span> <button type="button" class="pill-btn" data-sig-review="${esc(c.id)}" data-undo="1">Undo</button>`
             : `<button type="button" class="cp-btn" data-sig-review="${esc(c.id)}">Reviewed</button>`}</td>
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 5 : 6}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
-    </table></div>${matching.length > SIG_TOP ? `<button type="button" class="cal-more sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
+    </table></div>${matching.length > SIG_TOP ? `<button type="button" class="pill-btn sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
     <p class="impl-note">What customers said that set off the Gong trackers ${SIG_TRACKERS.map(([k]) => `“${esc(k)}”`).join(', ')} on the IMs’ calls. Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
 }
 

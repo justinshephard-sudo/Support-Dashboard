@@ -527,9 +527,10 @@ function renderImplOverList() {
   const start = implOverPage * IMPL_OVER_PAGE_SIZE;
   const shown = over.slice(start, start + IMPL_OVER_PAGE_SIZE);
   const table = document.getElementById('impl-over');
-  table.querySelector('thead').innerHTML = `<tr>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr>`;
+  const txt = (k) => (['Status', 'Stage', 'Specialist', 'AccountManager'].includes(k) ? ' class="txt"' : '');
+  table.querySelector('thead').innerHTML = `<tr>${cols.map(([k, l]) => `<th${txt(k)}>${esc(l)}</th>`).join('')}</tr>`;
   table.querySelector('tbody').innerHTML = shown.length
-    ? shown.map((f) => `<tr>${cols.map(([k]) => `<td>${esc(f[k] || '–')}</td>`).join('')}</tr>`).join('')
+    ? shown.map((f) => `<tr>${cols.map(([k]) => `<td${txt(k)}>${esc(f[k] || '–')}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${cols.length}">No open onboardings at 70+ days.</td></tr>`;
 
   const pager = document.getElementById('impl-over-pager');

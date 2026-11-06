@@ -737,7 +737,7 @@ function mrrChartOpts(o) {
   const tick = cssVar('--faint'), grid = cssVar('--border');
   const fmt = (v) => (o.pct ? v + '%' : o.count ? v : (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US'));
   const valueAxis = { stacked: !!o.stacked, beginAtZero: true, grid: { color: grid }, ticks: { color: tick, callback: fmt, precision: 0 }, max: o.max };
-  const catAxis = { stacked: !!o.stacked, grid: { display: false }, ticks: { color: cssVar('--text-2'), font: { weight: 600 }, autoSkip: !o.horizontal } };
+  const catAxis = { stacked: !!o.stacked, grid: { display: false }, ticks: { color: cssVar('--text-2'), font: { weight: 600 }, autoSkip: !o.horizontal, maxRotation: o.horizontal ? undefined : 0 } };
   const scales = o.horizontal ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis };
   if (o.dual) scales.y2 = { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { color: tick, precision: 0 } };
   return {
