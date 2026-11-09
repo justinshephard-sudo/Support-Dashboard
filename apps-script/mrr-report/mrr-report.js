@@ -501,7 +501,7 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm10_';
+var CSM_CACHE = 'csm11_';
 var HEALTH = { good: 33, bad: 67 };      // churn score: lower is healthier — good under 33, bad 67+
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
@@ -644,12 +644,17 @@ function readHealth_(skip) {
   }).map(function (r) {
     var sc = String(r['ChurnScore#']).trim();
     var done = String(r['OnboardingCompletedDate#'] || '').trim();
+    var end = String(r['ContractEnd#'] || '').trim();
+    // Renewal-risk flags besides health: cancellation flagged in ChurnZero, set not to renew, invoice overdue.
+    var flags = [/^yes$/i.test(String(r['CancellationRequested#'])) || /^yes$/i.test(String(r['DangerZone#'])) ? 'cancel' : '',
+      /^yes$/i.test(String(r['NonRenewing#'])) ? 'nonrenew' : '', String(r['Overdue#'] || '').trim() ? 'overdue' : ''].filter(Boolean).join(',');
     return [String(r['Name#']).trim(), name_(r['AccountManager#']), sc === '' ? null : Number(sc), money_(r['MRR#']), firmId_(r['FirmId#']),
-      /^\d{4}-\d{2}-\d{2}$/.test(done) ? done : ''];
+      /^\d{4}-\d{2}-\d{2}$/.test(done) ? done : '', /^\d{4}-\d{2}-\d{2}$/.test(end) ? end : '', flags];
   });
   // hasDone: the Accounts sync has started copying OnboardingCompletedDate (the CSM tab says "after the next sync" until then).
   var hasDone = rows.length > 0 && 'OnboardingCompletedDate#' in rows[0];
-  return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts, hasDone: hasDone };
+  var hasRenewals = rows.length > 0 && 'ContractEnd#' in rows[0];
+  return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts, hasDone: hasDone, hasRenewals: hasRenewals };
 }
 
 // firms: [company, am, coverage % (null = too few new leads to grade), leads, scored, engaged, credits $, add-on MRR, firmId]

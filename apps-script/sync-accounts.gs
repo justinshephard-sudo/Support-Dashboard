@@ -40,6 +40,9 @@ var CZ_COLUMNS = [
   'OnboardingCompletedDate',
   // Firm Lookup's overdue flag: "amount|invoices|oldest due yyyy-MM-dd", or blank.
   'Overdue',
+  // Renewal radar (CSM tab): the soonest Chargebee contract-term end (annual contracts only; month-to-month
+  // subscriptions have no contract term), yyyy-MM-dd, and "Yes" if a subscription is set not to renew.
+  'ContractEnd', 'NonRenewing',
 ];
 
 var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmount', 'NextRenewalDate', 'LicenseCount',
@@ -182,6 +185,8 @@ function accountToRow_(a, ctx) {
     AddOns: addOnSummary_(ctx.addOns[acctId]),
     InvoiceBalance: balanceSummary_(ctx.unpaid[acctId]),
     Overdue: overdueSummary_(ctx.unpaid[acctId]),
+    ContractEnd: contractEnd_(ctx.subs[acctId]),
+    NonRenewing: (ctx.subs[acctId] || []).some(function (s) { return String(s.Status || '').toLowerCase() === 'non_renewing'; }) ? 'Yes' : '',
     LegacyContract: legacySummary_(ctx.legacy[acctId]),
     ChurnCategory: cf.ChurnCategory || '',
     ChurnDetails: String(cf.ChurnDetails || '').slice(0, 600),
@@ -242,6 +247,12 @@ function pickSub_(subs) {
   var active = subs.filter(function (s) { return String(s.Status || '').toLowerCase() === 'active'; });
   var pool = active.length ? active : subs;
   return pool.slice().sort(function (a, b) { return new Date(b.CreatedAt || 0) - new Date(a.CreatedAt || 0); })[0];
+}
+// Soonest contract-term end among live subscriptions (active / non-renewing), yyyy-MM-dd, or ''.
+function contractEnd_(subs) {
+  var ends = (subs || []).filter(function (s) { return /^(active|non_renewing)$/i.test(String(s.Status || '')) && s.ContractTermContractEnd; })
+    .map(function (s) { return String(s.ContractTermContractEnd).slice(0, 10); }).sort();
+  return ends[0] || '';
 }
 function planSummary_(subs) { var s = pickSub_(subs); return s ? (s.PlanId || '') : ''; }
 function subStart_(subs) { var s = pickSub_(subs); return s ? fmtDate_(s.CreatedAt || s.StartDate || '') : ''; }
