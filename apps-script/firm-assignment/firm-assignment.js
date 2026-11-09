@@ -56,9 +56,9 @@ var TIER_DEFAULT = { reps: {}, min: 1000 };
    The IM and CSM go into two text fields that sync with Salesforce; a ChurnZero play sets the
    roles from them (the roles themselves can't be written through the API). Partner-sourced firms
    get Kennedy for both. Names as they appear in ChurnZero. */
-// Max Castro moves from Support to IM on 2027-01-01. A name with no active ChurnZero user is left out
-// of the rotation until it has one (Max has no ChurnZero user yet).
-var IM_ROSTER = ['Callie Burns', 'Admir Karamovic', 'Andy Galindo', 'Swetha Devakumar', 'Max Castro'];
+// Max Castro and Rosa Flores move from Support to IM on 2027-01-01. A name with no active ChurnZero
+// user is left out of the rotation until it has one (neither has a ChurnZero user yet).
+var IM_ROSTER = ['Callie Burns', 'Admir Karamovic', 'Andy Galindo', 'Swetha Devakumar', 'Max Castro', 'Rosa Flores'];
 var CSM_ROSTER = ['Elliott Jones', 'Julio Ortiz', 'Jessie Hobbs'];   // biggest firms first
 var CSM_MIN = 400;                        // a CSM only when MRR is over this
 var CSM_BANDS_DEFAULT = { top: 850, mid: 550 };   // ≈ thirds of 2026's new firms over $400
