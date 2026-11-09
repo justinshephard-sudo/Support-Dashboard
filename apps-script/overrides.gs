@@ -24,6 +24,13 @@ function doPost(e) {
     try { return dashJson_(refreshChurnReasons_()); }
     catch (err) { console.error(err); return dashJson_({ ok: false, error: 'Couldn’t refresh churn reasons from ChurnZero.' }); }
   }
+  // An IM just closed an onboarding (anyone signed in): rebuild the Implementation tabs in a minute,
+  // so the firm leaves everyone's open list without waiting for the 5am sync. Back-to-back closes
+  // share one re-sync (scheduleImplResync_ replaces a pending one).
+  if (body.action === 'resyncImpl') {
+    try { scheduleImplResync_(); return dashJson_({ ok: true }); }
+    catch (err) { console.error(err); return dashJson_({ ok: false, error: 'Couldn’t schedule the Implementation refresh.' }); }
+  }
   if (!who.manager) return dashJson_({ ok: false, error: 'Only managers can do that.' });
   if (body.action === 'exclude' || body.action === 'unexclude') {
     try { return dashJson_(handleExclusion_(body, who)); }

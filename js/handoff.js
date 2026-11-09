@@ -16,6 +16,15 @@ function handoffClose() {
   document.getElementById('handoff')?.remove();
   document.removeEventListener('keydown', handoffKey);
 }
+// After a close: ask the data sheet's web app to rebuild the Implementation tabs in a minute, so the
+// firm leaves everyone's open list. Best effort; the 5am sync catches anything missed.
+function handoffResyncImpl() {
+  fetch(EXCL_URL, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ token: AUTH.token, action: 'resyncImpl' }),
+  }).catch(() => { /* the morning sync covers it */ });
+}
+
 function handoffKey(e) { if (e.key === 'Escape') handoffClose(); }
 
 const HO_MOOD = { Positive: '😊', Neutral: '😐', Negative: '😟' };
@@ -99,13 +108,15 @@ async function openHandoff(firmId, name) {
         <p>${esc(f.name)} is marked <b>${esc(res.outcome)}</b>${res.ownerMovedTo ? ` and the Owner moved to ${esc(res.ownerMovedTo)}` : ''}.
           ${res.dryRun ? `<br><b>Dry run — nothing was written.</b> Would set: ${esc(res.wouldWrite.join(' · '))}.` : res.confirmed ? '' : 'ChurnZero hasn’t shown it yet — it can take a minute.'}
           ${res.unsaved ? `${res.unsaved} answer${res.unsaved === 1 ? ' was' : 's were'} logged but not sent to ChurnZero yet (fields still to be connected).` : ''}
-          The Implementation numbers update with the next sync.</p>
+          ${res.dryRun ? 'The Implementation numbers update with the next sync.' : 'It leaves everyone’s open onboardings and the Implementation numbers update in about two minutes.'}</p>
         <button type="button" class="mgr-btn" data-ho-cancel>Done</button></div>`;
       body.querySelector('[data-ho-cancel]').addEventListener('click', handoffClose);
       // Johnny and Merlin dance for a completed onboarding (not for never engaged / third party).
       if (res.outcome === 'Complete') obDanceParty(f.name, res);
       if (res.dryRun) return;
       IMPL.open = IMPL.open.filter((r) => String(r.FirmId) !== String(firmId));
+      if (typeof CSM !== 'undefined') CSM.handoffs = null;   // the CSM page reloads its completed list
+      handoffResyncImpl();
       document.querySelectorAll(`#impl-drill [data-close-firm="${CSS.escape(String(firmId))}"]`).forEach((b) => { b.closest('tr').classList.add('row-muted'); b.replaceWith(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'Closed' })); });
     } catch (err) {
       msg.className = 'fa-msg err';

@@ -72,7 +72,8 @@ function scheduleImplResync_() {
   ScriptApp.newTrigger('resyncImplementationAfterExclusion').timeBased().after(60 * 1000).create();
 }
 
-// One-off trigger target: rebuilds the Implementation tabs, then removes itself.
+// One-off trigger target: rebuilds the Implementation tabs, then removes itself. Also scheduled
+// when an IM closes an onboarding (overrides.gs, action resyncImpl).
 function resyncImplementationAfterExclusion() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'resyncImplementationAfterExclusion') ScriptApp.deleteTrigger(t);
