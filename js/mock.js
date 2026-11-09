@@ -33,6 +33,9 @@ function mockSeed() {
       { id: 98, name: 'Andy Galindo', open: 15, openMrr: 7420, firms: 120, mrr: 61200, lastStart: MOCK_DAY(3), included: true, high: false },
       { id: 104, name: 'Admir Karamovic', open: 18, openMrr: 12850, firms: 140, mrr: 90310, lastStart: MOCK_DAY(1), included: true, high: true },
       { id: 112, name: 'Swetha Devakumar', open: 9, openMrr: 3980, firms: 45, mrr: 21400, lastStart: MOCK_DAY(6), included: true, high: false },
+      // New IMs from Support on 2027-01-01: no book yet.
+      { id: 120, name: 'Max Castro', open: 0, openMrr: 0, firms: 0, mrr: 0, lastStart: MOCK_DAY(30), included: true, high: false },
+      { id: 121, name: 'Rosa Flores', open: 0, openMrr: 0, firms: 0, mrr: 0, lastStart: MOCK_DAY(30), included: true, high: false },
     ],
     csms: [
       { id: 7, name: 'Elliott Jones', open: 19, openMrr: 26413, firms: 133, mrr: 231549, lastStart: MOCK_DAY(4), included: true },
@@ -294,6 +297,28 @@ const MOCK_ACTIONS = {
   setRotation: mockSet, setTier: mockSet, setCsmBands: mockSet,
 };
 
+/* Read-only preview (localhost only, on unless turned off from the banner): every web-app call that
+   isn't a known read is answered here with "nothing was saved", and nothing but GETs reach Google's
+   APIs. Test data (below) still fakes New Firm Assignment and Close onboarding on top of this. */
+const RO_KEY = 'cs-readonly';
+const RO_ON = LOCAL_ENV && (() => { try { return localStorage.getItem(RO_KEY) !== 'off'; } catch (e) { return true; } })();
+const RO_READS = new Set(['load', 'csm', 'handoffs', 'get', 'page', 'prepStatus', 'handoffStart']);
+const RO_BLOCKED = [];
+
+if (RO_ON) {
+  const passFetch = window.fetch;
+  window.fetch = async (url, opts = {}) => {
+    const u = String(url), method = String(opts.method || 'GET').toUpperCase();
+    let action = '';
+    try { action = JSON.parse(opts.body || '{}').action || ''; } catch (e) { /* not JSON */ }
+    const write = method !== 'GET' && (/script\.google(usercontent)?\.com\/macros/.test(u) ? !RO_READS.has(action) : /googleapis\.com/.test(u));
+    if (!write) return passFetch(url, opts);
+    RO_BLOCKED.push({ url: u.split('?')[0], action: action || '(no action)', at: new Date().toISOString() });
+    console.warn('Read-only preview: blocked', action || method, u.split('?')[0]);
+    return new Response(JSON.stringify({ ok: false, error: 'Read-only preview: nothing was saved.' }), { headers: { 'Content-Type': 'application/json' } });
+  };
+}
+
 if (LOCAL_ENV) {
   if (MOCK_ON) {
     mockLoadState();
@@ -323,8 +348,10 @@ if (LOCAL_ENV) {
     const banner = document.querySelector('.local-banner');
     if (!banner) return;
     if (MOCK_ON) banner.textContent += ' · TEST DATA: New Firm Assignment, Close onboarding and the CSM handoffs are made up';
+    if (RO_ON) banner.textContent += ' · READ-ONLY: nothing is saved anywhere';
     const btn = (label, fn) => Object.assign(document.createElement('button'), { type: 'button', className: 'local-banner-btn', textContent: label, onclick: fn });
     banner.append(btn(MOCK_ON ? 'Turn test data off' : 'Use test data', () => { try { localStorage.setItem(MOCK_KEY, MOCK_ON ? 'off' : 'on'); } catch (e) { /* */ } location.reload(); }));
     if (MOCK_ON) banner.append(btn('Reset test data', () => { try { localStorage.removeItem(MOCK_STATE); } catch (e) { /* */ } location.reload(); }));
+    banner.append(btn(RO_ON ? 'Allow saving' : 'Back to read-only', () => { try { localStorage.setItem(RO_KEY, RO_ON ? 'off' : 'on'); } catch (e) { /* */ } location.reload(); }));
   });
 }
