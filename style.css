@@ -1199,3 +1199,8 @@ tr.sp-disc-row td{padding-top:0}
 td.txt,th.txt{text-align:left!important}                             /* text columns read left to right */
 p,.mrr-sync,.merlin-bubble,.loop-bubble{text-wrap:pretty}            /* no single word left on the last line */
 #manual-tiles .tile .label{min-height:4.05em}                         /* one label here runs to three lines */
+
+/* Excluded firms in pop-ups: listed, struck through, not counted */
+.excl-row td{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--text-3) 70%,transparent);color:var(--text-3)}
+.excl-row td .csm-pill{opacity:.55}
+.excl-tag{display:inline-block;text-decoration:none;margin-left:6px;font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--text-2);background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:1px 7px;vertical-align:middle}

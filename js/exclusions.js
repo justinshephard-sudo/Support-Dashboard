@@ -24,18 +24,40 @@ function loadExclusions(force) {
 }
 const exclScopeOf = (id) => (EXCL.rows.find((r) => r.id === exclKey(id)) || {}).scope || '';
 const isExcludedFrom = (id, area) => ['Both', area].includes(exclScopeOf(id));
-const exclRowsFor = (area) => EXCL.rows.filter((r) => r.scope === 'Both' || r.scope === area);
-
-// Drop IM-excluded firms from the Implementation pop-up lists right away; the tiles catch up
-// when the sync re-runs.
-function exclApplyImpl() {
-  IMPL.open = IMPL.open.filter((f) => !isExcludedFrom(f.FirmId, 'IM'));
-  IMPL.events = IMPL.events.filter((e) => !isExcludedFrom(e.FirmId, 'IM'));
+// Who each excluded firm belongs to, from the firm rows already loaded on the page (IM lists, CSM data).
+function exclAmOf(id) {
+  id = exclKey(id);
+  const im = (typeof IMPL !== 'undefined' ? IMPL.open.concat(IMPL.events) : []).find((f) => exclKey(f.FirmId) === id);
+  if (im && im.AccountManager) return im.AccountManager;
+  const x = (typeof CSM !== 'undefined' && CSM.data && CSM.data.x) || {};
+  const h = ((x.health || {}).accounts || []).find((a) => exclKey(a[4]) === id);
+  if (h && h[1]) return h[1];
+  const f = ((x.history || {}).firms || []).find((r) => exclKey(r[6]) === id);
+  return f ? f[1] || '' : '';
 }
+// The excluded firms that apply to a tab. Reps only see the ones on their own book; managers see all.
+function exclRowsFor(area) {
+  const rows = EXCL.rows.filter((r) => r.scope === 'Both' || r.scope === area);
+  if (isManager()) return rows;
+  const names = [...new Set(EXCL.rows.map((r) => exclAmOf(r.id)).filter(Boolean)
+    .concat(typeof IMPL !== 'undefined' ? IMPL.open.map((f) => f.AccountManager) : []))];
+  const me = myRepName(names);
+  return me ? rows.filter((r) => exclAmOf(r.id) === me) : [];
+}
+// Struck-through rows in the pop-ups: the firm is listed but doesn't count toward any number.
+const exclTag = () => ' <span class="excl-tag" title="Excluded from these numbers by a manager">Excluded</span>';
+const exclRow = (on) => (on ? ' class="excl-row"' : '');
+
+// Mark IM-excluded firms in the Implementation lists (the sync writes them with Excluded = 1; a change made
+// on the page applies straight away). They stay in the pop-ups, struck through, and never count.
+function exclApplyImpl() {
+  IMPL.open.concat(IMPL.events).forEach((f) => { f._excl = f.Excluded === '1' || isExcludedFrom(f.FirmId, 'IM'); });
+}
+const implCounted = (rows) => rows.filter((f) => !f._excl);
 
 // The "Exclude" button on a firm row — Manager mode only.
 function exclButton(id, name, area) {
-  if (!overridesUnlocked || !exclKey(id)) return '';
+  if (!overridesUnlocked || !exclKey(id) || isExcludedFrom(id, area)) return '';
   return `<button type="button" class="excl-btn" data-excl="${esc(exclKey(id))}" data-name="${esc(name || '')}" data-area="${area}" title="Take this firm out of the ${area} numbers">Exclude</button>`;
 }
 // The "Excluded firms (n)" link at the top of the IM and CSM tabs: everyone sees it when firms are

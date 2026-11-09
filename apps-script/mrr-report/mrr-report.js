@@ -501,7 +501,7 @@ function addMonths_(d, n) { var x = new Date(d); x.setMonth(x.getMonth() + n); r
 var MONTH_END_TAB = 'CSM Retention Months';
 var HISTORY_TAB = 'CSM Firm History';
 // Bump the version whenever buildCsm_'s shape changes, so an older cached copy is never served.
-var CSM_CACHE = 'csm9_';
+var CSM_CACHE = 'csm10_';
 var HEALTH = { good: 33, bad: 67 };      // churn score: lower is healthier — good under 33, bad 67+
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
 // them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
@@ -533,8 +533,15 @@ function buildCsm_(force) {
   var skip = readExcluded_();
   var ai;
   try { ai = readAiHealth_(skip); } catch (e) { console.error(e && e.stack || e); ai = { error: 'Couldn’t read Merlin AI usage.' }; }
+  // The excluded firms on their own (same row shapes), so the page can list them struck through in the
+  // pop-ups without counting them anywhere.
+  var only = { __only: skip }, x = {};
+  try {
+    x = { history: { firms: (readFirmHistory_(only).firms || []) }, health: { accounts: (readHealth_(only).accounts || []) } };
+    x.ai = { firms: ((ai && !ai.error) ? (readAiHealth_(only).firms || []) : []) };
+  } catch (e) { console.error(e && e.stack || e); x = {}; }
   return { ok: true, built: Date.now(), history: readFirmHistory_(skip), health: readHealth_(skip), months: repMonths_(force, skip), ai: ai,
-    excluded: Object.keys(skip) };
+    excluded: Object.keys(skip), x: x };
 }
 
 // Per-rep totals for the last 13 months, from the MRR copy already in the cache, so the CSM
@@ -579,7 +586,7 @@ function readFirmHistory_(skip) {
   var now = monthKey_(new Date()), checkpoint = shift(now, -1);
   var first = rows.length ? ymNorm_(rows[0]['First Snapshot#']) : '';
   var firms = rows.filter(function (r) {
-    return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0 && !skip[firmId_(r['Firm ID#'])];
+    return ymNorm_(r['Signup Month#']) && money_(r['Start MRR#']) > 0 && !dropFirm_(skip, firmId_(r['Firm ID#']));
   }).map(function (r) {
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), ymNorm_(r['Signup Month#']), money_(r['Start MRR#']),
       money_(r['Last Month MRR#']), money_(r['MRR Now#']), firmId_(r['Firm ID#']),
@@ -633,7 +640,7 @@ function readHealth_(skip) {
   var rows = rows_(sh);
   var accounts = rows.filter(function (r) {
     return String(r['ContractStatus#']).trim() !== 'Inactive' && money_(r['MRR#']) > 0 && String(r['AccountManager#']).trim()
-      && !skip[firmId_(r['FirmId#'])];
+      && !dropFirm_(skip, firmId_(r['FirmId#']));
   }).map(function (r) {
     var sc = String(r['ChurnScore#']).trim();
     var done = String(r['OnboardingCompletedDate#'] || '').trim();
@@ -662,7 +669,7 @@ function readAiHealth_(skip) {
     if (r['pulled_at#'] && r['pulled_at#'] > asOf) asOf = r['pulled_at#'];
   });
   var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the query = no leads and no AI use
-  var firms = rows_(list).filter(function (r) { return !skip[firmId_(r['Firm ID#'])]; }).map(function (r) {
+  var firms = rows_(list).filter(function (r) { return !dropFirm_(skip, firmId_(r['Firm ID#'])); }).map(function (r) {
     var u = byCustomer[String(r['Customer ID#']).trim()] || byFirm[firmId_(r['Firm ID#'])] || none;
     var cov = u.leads >= AI_HEALTH.minLeads ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#'])];
@@ -726,6 +733,13 @@ function writeAiUsage_(head, rows) {
   var sh = ss.getSheetByName(AI_USAGE_TAB) || ss.insertSheet(AI_USAGE_TAB);
   sh.clearContents();
   sh.getRange(1, 1, out.length, head.length).setNumberFormat('@').setValues(out);
+}
+
+// skip = { firmId: true } leaves those firms out; { __only: { firmId: true } } keeps ONLY those firms
+// (used to list the excluded ones on their own).
+function dropFirm_(skip, id) {
+  if (skip && skip.__only) return !skip.__only[id];
+  return !!(skip && skip[id]);
 }
 
 // { firmId: true } for firms managers excluded from CSM (scope "CSM" or "Both").

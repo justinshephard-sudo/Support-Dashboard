@@ -106,11 +106,26 @@ function csmMonth(ym, rep) {
   return { net: t[0], expansion: t[1], changes: t[2], aiAdded: t[3], aiRemoved: t[4] };
 }
 
-// The firms behind a card's growth / AI numbers (needs the full MRR event list).
+// The firms behind a card's growth / AI numbers (needs the full MRR event list). Firms managers took out
+// of the CSM numbers are added at the end, marked _excl: listed struck through, never counted.
 function csmMonthRows(ym, rep) {
-  const skip = new Set(CSM.data.excluded || []);   // firms managers took out of the CSM numbers
-  const rows = MRR.all.filter((e) => e.ym === ym && mrrAm(e) === rep && !skip.has(String(e.firm)));
+  const skip = new Set(CSM.data.excluded || []);
+  const mine = MRR.all.filter((e) => e.ym === ym && mrrAm(e) === rep);
+  const rows = mine.filter((e) => !skip.has(String(e.firm)))
+    .concat(mine.filter((e) => skip.has(String(e.firm))).map((e) => Object.assign({}, e, { _excl: true })));
   return { rows, aiRows: rows.filter((e) => e.ai) };
+}
+
+// Runs a CSM calculation over ONLY the excluded firms (the backend sends them separately in data.x),
+// so a pop-up can list them struck through under the counted ones. Returns null if there are none.
+function csmExcluded(fn) {
+  const x = CSM.data && CSM.data.x;
+  if (!x || !(CSM.data.excluded || []).length) return null;
+  const saved = { history: CSM.data.history, health: CSM.data.health, ai: CSM.data.ai };
+  CSM.data.history = Object.assign({}, saved.history, { firms: (x.history || {}).firms || [] });
+  CSM.data.health = Object.assign({}, saved.health, { accounts: (x.health || {}).accounts || [] });
+  CSM.data.ai = Object.assign({}, saved.ai, { firms: (x.ai || {}).firms || [] });
+  try { return fn(); } catch (e) { return null; } finally { Object.assign(CSM.data, saved); }
 }
 
 async function csmWithEvents(fn) {
@@ -271,6 +286,9 @@ function csmRetentionDrill(kind, rep) {
   const then = (f) => f[3], now = r.val, delta = (f) => now(f) - then(f);
   const rows = r.book.slice().sort((x, y) => delta(x) - delta(y));
   const lost = rows.filter((f) => now(f) === 0).length;
+  const xr = csmExcluded(() => csmRetention(kind, rep || null));
+  const xs = new Set(xr ? xr.book : []);
+  const listed = rows.concat([...xs]);
   const when = r.cohort ? `the end of ${esc(mrrYmLabel(r.checkpoint))}` : 'now';
   const scope = r.cohort
     ? `${mrrPlural(rows.length, 'firm')} that signed up in ${esc(mrrYmLabel(r.cohort))} and just completed month ${kind}`
@@ -282,32 +300,36 @@ function csmRetentionDrill(kind, rep) {
       <b>NRR</b> = ${mrrMoney(r.now)} ÷ ${mrrMoney(r.start)}; upgrades count, so it can go over 100%.
       <b>GRR</b> counts each firm at no more than its starting MRR, so it only shows what was kept (cancellations and downgrades).
       Firms count for their current AM, or the AM they had when they cancelled.${kind === 'bob' ? ` Firms already paying in ${esc(mrrYmLabel(h.first))}, when the snapshots begin, start from that month.` : ''}</p></div>
-    ${rows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR ${r.cohort ? 'end of ' + esc(mrrYmLabel(r.checkpoint)) : 'now'}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map((f) => `<tr><td>${esc(f[0])}${now(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(then(f))}</td><td>${mrrMoney(now(f))}</td><td><b class="${delta(f) >= 0 ? 'pos' : 'neg'}">${mrrMoney(delta(f), true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
+    ${listed.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR ${r.cohort ? 'end of ' + esc(mrrYmLabel(r.checkpoint)) : 'now'}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${listed.map((f) => `<tr${exclRow(xs.has(f))}><td>${esc(f[0])}${now(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}${xs.has(f) ? exclTag() : ''}</td>${rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(then(f))}</td><td>${mrrMoney(now(f))}</td><td><b class="${delta(f) >= 0 ? 'pos' : 'neg'}">${mrrMoney(delta(f), true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>` : '<div class="empty-note">No firms in this group.</div>'}`);
 }
 
 function csmHealthDrill(rep) {
   const h = csmHealth(rep);
   const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', 'Unscored']];
-  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (b[2] ?? -1) - (a[2] ?? -1)).map((a) => ({ a, k, l })));   // highest (worst) score first
+  const xh = csmExcluded(() => csmHealth(rep));
+  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (b[2] ?? -1) - (a[2] ?? -1)).map((a) => ({ a, k, l })))   // highest (worst) score first
+    .concat(xh ? order.flatMap(([k, l]) => xh[k].map((a) => ({ a, k, l, x: true }))) : []);
   MRR.drill = null;
   mrrModal(`${rep} — account health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} unscored` : ''} · worst first`,
     `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th><th>Health</th><th>Churn score</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map(({ a, k, l }) => `<tr><td>${esc(a[0])}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${a[2] == null ? '—' : Math.round(a[2])}</td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`).join('')}
+      ${rows.map(({ a, k, l, x }) => `<tr${exclRow(x)}><td>${esc(a[0])}${x ? exclTag() : ''}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${a[2] == null ? '—' : Math.round(a[2])}</td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>`);
 }
 
 function csmFreshDrill(rep) {
   const r = csmFresh(rep || null);
+  const xf = csmExcluded(() => csmFresh(rep || null));
+  const listed = r.firms.concat(xf ? xf.firms.map((e) => Object.assign({ x: true }, e)) : []);
   const team = !rep;
   rep = rep || 'Team';
   const fmt = (d) => new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   const grade = (a) => (a[2] == null ? ['none', 'Unscored'] : a[2] < CSM_HEALTH.good ? ['good', 'Good'] : a[2] < CSM_HEALTH.bad ? ['okay', 'Okay'] : ['bad', 'Bad']);
   MRR.drill = null;
   mrrModal(`${rep} — first 90 days`, `${mrrPlural(r.firms.length, 'account')} finished onboarding in the last ${CSM_FRESH_DAYS} days · ${r.bands[0]} in days 1–30 · ${r.bands[1]} in 31–60 · ${r.bands[2]} in 61–90 · newest first`,
-    r.firms.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th>${team ? '<th>Rep</th>' : ''}<th>Onboarding completed</th><th>Day</th><th>Days left</th><th>Health</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${r.firms.map(({ a, age }) => { const [k, l] = grade(a); return `<tr><td>${esc(a[0])}</td>${team ? `<td>${esc(a[1])}</td>` : ''}<td>${esc(fmt(a[5]))}</td><td>${age + 1} of ${CSM_FRESH_DAYS}</td><td>${CSM_FRESH_DAYS - age - 1}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
+    listed.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th>${team ? '<th>Rep</th>' : ''}<th>Onboarding completed</th><th>Day</th><th>Days left</th><th>Health</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${listed.map(({ a, age, x }) => { const [k, l] = grade(a); return `<tr${exclRow(x)}><td>${esc(a[0])}${x ? exclTag() : ''}</td>${team ? `<td>${esc(a[1])}</td>` : ''}<td>${esc(fmt(a[5]))}</td><td>${age + 1} of ${CSM_FRESH_DAYS}</td><td>${CSM_FRESH_DAYS - age - 1}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
     </tbody></table></div>` : '<div class="empty-note">No active accounts finished onboarding in the last 90 days.</div>');
 }
 
@@ -316,14 +338,16 @@ function csmAiHealthDrill(rep) {
   const h = csmAiHealth(rep);
   const few = `Under ${d.minLeads || 5} leads`;
   const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', few]];
-  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (a[2] ?? 999) - (b[2] ?? 999)).map((f) => ({ f, k, l })));
+  const xh = csmExcluded(() => csmAiHealth(rep));
+  const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (a[2] ?? 999) - (b[2] ?? 999)).map((f) => ({ f, k, l })))
+    .concat(xh ? order.flatMap(([k, l]) => xh[k].map((f) => ({ f, k, l, x: true }))) : []);
   const asOf = d.asOf ? `usage as of ${new Date(d.asOf).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'usage from a one-time Metabase export';
   MRR.drill = null;
   mrrModal(`${rep} — Merlin AI health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} with under ${d.minLeads || 5} new leads (not graded)` : ''} · ${asOf}`,
     `<div class="mrr-method"><p><b>Coverage</b> = new leads Merlin scored or worked with Engage in the last 30 days ÷ the firm’s new leads in that time, capped at 100% (re-scoring older leads can push it over).
       Good is ${d.good}%+, okay ${d.bad}–${d.good}%, bad under ${d.bad}%. Firms with fewer than ${d.minLeads || 5} new leads aren’t graded. Every firm paying for the AI credits add-on is included, whenever it was added.</p></div>
     <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Health</th><th>Coverage</th><th>New leads</th><th>Scored</th><th>Engage</th><th>Credits used</th><th>Add-on MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map(({ f, k, l }) => `<tr><td>${esc(f[0])}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${f[3].toLocaleString()}</td><td>${f[4].toLocaleString()}</td><td>${f[5].toLocaleString()}</td><td>${mrrMoney(f[6])}</td><td>${mrrMoney(f[7])}</td>${overridesUnlocked ? `<td>${exclButton(f[8], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
+      ${rows.map(({ f, k, l, x }) => `<tr${exclRow(x)}><td>${esc(f[0])}${x ? exclTag() : ''}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${f[3].toLocaleString()}</td><td>${f[4].toLocaleString()}</td><td>${f[5].toLocaleString()}</td><td>${mrrMoney(f[6])}</td><td>${mrrMoney(f[7])}</td>${overridesUnlocked ? `<td>${exclButton(f[8], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>`);
 }
 
@@ -332,7 +356,7 @@ function csmAiDrill(rep) {
   MRR.drill = null;
   mrrModal(`${rep} — AI upsells, ${mrrYmLabel(CSM.ym)}`, `${mrrMoney(m.aiAdded)} added of the ${mrrMoney(CSM_AI_TARGET)} target${m.aiRemoved ? ` · ${mrrMoney(m.aiRemoved, true)} removed` : ''}`,
     m.aiRows.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>AI MRR change</th><th>Total change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${m.aiRows.sort((a, b) => b.ai - a.ai).map((e) => `<tr><td>${esc(e.company)}</td><td><b class="${e.ai >= 0 ? 'pos' : 'neg'}">${mrrMoney(e.ai, true)}</b></td><td>${mrrMoney(e.amt, true)}</td>${overridesUnlocked ? `<td>${exclButton(e.firm, e.company, 'CSM')}</td>` : ''}</tr>`).join('')}
+      ${m.aiRows.sort((a, b) => (!!a._excl - !!b._excl) || b.ai - a.ai).map((e) => `<tr${exclRow(e._excl)}><td>${esc(e.company)}${e._excl ? exclTag() : ''}</td><td><b class="${e.ai >= 0 ? 'pos' : 'neg'}">${mrrMoney(e.ai, true)}</b></td><td>${mrrMoney(e.amt, true)}</td>${overridesUnlocked ? `<td>${exclButton(e.firm, e.company, 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>` : '<div class="empty-note">No AI credits add-ons or Copilot seats added to existing firms this month yet.</div>');
 }
 
@@ -391,13 +415,17 @@ function csmCohortDrill(k, age) {
   const m = age * g.step, at = (f) => f[7][m] || 0, c = r.cells[age - 1];
   const rows = r.firms.slice().sort((x, y) => (at(x) - x[3]) - (at(y) - y[3]));
   const lost = rows.filter((f) => at(f) === 0).length;
+  const xg = csmExcluded(() => csmCohortGrid());
+  const xr = xg && xg.rows.find((x) => x.k === k);
+  const xs = new Set(xr ? xr.firms.filter((f) => f[7] && f[7].length > m) : []);
+  const listed = rows.concat([...xs]);
   const p = g.step === 3 ? `Q${age}` : `M${age}`;
   MRR.drill = null;
   mrrModal(`${o.rep || 'Team'} — ${r.label} cohort, ${p}`,
     `${o.metric.toUpperCase()} ${csmPct(c && c.v)} · ${mrrPlural(rows.length, 'firm')} · ${lost} cancelled by then · ${m} month${m === 1 ? '' : 's'} after signup`,
     `<div class="coh-back"><button type="button" class="csm-cohort-btn" data-coh-back>‹ Back to cohort analysis</button></div>
     <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th>${o.rep ? '' : '<th>AM</th>'}<th>Signed up</th><th>Starting MRR</th><th>MRR at ${p}</th><th>Change</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map((f) => { const d = at(f) - f[3]; return `<tr><td>${esc(f[0])}${at(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}</td>${o.rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(f[3])}</td><td>${mrrMoney(at(f))}</td><td><b class="${d >= 0 ? 'pos' : 'neg'}">${mrrMoney(d, true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
+      ${listed.map((f) => { const d = at(f) - f[3]; return `<tr${exclRow(xs.has(f))}><td>${esc(f[0])}${at(f) === 0 ? ' <span class="mrr-badge">cancelled</span>' : ''}${xs.has(f) ? exclTag() : ''}</td>${o.rep ? '' : `<td>${esc(f[1] || '—')}</td>`}<td>${esc(mrrYmLabel(f[2]))}</td><td>${mrrMoney(f[3])}</td><td>${mrrMoney(at(f))}</td><td><b class="${d >= 0 ? 'pos' : 'neg'}">${mrrMoney(d, true)}</b></td>${overridesUnlocked ? `<td>${exclButton(f[6], f[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
     </tbody></table></div>`, { back: () => csmCohortOpen(o.rep) });
   document.getElementById('mrrDrill').addEventListener('click', (e) => { if (e.target.closest('[data-coh-back]')) mrrCloseModal(); });
 }

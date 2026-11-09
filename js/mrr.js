@@ -654,8 +654,9 @@ const MRR_CAT_LABEL = { u: 'Upgrade', r: 'Reactivation', d: 'Downgrade', c: 'Can
 function mrrOpenDrill(title, sub, rows, kind) {
   // Churn lists run by cancel date; movement lists start with the biggest losses.
   MRR.drill = { rows, kind, sort: kind === 'churn' ? 'date' : 'amt', dir: 1 };
-  const total = mrrSum(rows);
-  mrrModal(title, `${esc(sub)} · ${mrrPlural(rows.length, 'firm')} · ${mrrMoney(total, true)}`, mrrDrillTable());
+  const counted = rows.filter((e) => !e._excl);   // excluded firms (CSM) are listed struck through, not counted
+  const total = mrrSum(counted);
+  mrrModal(title, `${esc(sub)} · ${mrrPlural(counted.length, 'firm')} · ${mrrMoney(total, true)}`, mrrDrillTable());
 }
 
 function mrrDrillTable() {
@@ -677,7 +678,7 @@ function mrrDrillTable() {
   ].filter(Boolean);
   const arrow = (k) => (k === sort ? (dir === 1 ? ' ↑' : ' ↓') : '');
   return `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr>${cols.map(([k, l]) => `<th${k ? ` data-sort="${k}" class="sortable"` : ''}>${l}${k ? arrow(k) : ''}</th>`).join('')}</tr></thead>
-    <tbody>${list.map((e) => `<tr>${cols.map((c) => `<td>${c[2](e)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <tbody>${list.map((e) => `<tr${e._excl ? ' class="excl-row"' : ''}>${cols.map((c, i) => `<td>${c[2](e)}${i === 0 && e._excl ? exclTag() : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function mrrDrillMonth(ym) { mrrOpenDrill(`Movement — ${mrrYmLabel(ym)}`, 'All existing-customer changes', MRR.all.filter((e) => e.ym === ym), 'move'); }

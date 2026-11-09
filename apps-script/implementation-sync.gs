@@ -52,9 +52,9 @@ var IMPL_HISTORY_MONTHS = 24;         // months of completion/CSAT history kept 
 var IMPL_MONTHLY_COLUMNS = ['Month', 'OpenOnboardings', 'PreKickoff', 'OpenStatus', 'NeedsScheduling', 'Over70',
   'ClosedOnboardings', 'MedianDays', 'CsatPct', 'CsatResponses', 'StageCounts', 'UpdatedAt', 'RepStats'];
 var IMPL_EVENTS_TAB = 'Impl - Firm Events';
-var IMPL_EVENT_COLUMNS = ['Type', 'Month', 'Date', 'Name', 'FirmId', 'AccountManager', 'Specialist', 'Days', 'Score', 'Comment'];
+var IMPL_EVENT_COLUMNS = ['Type', 'Month', 'Date', 'Name', 'FirmId', 'AccountManager', 'Specialist', 'Days', 'Score', 'Comment', 'Excluded'];
 var IMPL_OPEN_COLUMNS = ['Name', 'FirmId', 'Status', 'Stage', 'Specialist', 'AccountManager',
-  'DaysInOnboarding', 'NextMeeting', 'ImplementationType'];
+  'DaysInOnboarding', 'NextMeeting', 'ImplementationType', 'Excluded'];
 
 function syncImplementation() {
   var props = PropertiesService.getScriptProperties();
@@ -67,13 +67,17 @@ function syncImplementation() {
   var now = new Date();
 
   var excluded = excludedFirmIds_('IM');   // managers' "Excluded Firms" list (exclusions.gs)
-  var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
+  var eligible = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
     .filter(function (a) {
       var cf = a.Cf || {};
       var start = implStart_(a);
-      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true &&
-        start && start >= IMPL_MIN_START && !excluded[excludedFirmKey_(a.ExternalId || cf.FirmId)];
+      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true && start && start >= IMPL_MIN_START;
     });
+  var isExcl_ = function (a) { return !!excluded[excludedFirmKey_(a.ExternalId || (a.Cf || {}).FirmId)]; };
+  var accounts = eligible.filter(function (a) { return !isExcl_(a); });
+  // Excluded firms still go into the drill-down tabs (Excluded = 1) so the page can show them struck
+  // through, but they never count toward any number.
+  var exAccounts = eligible.filter(isExcl_);
   var activeIds = {}, repOf = {}, byId = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {
     activeIds[String(a.Id)] = implStart_(a);
@@ -113,17 +117,36 @@ function syncImplementation() {
       cf.ImplementationSpecialist || '', cf.AccountManager || '', days,
       next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || ''];
   });
+  exAccounts.filter(function (a) { return IMPL_OPEN_STATUSES.indexOf((a.Cf || {}).OnboardingStatus) !== -1; }).forEach(function (a) {
+    var cf = a.Cf || {}, next = nextMeeting[String(a.Id)] || '';
+    openRows.push([a.Name || '', a.ExternalId || cf.FirmId || '', cf.OnboardingStatus || '', cf.NewOnboardingCall || 'No stage set',
+      cf.ImplementationSpecialist || '', cf.AccountManager || '', Math.floor((now - implStart_(a)) / 86400000),
+      next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || '', '1']);
+  });
+  openRows.forEach(function (r) { if (r.length < IMPL_OPEN_COLUMNS.length) r.push(''); });
   openRows.sort(function (x, y) { return (Number(y[6]) || 0) - (Number(x[6]) || 0); });
 
   // --- completions per month (active firms) ---
   var events = [];        // drill-down rows for "Impl - Firm Events"
   var since = new Date(now.getFullYear(), now.getMonth() - IMPL_HISTORY_MONTHS + 1, 1);
-  function eventRow_(type, date, a, days, score, comment) {
+  function eventRow_(type, date, a, days, score, comment, excl) {
     var cf = a.Cf || {};
     return [type, Utilities.formatDate(date, tz, 'MMMM yyyy'), Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
       a.Name || '', a.ExternalId || cf.FirmId || '', cf.AccountManager || IMPL_UNASSIGNED,
-      cf.ImplementationSpecialist || '', days, score, comment];
+      cf.ImplementationSpecialist || '', days, score, comment, excl ? '1' : ''];
   }
+  // Excluded firms' completions: listed (struck through on the page), never counted.
+  var exStart = {}, exById = {};
+  exAccounts.forEach(function (a) {
+    var cf = a.Cf || {};
+    exStart[String(a.Id)] = implStart_(a);
+    exById[String(a.Id)] = a;
+    if (!cf.OnboardingCompletedDate) return;
+    if (cf.NewTimeInOnboarding != null && cf.NewTimeInOnboarding !== '' && Number(cf.NewTimeInOnboarding) < 0) return;
+    var doneAt = new Date(String(cf.OnboardingCompletedDate).slice(0, 10) + 'T12:00:00');
+    if (doneAt >= since) events.push(eventRow_('closed', doneAt, a,
+      cf.NewTimeInOnboarding == null || cf.NewTimeInOnboarding === '' ? '' : Number(cf.NewTimeInOnboarding), '', '', true));
+  });
   var completed = {};      // 'yyyy-MM' -> [days]
   var repCompleted = {};   // 'yyyy-MM' -> rep -> [days]
   accounts.forEach(function (a) {
@@ -150,6 +173,14 @@ function syncImplementation() {
   var csat = {};      // 'yyyy-MM' -> {pos, n}
   var repCsat = {};   // 'yyyy-MM' -> rep -> {pos, n}
   responses.forEach(function (r) {
+    var exS = exStart[String(r.AccountId)];
+    if (exS) {   // an excluded firm's response: listed, not counted
+      if (!r.IsPending && r.Score != null && r.ResponseDate && new Date(r.ResponseDate) >= exS) {
+        events.push(eventRow_('csat', new Date(r.ResponseDate), exById[String(r.AccountId)], '', Number(r.Score),
+          String(r.Comment || '').replace(/\s+/g, ' ').trim(), true));
+      }
+      return;
+    }
     var start = activeIds[String(r.AccountId)];
     // Only responses from this onboarding (on/after the firm's current start).
     if (r.IsPending || r.Score == null || !r.ResponseDate || !start || new Date(r.ResponseDate) < start) return;
