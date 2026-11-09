@@ -136,12 +136,14 @@ function closeOnboarding_(b, who) {
 
   // The decision maker first: it's the step most likely to be refused, so nothing else is half-written if it is.
   if (clean.decisionMaker) setDecisionMaker_(appKey, acct, Number(clean.decisionMaker));
-  czSet_(appKey, acct.ExternalId, 'OnboardingStatus', outcome.status);
-  czSet_(appKey, acct.ExternalId, 'OnboardingCompletedDate', today);
   HANDOFF_FIELDS.forEach(function (f) {
     if (f.cz && f.type !== 'contact' && clean[f.key]) czSet_(appKey, acct.ExternalId, f.cz, f.type === 'scale' ? Number(clean[f.key]) : clean[f.key]);
   });
   if (support) czSet_(appKey, acct.ExternalId, props.getProperty('CZ_OWNER_ATTR') || 'OwnerUserAccount', support.email);
+  // Status last: ChurnZero's completion email triggers on it and uses the Owner's scheduling link,
+  // so the new Owner and the answers are already sent when it fires.
+  czSet_(appKey, acct.ExternalId, 'OnboardingStatus', outcome.status);
+  czSet_(appKey, acct.ExternalId, 'OnboardingCompletedDate', today);
 
   if (DRY) return { ok: true, dryRun: true, wouldWrite: DRY_WRITES, confirmed: false, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
     unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
