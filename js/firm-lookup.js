@@ -102,6 +102,7 @@ function parseAccounts(rows) {
       cbStart: get(r, 'ChargebeeStart'),
       addons: get(r, 'AddOns'),
       invBalance: get(r, 'InvoiceBalance'),
+      overdue: (() => { const [amt, n, since] = String(get(r, 'Overdue') || '').split('|'); return Number(amt) > 0 ? { amt: Number(amt), n: Number(n) || 1, since } : null; })(),
       legacy: get(r, 'LegacyContract'),
     });
   }
@@ -279,6 +280,11 @@ function openFirm(firmId, name) {
   const web = f.web ? ` · <a href="https://${esc(f.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">🌐 ${esc(f.web)}</a>` : '';
   const badgeCls = hk === 'good' ? 'good' : hk === 'bad' ? 'bad' : 'warn';
   const dangerBadge = (f.danger || f.cancel) ? '<span class="pf-badge warn">⚠ Cancellation flagged</span>' : '';
+  // Overdue: 7+ days past due and $25+ (same rule as the missed-payments alerts). Badge only for current customers.
+  const od = f.overdue;
+  const odDays = od && od.since ? Math.max(0, Math.round((Date.now() - new Date(od.since + 'T12:00:00')) / 864e5)) : null;
+  const odBadge = od && !/cancel/i.test(f.cb || '') ? `<span class="pf-badge bad">⚠ $${od.amt.toLocaleString()} overdue</span>` : '';
+  const odText = od ? `$${od.amt.toLocaleString()} · ${od.n} invoice${od.n === 1 ? '' : 's'}${odDays != null ? ` · ${odDays} days late` : ''}` : '';
   const scoreN = toNumber(f.score);
   const scoreCls = scoreN == null ? '' : scoreN < 33 ? 'good' : scoreN < 67 ? 'warn' : 'bad';
   document.getElementById('profile').innerHTML = `
@@ -287,7 +293,7 @@ function openFirm(firmId, name) {
       <div class="pf-htext"><h3>${esc(f.name)}</h3><div class="sub">${sub}${web}</div></div>
       <div class="pf-hbadges">
         <span class="pf-badge ${badgeCls}">${h[0]}</span>
-        ${dangerBadge}
+        ${odBadge}${dangerBadge}
         ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
         ${typeof spButtonHtml === 'function' ? spButtonHtml() : ''}
       </div>
@@ -306,7 +312,7 @@ function openFirm(firmId, name) {
         ${pfRow('Licenses', orDash(f.lic))}
         ${contractRowHtml(f)}
         ${f.addons ? `<div class="pf-row"><span class="k">Add-ons</span><span class="v">${f.addons.split(';').map((s) => esc(s.trim())).filter(Boolean).join('<br>')}</span></div>` : ''}
-        ${f.invBalance ? pfRow('Balance due', f.invBalance, 'bad') : ''}
+        ${od ? pfRow('Overdue', odText, 'bad') : f.invBalance ? pfRow('Balance due', f.invBalance) : ''}
         ${f.legacy ? pfRow('Legacy contract', f.legacy) : ''}
       </div>
       <div class="pf-card"><h4>❤️ Health &amp; Risk</h4>

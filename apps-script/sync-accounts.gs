@@ -38,6 +38,8 @@ var CZ_COLUMNS = [
   'ChurnCategory', 'ChurnDetails', 'AvgLeadsMonthly',
   // yyyy-MM-dd, for the CSM tab's first-90-days count.
   'OnboardingCompletedDate',
+  // Firm Lookup's overdue flag: "amount|invoices|oldest due yyyy-MM-dd", or blank.
+  'Overdue',
 ];
 
 var ACCOUNT_FIELDS = ['Id', 'Name', 'ExternalId', 'IsActive', 'TotalContractAmount', 'NextRenewalDate', 'LicenseCount',
@@ -179,6 +181,7 @@ function accountToRow_(a, ctx) {
     ChargebeeStart: subStart_(ctx.subs[acctId]),
     AddOns: addOnSummary_(ctx.addOns[acctId]),
     InvoiceBalance: balanceSummary_(ctx.unpaid[acctId]),
+    Overdue: overdueSummary_(ctx.unpaid[acctId]),
     LegacyContract: legacySummary_(ctx.legacy[acctId]),
     ChurnCategory: cf.ChurnCategory || '',
     ChurnDetails: String(cf.ChurnDetails || '').slice(0, 600),
@@ -253,11 +256,26 @@ function addOnSummary_(addons) {
 }
 
 function balanceSummary_(unpaid) {
-  if (!unpaid || !unpaid.length) return '';
+  unpaid = (unpaid || []).filter(function (i) { return i.Status !== 'Voided'; });   // voided invoices aren't owed
+  if (!unpaid.length) return '';
   var total = 0;
   unpaid.forEach(function (i) { total += Number(i.AmountDue) || 0; });
   if (total <= 0) return '';
   return '$' + Math.round(total).toLocaleString() + ' (' + unpaid.length + ' unpaid)';
+}
+
+// Overdue = still owed (Payment Due / Not Paid, not voided), at least $25, and 7+ days past its due date —
+// the same rule as the CS missed-payments Slack alerts. "amount|invoices|oldest due date".
+var OVERDUE_MIN = 25, OVERDUE_DAYS = 7;
+function overdueSummary_(unpaid) {
+  var cutoff = new Date(Date.now() - OVERDUE_DAYS * 864e5).toISOString();
+  var od = (unpaid || []).filter(function (i) {
+    return (i.Status === 'Payment Due' || i.Status === 'Not Paid') && Number(i.AmountDue) >= OVERDUE_MIN && i.DueDate && String(i.DueDate) <= cutoff;
+  });
+  if (!od.length) return '';
+  var total = 0, oldest = '';
+  od.forEach(function (i) { total += Number(i.AmountDue) || 0; if (!oldest || String(i.DueDate) < oldest) oldest = String(i.DueDate); });
+  return Math.round(total) + '|' + od.length + '|' + oldest.slice(0, 10);
 }
 
 function legacySummary_(contracts) {
@@ -345,6 +363,7 @@ function writeAccountsTab_(rows) {
   var sheet = ss.getSheetByName(CZ_ACCOUNTS_TAB);
   if (!sheet) sheet = ss.insertSheet(CZ_ACCOUNTS_TAB);
   sheet.clearContents();
+  if (sheet.getMaxColumns() < CZ_COLUMNS.length) sheet.insertColumnsAfter(sheet.getMaxColumns(), CZ_COLUMNS.length - sheet.getMaxColumns());
   // Free text from ChurnZero (e.g. churn details) can't run as a formula.
   var out = [CZ_COLUMNS].concat(rows.map(function (r) { return r.map(dashSafe_); }));
   // Plain text, so Sheets doesn't turn dates, IDs or "Oct 2026" into numbers or dates.
