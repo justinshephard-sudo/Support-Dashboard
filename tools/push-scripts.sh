@@ -32,6 +32,7 @@ if want "$ONLY" bound; then
   cp "$AS/sync-accounts.gs" "$BOUND/sync-accounts.js"
   cp "$AS/implementation-sync.gs" "$BOUND/implementation-sync.js"
   cp "$AS/exclusions.gs" "$BOUND/exclusions.js"
+  cp "$AS/weekly-digest.gs" "$BOUND/weekly-digest.js"   # hook URL + key live only in $BOUND/digest-secret.js
   push support-report-bound "$BOUND" AKfycbz5hzP2ADpdQVN0bsV6h8TYZgj_snLQWeZgzYsZlDoJhdWv4WysfqlB2D0UX8TXrt9V8g
 fi
 if want "$ONLY" master; then
