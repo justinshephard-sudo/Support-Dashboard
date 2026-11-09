@@ -629,7 +629,7 @@ var SIGNAL_ALIASES = {
   'Onboarding – Blocked by a bug': ['Ai Onboarding Bug'],
   'Onboarding – Pushback': ['Ai pushback'],
 };
-var SIGNAL_VERSION = '10';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_VERSION = '11';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
@@ -751,11 +751,18 @@ function syncCallSignals() {
         }
         return null;
       }
-      var k = -1;
-      sents.forEach(function (s, j) { if (s.who === o.speakerId && s.start <= ms + 500 && (k < 0 || s.start > sents[k].start)) k = j; });
-      return k < 0 ? null : { t: Math.round(o.startTime), customer: true, text: sents[k].text.slice(0, 280) };
+      // AI trackers: Gong marks a moment, not a phrase, so the sentence right at the hit is often filler
+      // ("Okay.", "Give me one second."). Quote the customer's most substantial sentence around the hit
+      // instead, and treat a hit with nothing substantial nearby as noise.
+      var words = function (t) { return String(t || '').split(/\s+/).filter(Boolean).length; };
+      var best = null;
+      sents.forEach(function (s) {
+        if (s.who !== o.speakerId || s.end < ms - 15000 || s.start > ms + 25000 || words(s.text) < 7) return;
+        if (!best || words(s.text) > words(best.text)) best = s;
+      });
+      return best ? { t: Math.round(best.start / 1000), customer: true, text: best.text.slice(0, 280) } : null;
     }).filter(Boolean);
-    if (!found.length && (list.length || !sents.length)) return false;
+    if (!found.length && (list.length || sents.length)) return false;   // nothing substantial said: noise
     row.Count = row.CustomerCount = found.length || row.Count;
     row.Quotes = JSON.stringify(found.slice(0, 3));
     return true;
