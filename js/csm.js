@@ -257,7 +257,7 @@ function renderCsm() {
   }).join('');
 
   document.getElementById('csmBody').innerHTML = `
-    <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry()}</span></h3>
+    <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry('CSM')}</span></h3>
       ${isManager() ? `<label class="csm-rep-pick">Rep <select class="fb-select" id="csmRep"><option value="">Whole team</option>${allReps.map((r) => `<option value="${esc(r)}"${r === view ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>` : ''}
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid${solo ? ' csm-grid-solo' : ''}">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
