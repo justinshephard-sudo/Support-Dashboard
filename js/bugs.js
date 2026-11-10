@@ -124,7 +124,7 @@ function renderBugs() {
       </div>
       <div class="loop-hero-art bug-hero-art">
         <div class="loop-bubble">${prodN ? `${prodN} fix${prodN === 1 ? '' : 'es'} on production — go tell the firm${prodN === 1 ? '' : 's'}!` : sev12 ? `${sev12} big bug${sev12 === 1 ? '' : 's'} on my radar.` : 'No big bugs. Smooth flying!'}</div>
-        <img src="assets/merlin-bug.webp?v=1" alt="Merlin in a bug costume with sunglasses" width="520" height="557">
+        <img src="assets/merlin-bug.webp?v=2" alt="Merlin in a bug costume with sunglasses" width="520" height="557">
       </div>
     </section>
     <div class="bug-states" role="tablist" aria-label="Workflow state">
