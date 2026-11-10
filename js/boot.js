@@ -69,6 +69,7 @@ function bootstrap() {
   setupResources();
   setupRoundup();
   setupLoop();
+  setupFR();
   setupMrr();
   setupCsm();
   setupExclusions();

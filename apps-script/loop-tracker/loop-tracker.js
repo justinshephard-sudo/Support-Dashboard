@@ -8,7 +8,8 @@
    Notion access is a public integration authorized once with OAuth:
      1. Script Properties: NOTION_CLIENT_ID, NOTION_CLIENT_SECRET.
      2. Run startNotionAuth() in the editor, open the logged link, click Allow
-        and pick the Team Loop Tracker page. Notion redirects back to this web
+        and pick the Team Loop Tracker page AND the Feature Requests database
+        (feature-requests.js). Notion redirects back to this web
         app (doGet), which stores the token in NOTION_TOKEN.
    The redirect URI registered in Notion must be this web app's /exec URL.
 
@@ -46,7 +47,7 @@ function startNotionAuth() {
     '&client_id=' + encodeURIComponent(id) +
     '&redirect_uri=' + encodeURIComponent(redirectUri_()) +
     '&state=' + encodeURIComponent(state);
-  Logger.log('Open this link, click Allow, and pick the Team Loop Tracker page:\n' + url);
+  Logger.log('Open this link, click Allow, and pick BOTH the Team Loop Tracker page and the Feature Requests database:\n' + url);
 }
 
 var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxQVzKZdB8ecIFscQUDX3uoL8CCzzH1qFiL3VtfJymAAwZPGulkn34MQi2sLt-b7NdN/exec';
@@ -280,6 +281,11 @@ function doPost(e) {
     if (b.action === 'page') {
       if (!who.manager) return json_({ ok: true, lines: [] });
       return json_(pageText_(b.id));
+    }
+    if (/^fr/.test(b.action)) {
+      // Feature Requests (feature-requests.js): everyone signed in can read, +1 and add.
+      var fr = frDoPost_(b, who);
+      if (fr) return json_(fr);
     }
     if (b.action === 'update' || b.action === 'create') {
       if (!who.manager) return json_({ ok: false, error: 'Only managers can edit the Loop Tracker.' });
