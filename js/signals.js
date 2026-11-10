@@ -10,7 +10,6 @@ const SIG_TOP = 5;   // calls shown before "Show all"
 const SIG_TRACKERS = [
   ['Onboarding – Churn risk', 'Churn risk', 'bad'],
   ['Onboarding – Blocked by a bug', 'Blocked by a bug', 'bad'],
-  ['Onboarding – Pushback', 'Pushback', 'okay'],
 ];
 const sigInfo = (name) => SIG_TRACKERS.find(([k]) => k === name) || [name, name, 'none'];
 const sigRank = (name) => { const i = SIG_TRACKERS.findIndex(([k]) => k === name); return i < 0 ? 99 : i; };
@@ -23,7 +22,9 @@ function loadSignals(force) {
       const rows = await fetchTitleFrom(SHEET_ID, 'Call Signals');
       const head = (rows[0] || []).map((h) => String(h).trim());
       // Only the Gong AI trackers count (the old keyword-tracker flags were retired 2026-11-06).
-      SIG.rows = rows.slice(1).filter((r) => /^ai\b/i.test(String(r[head.indexOf('GongTracker')] || '').trim())).map((r) => {
+      // Only Gong AI-tracker hits that the AI second check confirmed (Verdict = yes) count.
+      const gi = head.indexOf('GongTracker'), vi = head.indexOf('Verdict');
+      SIG.rows = rows.slice(1).filter((r) => /^ai\b/i.test(String(r[gi] || '').trim()) && String(r[vi] || '').trim() === 'yes').map((r) => {
         const o = {};
         head.forEach((h, i) => { o[h] = r[i] == null ? '' : String(r[i]); });
         try { o.quotes = JSON.parse(o.Quotes || '[]'); } catch (e) { o.quotes = []; }
@@ -124,6 +125,7 @@ async function renderSignals() {
             ${firmRow && canCallPrep(firmRow) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(firmRow.FirmId)}">Call prep</button>` : ''}</td>
           <td>${c.hits.map((h) => `<span class="csm-pill h-${sigInfo(h.Tracker)[2]}">${esc(sigInfo(h.Tracker)[1])}${h.count > 1 ? ' ×' + h.count : ''}</span>`).join(' ')}</td>
           <td class="sig-quote">${first ? `<span class="sig-line" title="${esc(first.text)}"><span class="sig-who">${sigClock(first.t)}</span> “${sigQuote(first)}”</span>` : '<span class="muted">Transcript not ready yet</span>'}
+            ${c.hits[0] && c.hits[0].Reason ? `<div class="sig-why">Why: ${esc(c.hits[0].Reason)}</div>` : ''}
             ${q.length > 1 ? `<details><summary>${q.length - 1} more</summary>${q.slice(1).map((x) => `<p><span class="sig-who">${esc(sigInfo(x.tracker)[1])} · ${sigClock(x.t)}</span> “${sigQuote(x)}”</p>`).join('')}</details>` : ''}</td>
           <td class="nowrap">${c.reviewed
             ? `<span class="sig-rev-by" title="${esc(c.reviewed.by)} · ${esc(c.reviewed.at ? new Date(c.reviewed.at).toLocaleString() : '')}">✓ ${esc(who.charAt(0).toUpperCase() + who.slice(1))}</span> <button type="button" class="pill-btn" data-sig-review="${esc(c.id)}" data-undo="1">Undo</button>`
@@ -131,7 +133,7 @@ async function renderSignals() {
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 5 : 6}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
     </table></div>${matching.length > SIG_TOP ? `<button type="button" class="pill-btn sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
-    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk”, “Ai Onboarding Bug” and “Ai pushback” on the IMs’ calls. Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
+    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk” and “Ai Onboarding Bug” on the IMs’ calls, kept only when an AI second check of the transcript around the moment confirms it’s a real alarm (not talk about the old system or current process). Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
 }
 
 async function sigReview(btn) {

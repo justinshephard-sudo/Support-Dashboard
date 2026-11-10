@@ -104,7 +104,7 @@ function buildDigest_() {
   var label = { 'Onboarding – Churn risk': 'Churn risk', 'Onboarding – Blocked by a bug': 'Bug', 'Onboarding – Pushback': 'Pushback' };
   var calls = {}, order = [];
   digestRows_(ss.getSheetByName('Call Signals')).forEach(function (r) {
-    if (String(r.Date).slice(0, 10) < plusDays(-7) || !/^ai\b/i.test(String(r.GongTracker).trim()) || reviewed[String(r.CallId).trim()]) return;
+    if (String(r.Date).slice(0, 10) < plusDays(-7) || !/^ai\b/i.test(String(r.GongTracker).trim()) || r.Verdict !== 'yes' || reviewed[String(r.CallId).trim()]) return;
     var c = calls[r.CallId];
     if (!c) { c = calls[r.CallId] = { r: r, kinds: [], quote: '' }; order.push(r.CallId); }
     var k = label[r.Tracker] || r.Tracker;

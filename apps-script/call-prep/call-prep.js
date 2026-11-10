@@ -64,6 +64,7 @@ function doPost(e) {
   try { b = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
   try {
     if (b.action === 'prepResult') return dashJson_(prepResult_(b));   // Zapier; checked by its token
+    if (b.action === 'signalVerdicts') return dashJson_(signalVerdicts_(b));   // Zapier; checked by its token
     var who = dashAuth_(b.token);
     if (!who.ok) return dashJson_(who);
     if (b.action === 'prep') return dashJson_(prep_(b, who));
@@ -619,7 +620,8 @@ var SIGNAL_TAB = 'Call Signals';
 // Feature Request was dropped 2026-11-04 as noise.
 // Each signal and the Gong tracker names that feed it, preferred first (matched ignoring case and dash
 // style). 2026-11-04: tightened onboarding trackers; Competitors and Feature Request dropped as noise.
-var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug', 'Onboarding – Pushback'];
+// 2026-11-10: Pushback dropped (onboarding talk about being busy isn't an alarm); Justin turned its Gong tracker off.
+var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug'];
 var SIGNAL_ALIASES = {
   // Justin tightened the existing Churn / Product Bugs / Implementation Objection trackers in place (2026-11-04).
   // ("At risk", a Gong AI tracker, was tried and dropped: it flagged happy customers.)
@@ -629,11 +631,34 @@ var SIGNAL_ALIASES = {
   'Onboarding – Blocked by a bug': ['Ai Onboarding Bug'],
   'Onboarding – Pushback': ['Ai pushback'],
 };
-var SIGNAL_VERSION = '11';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_VERSION = '12';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
 var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
 var SIGNAL_KEEP_DAYS = 90;
-var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes', 'GongTracker'];
+var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes', 'GongTracker',
+  'Verdict', 'Reason'];
+// AI second check (2026-11-10): each Gong hit, with ~2 minutes of transcript around it, goes to Claude (AI by Zapier,
+// through the call-prep workflow) which answers whether it's a REAL alarm. Only Verdict = yes shows on the page and
+// in the digest; blank = waiting for the check. Verdicts are kept in the "Call Signal Verdicts" tab (key CallId|Tracker).
+var SIGNAL_VERDICT_TAB = 'Call Signal Verdicts';
+var SIGNAL_JUDGE_MAX = 20;   // hits per AI request
+var SIGNAL_JUDGE_PROMPT = [
+  'You review moments that a Gong tracker flagged on Lawmatics onboarding calls. Lawmatics is legal CRM / client intake software.',
+  'On these calls an implementation manager (\"Lawmatics\") sets up a new customer law firm (\"Customer\"). Customers constantly describe their OLD software,',
+  'their previous vendor, how they work today, problems with other tools, and their own clients. None of that is an alarm.',
+  '',
+  'For each hit decide if it is a REAL alarm that a manager should act on:',
+  '- \"Onboarding – Churn risk\": the Customer says, about LAWMATICS, that they may cancel, leave, not renew, want a refund, are switching',
+  '  away, or seriously doubt Lawmatics is worth it / is what they were sold.',
+  '- \"Onboarding – Blocked by a bug\": the Customer says something IN LAWMATICS is broken right now (error, won\u2019t save/load, behaves wrong)',
+  '  AND it is stopping or delaying their setup.',
+  'Answer real = false when the Customer is: describing a previous system or vendor; explaining their current process; talking about',
+  'cancelling a meeting, a consult, a client matter, or another tool; asking how to do something; confused but not blocked; making small',
+  'talk; or repeating/agreeing with what Lawmatics said. Also false when only Lawmatics says it. When unsure, answer false.',
+  '',
+  'Each hit has: key, signal, and context (the transcript around the moment, each line labeled Customer: or Lawmatics:).',
+  'Return ONLY JSON (no code fence): {\"verdicts\":[{\"key\":\"<key>\",\"real\":true|false,\"reason\":\"<max 15 words>\"}]} with one entry per hit.',
+].join('\n');
 
 // "Reviewed" on a flagged call (managers): one row per call in the "Call Signal Reviews" tab, which
 // the page reads to hide reviewed calls. undo removes the row.
@@ -765,7 +790,25 @@ function syncCallSignals() {
     if (!found.length && (list.length || sents.length)) return false;   // nothing substantial said: noise
     row.Count = row.CustomerCount = found.length || row.Count;
     row.Quotes = JSON.stringify(found.slice(0, 3));
+    // ~2 minutes of transcript around the first hit, both sides labeled, for the AI check.
+    var at = (row._occ[0] ? row._occ[0].startTime * 1000 : (found[0] ? found[0].t * 1000 : 0));
+    row._ctx = sents.filter(function (s) { return s.end >= at - 60000 && s.start <= at + 60000; })
+      .map(function (s) { return (row._ext[s.who] ? 'Customer: ' : 'Lawmatics: ') + s.text; }).join('\n').slice(0, 3000);
     return true;
+  });
+
+  // Verdicts already given; anything without one goes to the AI check (once every 3 hours at most).
+  var verdicts = signalVerdicts_load_();
+  var pending = [];
+  rows.forEach(function (row) {
+    var v = verdicts[row.CallId + '|' + row.Tracker];
+    if (v) { row.Verdict = v.verdict; row.Reason = v.reason; }
+    else if (row._ctx) pending.push(row);
+  });
+  var vi = SIGNAL_COLUMNS.indexOf('Verdict'), ri = SIGNAL_COLUMNS.indexOf('Reason'), ti = SIGNAL_COLUMNS.indexOf('Tracker');
+  old.forEach(function (r) {
+    var v = verdicts[r[0] + '|' + r[ti]];
+    if (v && !r[vi]) { r[vi] = v.verdict; r[ri] = v.reason; }
   });
 
   // Keep older rows for calls this run didn't re-read; drop anything past SIGNAL_KEEP_DAYS.
@@ -777,7 +820,76 @@ function syncCallSignals() {
   var all = [SIGNAL_COLUMNS].concat(out).map(function (r) { return r.map(function (v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }); });
   sh.getRange(1, 1, all.length, SIGNAL_COLUMNS.length).setNumberFormat('@').setValues(all);
   props.setProperty('SIGNAL_VERSION', SIGNAL_VERSION);
-  console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all)');
+  var sent = 0;
+  try { sent = signalJudge_(pending); } catch (e) { console.error('AI check: ' + (e && e.message)); }
+  console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all), ' +
+    sent + ' sent to the AI check');
+}
+
+// verdicts by "CallId|Tracker" → { verdict: 'yes' | 'no', reason }.
+function signalVerdicts_load_() {
+  var sh = SpreadsheetApp.openById(SIGNAL_SHEET_ID).getSheetByName(SIGNAL_VERDICT_TAB);
+  var out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3).getDisplayValues().forEach(function (r) { if (r[0]) out[r[0]] = { verdict: r[1], reason: r[2] }; });
+  return out;
+}
+
+// Sends hits without a verdict to the call-prep Zapier workflow (kind "signals"); it posts back signalVerdicts.
+function signalJudge_(pending) {
+  var cache = CacheService.getScriptCache();
+  var todo = pending.filter(function (r) { return !cache.get('sigsent_' + Utilities.base64EncodeWebSafe(r.CallId + '|' + r.Tracker)); }).slice(0, SIGNAL_JUDGE_MAX);
+  if (!todo.length) return 0;
+  var hook = PropertiesService.getScriptProperties().getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? '' : ZAPIER_HOOK_SECRET_URL);
+  if (!hook || typeof ZAPIER_HOOK_KEY === 'undefined') throw new Error('Zapier hook not set up');
+  var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
+  var items = todo.map(function (r) { return { key: r.CallId + '|' + r.Tracker, signal: r.Tracker, context: r._ctx }; });
+  cache.put('sigreq_' + requestId, JSON.stringify({ secret: secret, keys: items.map(function (i) { return i.key; }) }), 6 * 3600);
+  var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ kind: 'signals', requestId: requestId, token: secret, hookKey: ZAPIER_HOOK_KEY, callbackUrl: CALLBACK_URL,
+      instructions: SIGNAL_JUDGE_PROMPT, items: JSON.stringify(items) }) });
+  if (res.getResponseCode() >= 300) throw new Error('Zapier HTTP ' + res.getResponseCode());
+  todo.forEach(function (r) { cache.put('sigsent_' + Utilities.base64EncodeWebSafe(r.CallId + '|' + r.Tracker), '1', 3 * 3600); });
+  return todo.length;
+}
+
+// Zapier posts the AI's verdicts back here (checked by the one-time token). Saves them and fills the
+// Verdict / Reason columns of the Call Signals tab straight away.
+function signalVerdicts_(b) {
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get('sigreq_' + String(b.requestId || ''));
+  if (!raw) return { ok: false, error: 'unknown or expired request' };
+  var req = JSON.parse(raw);
+  if (!b.token || b.token !== req.secret) return { ok: false, error: 'bad token' };
+  if (!Array.isArray(b.verdicts)) { console.error('AI check: ' + (b.error || 'no verdicts')); return { ok: true, saved: 0 }; }
+  var asked = {};
+  req.keys.forEach(function (k) { asked[k] = true; });
+  var got = {};
+  b.verdicts.forEach(function (v) {
+    if (v && asked[v.key]) got[v.key] = { verdict: v.real === true ? 'yes' : 'no', reason: dashSafe_(String(v.reason || '').slice(0, 200)) };
+  });
+  var keys = Object.keys(got);
+  if (!keys.length) return { ok: true, saved: 0 };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+    var vs = ss.getSheetByName(SIGNAL_VERDICT_TAB);
+    if (!vs) { vs = ss.insertSheet(SIGNAL_VERDICT_TAB); vs.getRange(1, 1, 1, 4).setValues([['Key', 'Verdict', 'Reason', 'At']]).setFontWeight('bold'); }
+    var now = new Date().toISOString();
+    vs.getRange(vs.getLastRow() + 1, 1, keys.length, 4).setNumberFormat('@')
+      .setValues(keys.map(function (k) { return [k, got[k].verdict, got[k].reason, now]; }));
+    var sh = ss.getSheetByName(SIGNAL_TAB);
+    if (sh && sh.getLastRow() > 1) {
+      var n = sh.getLastRow() - 1;
+      var vals = sh.getRange(2, 1, n, SIGNAL_COLUMNS.length).getDisplayValues();
+      var vi = SIGNAL_COLUMNS.indexOf('Verdict'), ri = SIGNAL_COLUMNS.indexOf('Reason'), ti = SIGNAL_COLUMNS.indexOf('Tracker');
+      var changed = false;
+      vals.forEach(function (r) { var g = got[r[0] + '|' + r[ti]]; if (g) { r[vi] = g.verdict; r[ri] = g.reason; changed = true; } });
+      if (changed) sh.getRange(2, vi + 1, n, 2).setNumberFormat('@').setValues(vals.map(function (r) { return [r[vi], r[ri]]; }));
+    }
+  } finally { lock.releaseLock(); }
+  return { ok: true, saved: keys.length };
 }
 
 // Gong tracker name → its keyword phrases (lowercase), from Gong's tracker settings. {} if unavailable.
