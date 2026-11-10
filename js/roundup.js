@@ -127,16 +127,18 @@ function renderRoundup() {
 }
 
 function setResourcesView(view, load = true) {
-  if (!['kb', 'roundup', 'loop', 'fr', 'firm'].includes(view)) view = 'kb';
+  if (!['kb', 'roundup', 'loop', 'fr', 'bugs', 'firm'].includes(view)) view = 'kb';
   document.querySelectorAll('.res-switch-btn').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.resView === view)));
   document.getElementById('resKB').hidden = view !== 'kb';
   document.getElementById('roundup').hidden = view !== 'roundup';
   document.getElementById('loop').hidden = view !== 'loop';
   document.getElementById('fr').hidden = view !== 'fr';
+  document.getElementById('bugs').hidden = view !== 'bugs';
   document.getElementById('resFirm').hidden = view !== 'firm';
   try { localStorage.setItem('cs-res-view', view); } catch (e) { /* private mode */ }
   if (view === 'loop' && load) loadLoop();
   if (view === 'fr' && load) loadFR();
+  if (view === 'bugs' && load) loadBugs();
   if (view === 'roundup' && load) loadRoundup();
   if (view === 'kb' && load) openKnowledgeBase();
   if (view === 'firm' && load) { ensureTabData('firm'); document.getElementById('q')?.focus(); }

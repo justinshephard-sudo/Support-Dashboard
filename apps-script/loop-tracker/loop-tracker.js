@@ -287,6 +287,11 @@ function doPost(e) {
       var fr = frDoPost_(b, who);
       if (fr) return json_(fr);
     }
+    if (/^bug/.test(b.action)) {
+      // Open Bugs (bugs.js): read-only Shortcut view for everyone signed in.
+      var bug = bugDoPost_(b, who);
+      if (bug) return json_(bug);
+    }
     if (b.action === 'update' || b.action === 'create') {
       if (!who.manager) return json_({ ok: false, error: 'Only managers can edit the Loop Tracker.' });
       return json_(b.action === 'update' ? update_(b) : create_(b));

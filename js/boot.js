@@ -70,6 +70,7 @@ function bootstrap() {
   setupRoundup();
   setupLoop();
   setupFR();
+  setupBugs();
   setupMrr();
   setupCsm();
   setupExclusions();

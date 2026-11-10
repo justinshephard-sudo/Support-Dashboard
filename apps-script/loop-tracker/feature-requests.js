@@ -24,25 +24,29 @@ var FR_NOTES_MAX = 1800;
 
 /* ---------- cache (the list is bigger than one cache entry) ---------- */
 
-function frCachePut_(obj) {
+// Shared by Feature Requests and Open Bugs: one value split across cache keys.
+function chunkPut_(prefix, obj, seconds) {
   var s = JSON.stringify(obj), parts = {}, n = Math.ceil(s.length / FR_CHUNK);
-  for (var i = 0; i < n; i++) parts['fr_' + i] = s.slice(i * FR_CHUNK, (i + 1) * FR_CHUNK);
-  parts.fr_n = String(n);
-  CacheService.getScriptCache().putAll(parts, FR_STALE_SECONDS);
+  for (var i = 0; i < n; i++) parts[prefix + i] = s.slice(i * FR_CHUNK, (i + 1) * FR_CHUNK);
+  parts[prefix + 'n'] = String(n);
+  CacheService.getScriptCache().putAll(parts, seconds || FR_STALE_SECONDS);
 }
 
-function frCacheGet_() {
+function chunkGet_(prefix) {
   try {
     var c = CacheService.getScriptCache();
-    var n = Number(c.get('fr_n') || 0);
+    var n = Number(c.get(prefix + 'n') || 0);
     if (!n) return null;
     var keys = [];
-    for (var i = 0; i < n; i++) keys.push('fr_' + i);
+    for (var i = 0; i < n; i++) keys.push(prefix + i);
     var got = c.getAll(keys), s = '';
     for (var j = 0; j < n; j++) { if (got[keys[j]] == null) return null; s += got[keys[j]]; }
     return JSON.parse(s);
   } catch (e) { return null; }
 }
+
+function frCachePut_(obj) { chunkPut_('fr_', obj); }
+function frCacheGet_() { return chunkGet_('fr_'); }
 
 /* ---------- Notion → items ---------- */
 
