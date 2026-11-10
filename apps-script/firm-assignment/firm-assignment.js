@@ -47,6 +47,10 @@ var WEIGHTS = { open: 40, since: 30, book: 15, value: 15 };
 // Partner firms always go to Kennedy: the closed-won opp's Lead Source starts with "Partner", or the
 // ChurnZero account's Partner Type is Affiliate.
 var PARTNER_REP_ID = 11; // Kennedy Wickham's ChurnZero user (not the duplicate #120)
+// Duplicate ChurnZero users for the same person: their firms are folded into the real user, so a firm
+// assigned to the duplicate (e.g. Pittman Law Office → #120, Nov 2026) can't make a second "Kennedy" appear
+// in the rotation as a regular, lightly loaded rep.
+var DUPLICATE_USERS = { 120: PARTNER_REP_ID };
 var TIER_DEFAULT = { reps: { 7: true, 71: true }, min: 1000 }; // Elliott Jones, Julio Ortiz
 
 function authorize() {
@@ -213,6 +217,15 @@ function buildLoad_() {
       r.openMrr += Number(a.TotalContractAmount) || 0;
     }
     if (start > r.lastStart) r.lastStart = start;
+  });
+
+  Object.keys(DUPLICATE_USERS).forEach(function (dup) {
+    var d = reps[dup], to = DUPLICATE_USERS[dup];
+    if (!d) return;
+    var t = reps[to] || (reps[to] = { id: to, name: (users[to] && users[to].name) || d.name, am: false, firms: 0, mrr: 0, open: 0, openMrr: 0, lastStart: '' });
+    t.am = t.am || d.am; t.firms += d.firms; t.mrr += d.mrr; t.open += d.open; t.openMrr += d.openMrr;
+    if (d.lastStart > t.lastStart) t.lastStart = d.lastStart;
+    delete reps[dup];
   });
 
   // Assignments made from this page count as the rep's most recent assignment too.
