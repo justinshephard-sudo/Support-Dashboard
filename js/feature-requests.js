@@ -110,7 +110,7 @@ function renderFR() {
   const rest = d.items.length - top.length;
   const scope = FR.q ? `Searching all ${fmtNum(d.items.length)} requests` : FR.all ? `All ${fmtNum(d.items.length)} requests` : `Requests with ${FR_MIN}+ requesters`;
   root.innerHTML = `
-    <section class="loop-hero fr-hero">
+    <section class="loop-hero fr-hero fr-art">
       <div class="loop-hero-text">
         <div class="loop-eyebrow">What customers keep asking for</div>
         <h2>Feature <span>Requests</span></h2>
@@ -125,6 +125,10 @@ function renderFR() {
           <button type="button" class="loop-btn" id="frRefresh">↻ Refresh</button>
           <a class="loop-btn" href="${FR_NOTION_URL}" target="_blank" rel="noopener">Open in Notion ↗</a>
         </div>
+      </div>
+      <div class="loop-hero-art fr-hero-art">
+        <div class="loop-bubble">${fresh ? `${fresh} new idea${fresh === 1 ? '' : 's'} this month. Heard one? +1 it!` : 'Heard an idea from a firm? +1 it!'}</div>
+        <img src="assets/merlin-feature-request.webp?v=1" alt="Merlin at his laptop with a Feature Request notepad and a light bulb" width="560" height="376">
       </div>
     </section>
     <div class="fr-tools">
