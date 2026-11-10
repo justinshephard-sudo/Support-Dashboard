@@ -642,6 +642,8 @@ var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'C
 // in the digest; blank = waiting for the check. Verdicts are kept in the "Call Signal Verdicts" tab (key CallId|Tracker).
 var SIGNAL_VERDICT_TAB = 'Call Signal Verdicts';
 var SIGNAL_JUDGE_MAX = 20;   // hits per AI request
+// Bump when the instructions change: every hit gets judged again under the new rules.
+var SIGNAL_JUDGE_VERSION = '2';   // 2026-11-10: Lawmatics integrations (Google Ads, CallRail, email/calendar sync…) count as Lawmatics
 var SIGNAL_JUDGE_PROMPT = [
   'You review moments that a Gong tracker flagged on Lawmatics onboarding calls. Lawmatics is legal CRM / client intake software.',
   'On these calls an implementation manager (\"Lawmatics\") sets up a new customer law firm (\"Customer\"). Customers constantly describe their OLD software,',
@@ -652,6 +654,10 @@ var SIGNAL_JUDGE_PROMPT = [
   '  away, or seriously doubt Lawmatics is worth it / is what they were sold.',
   '- \"Onboarding – Blocked by a bug\": the Customer says something IN LAWMATICS is broken right now (error, won\u2019t save/load, behaves wrong)',
   '  AND it is stopping or delaying their setup.',
+  '  Lawmatics INTEGRATIONS are part of Lawmatics: Google Ads, Facebook/Meta lead ads, CallRail, Gmail/Outlook email sync, Google/Outlook',
+  '  calendar sync, Zoom, QuickBooks/LawPay/payments, e-signature, Zapier, website forms and any other connection set up inside Lawmatics.',
+  '  If one of those won\u2019t connect, errors, or doesn\u2019t sync, that IS a real alarm even if the root cause may be on the other company\u2019s',
+  '  side, unless it is clearly a simple setup step that was fixed on the call. A problem with a tool used outside Lawmatics is not.',
   'Answer real = false when the Customer is: describing a previous system or vendor; explaining their current process; talking about',
   'cancelling a meeting, a consult, a client matter, or another tool; asking how to do something; confused but not blocked; making small',
   'talk; or repeating/agreeing with what Lawmatics said. Also false when only Lawmatics says it. When unsure, answer false.',
@@ -693,7 +699,8 @@ function syncCallSignals() {
   var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
   var sh = ss.getSheetByName(SIGNAL_TAB) || ss.insertSheet(SIGNAL_TAB);
   var props = PropertiesService.getScriptProperties();
-  var rebuild = props.getProperty('SIGNAL_VERSION') !== SIGNAL_VERSION;
+  // A new SIGNAL_VERSION or AI-check version re-reads the last 30 days, so every hit is judged under the current rules.
+  var rebuild = props.getProperty('SIGNAL_VERSION') !== SIGNAL_VERSION + '.' + SIGNAL_JUDGE_VERSION;
   var old = !rebuild && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, SIGNAL_COLUMNS.length).getDisplayValues() : [];
   var days = old.length ? SIGNAL_WINDOW_DAYS : SIGNAL_FIRST_DAYS;
   var to = new Date(), from = new Date(to.getTime() - days * 864e5);
@@ -801,14 +808,14 @@ function syncCallSignals() {
   var verdicts = signalVerdicts_load_();
   var pending = [];
   rows.forEach(function (row) {
-    var v = verdicts[row.CallId + '|' + row.Tracker];
+    var v = verdicts[SIGNAL_JUDGE_VERSION + ':' + row.CallId + '|' + row.Tracker];
     if (v) { row.Verdict = v.verdict; row.Reason = v.reason; }
-    else if (row._ctx) pending.push(row);
+    else { row.Verdict = ''; row.Reason = ''; if (row._ctx) pending.push(row); }
   });
   var vi = SIGNAL_COLUMNS.indexOf('Verdict'), ri = SIGNAL_COLUMNS.indexOf('Reason'), ti = SIGNAL_COLUMNS.indexOf('Tracker');
   old.forEach(function (r) {
-    var v = verdicts[r[0] + '|' + r[ti]];
-    if (v && !r[vi]) { r[vi] = v.verdict; r[ri] = v.reason; }
+    var v = verdicts[SIGNAL_JUDGE_VERSION + ':' + r[0] + '|' + r[ti]];
+    r[vi] = v ? v.verdict : ''; r[ri] = v ? v.reason : '';
   });
 
   // Keep older rows for calls this run didn't re-read; drop anything past SIGNAL_KEEP_DAYS.
@@ -819,7 +826,7 @@ function syncCallSignals() {
   sh.clearContents();
   var all = [SIGNAL_COLUMNS].concat(out).map(function (r) { return r.map(function (v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }); });
   sh.getRange(1, 1, all.length, SIGNAL_COLUMNS.length).setNumberFormat('@').setValues(all);
-  props.setProperty('SIGNAL_VERSION', SIGNAL_VERSION);
+  props.setProperty('SIGNAL_VERSION', SIGNAL_VERSION + '.' + SIGNAL_JUDGE_VERSION);
   var sent = 0;
   try { sent = signalJudge_(pending); } catch (e) { console.error('AI check: ' + (e && e.message)); }
   console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all), ' +
@@ -838,7 +845,7 @@ function signalVerdicts_load_() {
 // Sends hits without a verdict to the call-prep Zapier workflow (kind "signals"); it posts back signalVerdicts.
 function signalJudge_(pending) {
   var cache = CacheService.getScriptCache();
-  var todo = pending.filter(function (r) { return !cache.get('sigsent_' + Utilities.base64EncodeWebSafe(r.CallId + '|' + r.Tracker)); }).slice(0, SIGNAL_JUDGE_MAX);
+  var todo = pending.filter(function (r) { return !cache.get('sigsent_' + Utilities.base64EncodeWebSafe(SIGNAL_JUDGE_VERSION + ':' + r.CallId + '|' + r.Tracker)); }).slice(0, SIGNAL_JUDGE_MAX);
   if (!todo.length) return 0;
   var hook = PropertiesService.getScriptProperties().getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? '' : ZAPIER_HOOK_SECRET_URL);
   if (!hook || typeof ZAPIER_HOOK_KEY === 'undefined') throw new Error('Zapier hook not set up');
@@ -849,7 +856,7 @@ function signalJudge_(pending) {
     payload: JSON.stringify({ kind: 'signals', requestId: requestId, token: secret, hookKey: ZAPIER_HOOK_KEY, callbackUrl: CALLBACK_URL,
       instructions: SIGNAL_JUDGE_PROMPT, items: JSON.stringify(items) }) });
   if (res.getResponseCode() >= 300) throw new Error('Zapier HTTP ' + res.getResponseCode());
-  todo.forEach(function (r) { cache.put('sigsent_' + Utilities.base64EncodeWebSafe(r.CallId + '|' + r.Tracker), '1', 3 * 3600); });
+  todo.forEach(function (r) { cache.put('sigsent_' + Utilities.base64EncodeWebSafe(SIGNAL_JUDGE_VERSION + ':' + r.CallId + '|' + r.Tracker), '1', 3 * 3600); });
   return todo.length;
 }
 
@@ -878,7 +885,7 @@ function signalVerdicts_(b) {
     if (!vs) { vs = ss.insertSheet(SIGNAL_VERDICT_TAB); vs.getRange(1, 1, 1, 4).setValues([['Key', 'Verdict', 'Reason', 'At']]).setFontWeight('bold'); }
     var now = new Date().toISOString();
     vs.getRange(vs.getLastRow() + 1, 1, keys.length, 4).setNumberFormat('@')
-      .setValues(keys.map(function (k) { return [k, got[k].verdict, got[k].reason, now]; }));
+      .setValues(keys.map(function (k) { return [SIGNAL_JUDGE_VERSION + ':' + k, got[k].verdict, got[k].reason, now]; }));
     var sh = ss.getSheetByName(SIGNAL_TAB);
     if (sh && sh.getLastRow() > 1) {
       var n = sh.getLastRow() - 1;
