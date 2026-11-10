@@ -1276,3 +1276,8 @@ div.fr-stat{cursor:default}
 .bug-comment{background:var(--surface-2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
 .bug-cwho{font-size:12px;font-weight:700;color:var(--text-3)}
 @media (max-width:520px){.bug-row{gap:10px;padding:12px}.bug-link{display:none}}
+.loop-hero.bug-hero{grid-template-columns:minmax(0,1fr) 300px}
+.bug-hero-art{margin:-6px -6px -30px 0}
+.bug-hero-art img{max-width:290px}
+.bug-hero-art .loop-bubble{left:-60px;top:6px}
+@media (max-width:720px){.loop-hero.bug-hero{grid-template-columns:1fr}.bug-hero-art{margin:6px auto -24px}.bug-hero-art img{max-width:200px}.bug-hero-art .loop-bubble{left:0;top:-10px}}

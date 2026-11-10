@@ -105,7 +105,7 @@ function renderBugs() {
   const teams = [...new Set(all.map((it) => it.g).filter((g) => d.groups[g]))].sort((a, b) => d.groups[a].localeCompare(d.groups[b]));
   const sevs = [...new Set(all.map((it) => it.sev))].sort((a, b) => (a || 9) - (b || 9));
   root.innerHTML = `
-    <section class="loop-hero fr-hero bug-hero">
+    <section class="loop-hero bug-hero">
       <div class="loop-hero-text">
         <div class="loop-eyebrow">From Shortcut · Customer Success workflow</div>
         <h2>Open <span>Bugs</span></h2>
@@ -121,6 +121,10 @@ function renderBugs() {
           <button type="button" class="loop-btn" id="bugRefresh">↻ Refresh</button>
           <a class="loop-btn" href="${BUG_SC_URL}" target="_blank" rel="noopener">Open Shortcut ↗</a>
         </div>
+      </div>
+      <div class="loop-hero-art bug-hero-art">
+        <div class="loop-bubble">${prodN ? `${prodN} fix${prodN === 1 ? '' : 'es'} on production — go tell the firm${prodN === 1 ? '' : 's'}!` : sev12 ? `${sev12} big bug${sev12 === 1 ? '' : 's'} on my radar.` : 'No big bugs. Smooth flying!'}</div>
+        <img src="assets/merlin-bug.webp?v=1" alt="Merlin in a bug costume with sunglasses" width="520" height="557">
       </div>
     </section>
     <div class="bug-states" role="tablist" aria-label="Workflow state">
