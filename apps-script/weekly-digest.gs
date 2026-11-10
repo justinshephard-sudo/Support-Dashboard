@@ -101,7 +101,7 @@ function buildDigest_() {
   // ---- Call signals, last 7 days, AI trackers, not reviewed ----
   var reviewed = {};
   digestRows_(ss.getSheetByName('Call Signal Reviews')).forEach(function (r) { reviewed[String(r.CallId).trim()] = true; });
-  var label = { 'Onboarding – Churn risk': 'Churn risk', 'Onboarding – Blocked by a bug': 'Bug', 'Onboarding – Pushback': 'Pushback' };
+  var label = { 'Onboarding – Churn risk': 'Churn risk', 'Onboarding – Blocked by a bug': 'Bug', 'Onboarding – Sold vs reality': 'Sold vs reality', 'Onboarding – Pushback': 'Pushback' };
   var calls = {}, order = [];
   digestRows_(ss.getSheetByName('Call Signals')).forEach(function (r) {
     if (String(r.Date).slice(0, 10) < plusDays(-7) || !/^ai\b/i.test(String(r.GongTracker).trim()) || r.Verdict !== 'yes' || reviewed[String(r.CallId).trim()]) return;

@@ -621,7 +621,8 @@ var SIGNAL_TAB = 'Call Signals';
 // Each signal and the Gong tracker names that feed it, preferred first (matched ignoring case and dash
 // style). 2026-11-04: tightened onboarding trackers; Competitors and Feature Request dropped as noise.
 // 2026-11-10: Pushback dropped (onboarding talk about being busy isn't an alarm); Justin turned its Gong tracker off.
-var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug'];
+// 2026-11-10: Justin repurposed the Gong "Ai pushback" tracker as "Ai Sold vs Reality".
+var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug', 'Onboarding – Sold vs reality'];
 var SIGNAL_ALIASES = {
   // Justin tightened the existing Churn / Product Bugs / Implementation Objection trackers in place (2026-11-04).
   // ("At risk", a Gong AI tracker, was tried and dropped: it flagged happy customers.)
@@ -630,6 +631,7 @@ var SIGNAL_ALIASES = {
   'Onboarding – Churn risk': ['Ai churn risk'],
   'Onboarding – Blocked by a bug': ['Ai Onboarding Bug'],
   'Onboarding – Pushback': ['Ai pushback'],
+  'Onboarding – Sold vs reality': ['Ai Sold vs Reality'],
 };
 var SIGNAL_VERSION = '12';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
 var SIGNAL_WINDOW_DAYS = 3;
@@ -643,7 +645,7 @@ var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'C
 var SIGNAL_VERDICT_TAB = 'Call Signal Verdicts';
 var SIGNAL_JUDGE_MAX = 20;   // hits per AI request
 // Bump when the instructions change: every hit gets judged again under the new rules.
-var SIGNAL_JUDGE_VERSION = '2';   // 2026-11-10: Lawmatics integrations (Google Ads, CallRail, email/calendar sync…) count as Lawmatics
+var SIGNAL_JUDGE_VERSION = '3';   // 3: Sold vs reality added   // 2026-11-10: Lawmatics integrations (Google Ads, CallRail, email/calendar sync…) count as Lawmatics
 var SIGNAL_JUDGE_PROMPT = [
   'You review moments that a Gong tracker flagged on Lawmatics onboarding calls. Lawmatics is legal CRM / client intake software.',
   'On these calls an implementation manager (\"Lawmatics\") sets up a new customer law firm (\"Customer\"). Customers constantly describe their OLD software,',
@@ -658,6 +660,11 @@ var SIGNAL_JUDGE_PROMPT = [
   '  calendar sync, Zoom, QuickBooks/LawPay/payments, e-signature, Zapier, website forms and any other connection set up inside Lawmatics.',
   '  If one of those won\u2019t connect, errors, or doesn\u2019t sync, that IS a real alarm even if the root cause may be on the other company\u2019s',
   '  side, unless it is clearly a simple setup step that was fixed on the call. A problem with a tool used outside Lawmatics is not.',
+  '- \"Onboarding – Sold vs reality\": the Customer says Lawmatics is missing something, works differently, or costs/includes something',
+  '  different from what they were TOLD BEFORE BUYING (by sales, a demo, or the website) \u2014 e.g. \"we were told it could\u2026\", \"sales said\u2026\",',
+  '  \"the demo showed\u2026\", \"that\u2019s what we bought it for\", \"nobody told us\u2026\". It must be a claim about what they were promised.',
+  '  Answer false for: \"can it do X?\" questions with no claim of a promise, feature requests, describing their old software, bugs',
+  '  (that is the bug signal), talk of leaving (churn signal), or the IM explaining what Lawmatics does.',
   'Answer real = false when the Customer is: describing a previous system or vendor; explaining their current process; talking about',
   'cancelling a meeting, a consult, a client matter, or another tool; asking how to do something; confused but not blocked; making small',
   'talk; or repeating/agreeing with what Lawmatics said. Also false when only Lawmatics says it. When unsure, answer false.',

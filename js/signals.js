@@ -10,6 +10,7 @@ const SIG_TOP = 5;   // calls shown before "Show all"
 const SIG_TRACKERS = [
   ['Onboarding – Churn risk', 'Churn risk', 'bad'],
   ['Onboarding – Blocked by a bug', 'Blocked by a bug', 'bad'],
+  ['Onboarding – Sold vs reality', 'Sold vs reality', 'okay'],
 ];
 const sigInfo = (name) => SIG_TRACKERS.find(([k]) => k === name) || [name, name, 'none'];
 const sigRank = (name) => { const i = SIG_TRACKERS.findIndex(([k]) => k === name); return i < 0 ? 99 : i; };
@@ -133,7 +134,7 @@ async function renderSignals() {
         </tr>`;
       }).join('') : `<tr><td colspan="${rep ? 5 : 6}" class="empty-note">No flagged calls ${SIG.days === 7 ? 'this week' : 'in the last 30 days'}.</td></tr>`}</tbody>
     </table></div>${matching.length > SIG_TOP ? `<button type="button" class="pill-btn sig-all" data-sig-all>${SIG.all ? 'Show fewer' : `Show all ${matching.length}`}</button>` : ''}</div>
-    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk” and “Ai Onboarding Bug” on the IMs’ calls, kept only when an AI second check of the transcript around the moment confirms it’s a real alarm (not talk about the old system or current process). Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
+    <p class="impl-note">What customers said that set off the Gong AI trackers “Ai churn risk”, “Ai Onboarding Bug” and “Ai Sold vs Reality” on the IMs’ calls, kept only when an AI second check of the transcript around the moment confirms it’s a real alarm (not talk about the old system or current process). Refreshed hourly. ⚑ on a firm’s row: signals in the last 30 days. Reviewed calls are hidden for every manager and don’t count toward ⚑.</p>`}`;
 }
 
 async function sigReview(btn) {
