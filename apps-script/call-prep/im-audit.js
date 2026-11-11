@@ -49,7 +49,7 @@ var IM_REP_PROMPT = [
   '',
   'You get: the IM\'s numbers for the last 30 days next to the team; one line per firm in their book (stage, days, milestones, usage);',
   'Gong summaries of every call they led, labeled [gong:ID] with the firm; email response-time facts; and a closer timeline for a few',
-  'sample firms [firm:FIRMID]. Calls show Gong\'s talk ratio (IM share of talking), longest monologue and question counts.',
+  'sample firms [firm:FIRMID]. Calls show how much of the call the IM spent talking, longest monologue and question counts.',
   '',
   'Find PATTERNS across firms and calls, not one-offs. Be specific, fair and kind; this is for coaching. Keep apart: product limits or',
   'bugs, and firms that stall for their own reasons (busy, no-shows), vs. the IM\'s own process and skills. Credit what goes well.',
@@ -203,7 +203,7 @@ function imCallInfo_(c, repEmail) {
   return {
     id: String(m.id), title: m.title || 'Call', date: imDay_(m.started), minutes: Math.round((m.duration || 0) / 60), url: m.url || '',
     brief: String(content.brief || '').slice(0, 1400), keyPoints: keyPoints.slice(0, 8), outcome: content.callOutcome && content.callOutcome.name || '',
-    talk: stats.talkratio != null ? Math.round(stats.talkratio <= 1 ? stats.talkratio * 100 : stats.talkratio) : imTalkShare_(inter.speakers, ids),
+    talk: stats.talkratio != null ? Math.round(stats.talkratio <= 1 ? stats.talkratio * 100 : stats.talkratio) : imTalkShare_(inter.speakers, ids, m.duration),
     monologue: stats.longestmonologue != null ? Math.round(stats.longestmonologue) : null,
     patience: stats.patience != null ? Math.round(stats.patience * 10) / 10 : null,
     questions: inter.questions ? (inter.questions.companyCount || 0) : null,
@@ -215,8 +215,9 @@ function imCallInfo_(c, repEmail) {
   };
 }
 
-// Fallback when Gong has no per-person stats: the IM's share of all talk time, from interaction.speakers.
-function imTalkShare_(speakers, ids) {
+// Fallback when Gong has no per-person stats: the IM's talk time as a share of the call. Gong's speakers list
+// only has Lawmatics people, so the call's length (not the speakers' total) is the denominator.
+function imTalkShare_(speakers, ids, durationSec) {
   speakers = speakers || [];
   var total = 0, mine = 0;
   speakers.forEach(function (sp) {
@@ -224,12 +225,13 @@ function imTalkShare_(speakers, ids) {
     total += t;
     if (ids.indexOf(String(sp.userId || '')) > -1 || ids.indexOf(String(sp.id || '')) > -1) mine += t;
   });
-  return total > 0 && mine > 0 ? Math.round(100 * mine / total) : null;
+  var denom = Number(durationSec) || 0;
+  return denom > 60 && mine > 0 ? Math.min(100, Math.round(100 * mine / denom)) : null;
 }
 
 function imCallText_(c, firmName) {
   return '[gong:' + c.id + '] ' + c.date + ' · ' + (firmName || 'unmatched firm') + ' · ' + c.title + ' · ' + c.minutes + ' min' +
-    (c.talk != null ? ' · IM talk ' + c.talk + '%' : '') + (c.monologue != null ? ' · longest monologue ' + c.monologue + 's' : '') +
+    (c.talk != null ? ' · IM talked ' + c.talk + '% of the call' : '') + (c.monologue != null ? ' · longest monologue ' + c.monologue + 's' : '') +
     (c.questions != null ? ' · IM questions ' + c.questions : '') + (c.outcome ? ' · outcome: ' + c.outcome : '') + '\n' +
     (c.brief || '(no Gong brief)') + (c.keyPoints.length ? '\nKey points: ' + c.keyPoints.join(' | ') : '');
 }
