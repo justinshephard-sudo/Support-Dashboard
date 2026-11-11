@@ -182,7 +182,7 @@ function imGongCalls_(uid, fromIso, callIds) {
   var out = [], cursor = null, guard = 0;
   do {
     var r = gongFetch_('/v2/calls/extensive', { cursor: cursor || undefined, filter: filter, contentSelector: { context: 'Extended',
-      exposedFields: { parties: true, content: { brief: true, keyPoints: true, callOutcome: true }, interaction: { personInteractionStats: true, questions: true } } } });
+      exposedFields: { parties: true, content: { brief: true, keyPoints: true, callOutcome: true }, interaction: { personInteractionStats: true, speakers: true, questions: true } } } });
     (r && r.calls || []).forEach(function (c) { out.push(c); });
     cursor = r && r.records && r.records.cursor;
   } while (cursor && guard++ < 15);
@@ -203,7 +203,7 @@ function imCallInfo_(c, repEmail) {
   return {
     id: String(m.id), title: m.title || 'Call', date: imDay_(m.started), minutes: Math.round((m.duration || 0) / 60), url: m.url || '',
     brief: String(content.brief || '').slice(0, 1400), keyPoints: keyPoints.slice(0, 8), outcome: content.callOutcome && content.callOutcome.name || '',
-    talk: stats.talkratio != null ? Math.round(stats.talkratio <= 1 ? stats.talkratio * 100 : stats.talkratio) : null,
+    talk: stats.talkratio != null ? Math.round(stats.talkratio <= 1 ? stats.talkratio * 100 : stats.talkratio) : imTalkShare_(inter.speakers, ids),
     monologue: stats.longestmonologue != null ? Math.round(stats.longestmonologue) : null,
     patience: stats.patience != null ? Math.round(stats.patience * 10) / 10 : null,
     questions: inter.questions ? (inter.questions.companyCount || 0) : null,
@@ -213,6 +213,18 @@ function imCallInfo_(c, repEmail) {
       return acc;
     }, []),
   };
+}
+
+// Fallback when Gong has no per-person stats: the IM's share of all talk time, from interaction.speakers.
+function imTalkShare_(speakers, ids) {
+  speakers = speakers || [];
+  var total = 0, mine = 0;
+  speakers.forEach(function (sp) {
+    var t = Number(sp.talkTime) || 0;
+    total += t;
+    if (ids.indexOf(String(sp.userId || '')) > -1 || ids.indexOf(String(sp.id || '')) > -1) mine += t;
+  });
+  return total > 0 && mine > 0 ? Math.round(100 * mine / total) : null;
 }
 
 function imCallText_(c, firmName) {
@@ -522,5 +534,5 @@ function checkImAudit() {
   var uid = gongUserId_(rep.email);
   var raw = uid ? imGongCalls_(uid, new Date(Date.now() - 7 * 864e5).toISOString())[0] : null;
   if (raw) Logger.log('Gong stats sample: ' + JSON.stringify({ me: (raw.parties || []).filter(function (p) { return String(p.emailAddress || '').toLowerCase() === rep.email; }),
-    stats: (raw.interaction || {}).personInteractionStats }).slice(0, 1500));
+    stats: (raw.interaction || {}).personInteractionStats, speakers: (raw.interaction || {}).speakers }).slice(0, 1500));
 }
