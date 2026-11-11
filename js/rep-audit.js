@@ -309,7 +309,7 @@ function renderImAudit(a) {
       ${kpi(s.quiet14, 'No touch in 14+ days', s.quiet14 > 0)}
       ${kpi(s.finished, 'Finished (30 days)', false, s.finishedMedianDays != null ? `median ${s.finishedMedianDays} days` : '')}
       ${kpi(s.callsLed, 'Calls led')}
-      ${kpi(s.talkMedian == null ? null : s.talkMedian + '%', 'Talk ratio (median)', s.talkMedian > 65)}
+      ${kpi(s.talkMedian == null ? null : s.talkMedian + '%', 'IM talking (share of call, median)', s.talkMedian > 60)}
       ${kpi(s.replyMedianHours == null ? null : s.replyMedianHours + 'h', 'Email reply (median)', s.replyMedianHours > 24, s.slowReplies ? `${s.slowReplies} over 24h` : '')}
       ${kpi(s.csatPct == null ? null : s.csatPct + '%', `Onboarding CSAT (${s.csatN || 0})`, s.csatPct != null && s.csatPct < 80, vs(t.csatPct == null ? null : t.csatPct + '%'))}`;
   const usage = firm && s.usage ? `<p class="ra-usage"><b>Milestones:</b> ${(s.milestones || []).map((m) => `<span class="ra-ms${m.done ? ' done' : ''}">${m.done ? '✓' : '○'} ${esc(m.name)}</span>`).join(' ')}<br>
