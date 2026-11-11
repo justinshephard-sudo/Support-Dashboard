@@ -296,7 +296,7 @@ function openFirm(firmId, name) {
         ${odBadge}${dangerBadge}
         ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
         ${typeof spButtonHtml === 'function' ? spButtonHtml() : ''}
-        ${f.firmId && overridesUnlocked && AUTH.email && MANAGER_EMAILS.includes(AUTH.email.toLowerCase()) && typeof raAuditFirm === 'function' ? `<button type="button" class="pill-btn" id="pfAudit" data-firm="${esc(f.firmId)}" data-name="${esc(f.name)}">🔍 Audit onboarding</button>` : ''}
+        ${f.firmId && overridesUnlocked && AUTH.email && MANAGER_EMAILS.includes(AUTH.email.toLowerCase()) && typeof raAuditFirm === 'function' ? `<button type="button" class="pill-btn" id="pfAudit" data-firm="${esc(f.firmId)}" data-name="${esc(f.name)}">🔍 Audit firm</button>` : ''}
       </div>
     </div>
     <div class="pf-grid">

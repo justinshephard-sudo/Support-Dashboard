@@ -93,7 +93,8 @@ var IM_REP_PROMPT = [
 ].join('\n');
 
 var IM_FIRM_PROMPT = [
-  'You review ONE law firm\'s Lawmatics onboarding end to end for the Customer Success managers.',
+  'You review ONE law firm\'s Lawmatics account for the Customer Success managers: its onboarding end to end, and, if it is live,',
+  '  how it is going since (usage, sentiment, frustrations).',
   IM_RUBRIC,
   '',
   'You get: the firm\'s profile (stage, days, pauses, milestones, 30-day usage, sales notes); every recorded call with Gong\'s summary',
@@ -106,7 +107,7 @@ var IM_FIRM_PROMPT = [
   '',
   'Return ONLY a JSON object (no code fence) with exactly these keys:',
   '{"headline": "one or two sentences: where this onboarding stands and why",',
-  ' "status": "on track | at risk | stalled | done",',
+  ' "status": "on track | at risk | stalled | done | healthy | low usage",',
   ' "timeline": [{"date": "YYYY-MM-DD", "event": "what happened (call, milestone, email, pause)"}],',
   ' "progression": [{"point": "...", "refs": []}],',
   ' "adoption": [{"point": "...", "refs": []}],',

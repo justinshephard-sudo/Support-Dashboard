@@ -66,7 +66,6 @@ function renderAuditHome() {
       <button type="button" role="tab" class="res-switch-btn" data-ra-tab="support" aria-selected="${RA.tab === 'support'}">Support</button>
       <button type="button" role="tab" class="res-switch-btn" data-ra-tab="im" aria-selected="${RA.tab === 'im'}">Implementation</button></div>`;
   if (RA.tab === 'im') {
-    const firms = d.imFirms || [];
     const busyFirm = (id) => { const a = last('firm:' + id); return a && a.status === 'running'; };
     body.innerHTML = tabs + `
       ${d.imError ? `<div class="error-banner">${esc(d.imError)}</div>` : ''}
@@ -74,9 +73,11 @@ function renderAuditHome() {
         ${(d.imReps || []).map((r) => raRepCard(r, last(r.id), 'data-ra-run-im')).join('') || '<p class="loop-empty">No AMs with open onboardings found.</p>'}
       </div>
       <div class="ra-firm-pick">
-        <div><b>Audit one onboarding</b><span>Reads every call, email, milestone and usage number for a single firm since it started.</span></div>
-        <select id="raFirm" aria-label="Firm"><option value="">Pick a firm in onboarding…</option>${firms.map((f) => `<option value="${esc(f.firmId)}" data-name="${esc(f.name)}">${esc(f.name)} · ${esc(f.rep)} · day ${f.days}</option>`).join('')}</select>
-        <button type="button" class="mgr-btn on" id="raFirmRun">Audit firm</button>
+        <div><b>Audit one firm</b><span>Any firm, in onboarding or live: every call, email, milestone and usage number, plus its bugs and feature requests.</span></div>
+        <div class="ra-firm-search">
+          <input id="raFirmQ" type="search" placeholder="Search any firm by name or Firm ID…" autocomplete="off" aria-label="Search firms">
+          <div id="raFirmResults" class="ra-firm-results" hidden></div>
+        </div>
       </div>
       <h3 class="ra-h">Past implementation audits</h3>
       ${raHistory(d.audits.filter((a) => a.kind === 'im' || a.kind === 'firm'))}
@@ -257,8 +258,29 @@ function updateAuditButton() {
   if (!overridesUnlocked) leaveAudits();
 }
 
+// Firm search for the single-firm audit: the same account list and matching as Firm Lookup.
+async function raFirmSearch(q) {
+  const box = document.getElementById('raFirmResults');
+  if (!box) return;
+  if (!q.trim()) { box.hidden = true; return; }
+  if (!FIRMS.loaded) { box.hidden = false; box.innerHTML = '<p class="loop-muted">Loading firms…</p>'; await ensureTabData('firm'); }
+  if (document.getElementById('raFirmQ')?.value !== q) return;
+  const hits = FIRMS.list.map((f) => ({ f, s: firmSearchScore(q, f) })).filter((x) => x.s > 0 && x.f.firmId)
+    .sort((a, b) => b.s - a.s).slice(0, 8).map((x) => x.f);
+  box.hidden = false;
+  box.innerHTML = hits.length ? hits.map((f) => `<button type="button" class="ra-firm-hit" data-ra-firm="${esc(f.firmId)}" data-name="${esc(f.name)}">
+      <b>${esc(f.name)}</b><span>Firm ${esc(f.firmId)}${f.am ? ' · ' + esc(f.am) : ''}${f.cb ? ' · ' + esc(f.cb) : ''}</span><i>Audit →</i></button>`).join('')
+    : '<p class="loop-muted">No firm matches that.</p>';
+}
+
 function setupAudits() {
   const body = document.getElementById('raBody');
+  let fq;
+  body.addEventListener('input', (e) => {
+    if (e.target.id !== 'raFirmQ') return;
+    clearTimeout(fq);
+    fq = setTimeout(() => raFirmSearch(e.target.value), 150);
+  });
   body.addEventListener('click', (e) => {
     const run = e.target.closest('[data-ra-run]');
     if (run) { runAudit(run.dataset.raRun); return; }
@@ -266,11 +288,6 @@ function setupAudits() {
     if (runIm) { runImAudit({ repId: runIm.dataset.raRunIm }, runIm.dataset.raRunIm); return; }
     const tab = e.target.closest('[data-ra-tab]');
     if (tab) { RA.tab = tab.dataset.raTab; try { localStorage.setItem('cs-ra-tab', RA.tab); } catch (err) { /* private mode */ } renderAuditHome(); return; }
-    if (e.target.closest('#raFirmRun')) {
-      const sel = document.getElementById('raFirm');
-      if (!sel.value) { sel.focus(); return; }
-      runImAudit({ firmId: sel.value, firmName: sel.selectedOptions[0].dataset.name }, 'firm:' + sel.value); return;
-    }
     const firmBtn = e.target.closest('[data-ra-firm]');
     if (firmBtn) { runImAudit({ firmId: firmBtn.dataset.raFirm, firmName: firmBtn.dataset.name }, 'firm:' + firmBtn.dataset.raFirm); return; }
     const open = e.target.closest('[data-ra-open]');
@@ -301,7 +318,7 @@ function renderImAudit(a) {
   const firm = a.kind === 'firm';
   const head = `<div class="ra-head">
       <button type="button" class="mgr-btn" id="raBack">← All</button>
-      <div><h3>${firm ? '🏢 ' : ''}${esc(a.rep)} <span>· ${firm ? 'onboarding review' : 'last 30 days'}</span></h3><p>Run ${esc(raWhen(a.requested))} by ${esc(raFirst(String(a.requestedBy).split('@')[0]))}</p></div>
+      <div><h3>${firm ? '🏢 ' : ''}${esc(a.rep)} <span>· ${firm ? 'firm review' : 'last 30 days'}</span></h3><p>Run ${esc(raWhen(a.requested))} by ${esc(raFirst(String(a.requestedBy).split('@')[0]))}</p></div>
     </div>`;
   if (a.status === 'running') {
     body.innerHTML = head + `<div class="ra-running"><div class="ra-spin"></div><p><b>Auditing…</b><br>ChurnZero, Gong and email are read; now writing the report. This page updates on its own — usually 2–4 minutes.</p>
@@ -390,7 +407,7 @@ function renderImAudit(a) {
     ${!firm && (r.firm_spotlights || []).length ? `<section class="ra-sec wide"><h3>🏢 Firm spotlights</h3><div class="ra-spots">${r.firm_spotlights.map((f) => `<div class="ra-spot">
         <div class="ra-spot-head"><b>${esc(f.firm)}</b><span class="ra-status ${esc(String(f.status || '').replace(/\s+/g, '-'))}">${esc(f.status || '')}</span></div>
         <p>${esc(f.what_happened || '')}</p>${f.next_step ? `<p class="ra-next">Next: ${esc(f.next_step)}</p>` : ''}${raRefs(f.refs, a)}
-        ${f.firm_id ? `<button type="button" class="pill-btn" data-ra-firm="${esc(f.firm_id)}" data-name="${esc(f.firm)}">Audit this onboarding</button>` : ''}</div>`).join('')}</div></section>` : ''}
+        ${f.firm_id ? `<button type="button" class="pill-btn" data-ra-firm="${esc(f.firm_id)}" data-name="${esc(f.firm)}">Audit this firm</button>` : ''}</div>`).join('')}</div></section>` : ''}
     ${firm ? raProductSections(r, a) : ''}
     ${firm ? raSection('Next steps', '➡️', r.next_steps, (x) => `<li><b>${esc(x.action)}</b><p>Owner: ${esc(x.owner || '')}</p></li>`).replace('ra-sec', 'ra-sec wide coach')
       : raSection('Coaching focus', '🎯', r.coaching, (x) => `<li><b>${esc(x.action)}</b><p>${esc(x.why)}</p></li>`).replace('ra-sec', 'ra-sec wide coach')}
