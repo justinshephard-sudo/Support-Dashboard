@@ -1365,3 +1365,7 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .ra-tl{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--text-2)}
 .ra-tl b{color:var(--text-1);font-variant-numeric:tabular-nums;margin-right:6px}
 #pfAudit{margin-left:4px}
+.ra-group{font-size:18px;font-weight:800;color:var(--text-1);margin:26px 4px 12px}
+.ra-group + .ra-grid + .ra-spots,.ra-grid + .ra-spots{margin-top:14px}
+.ra-bugs li{border-left-color:#d64545}
+.ra-frs li{border-left-color:#ff9011}

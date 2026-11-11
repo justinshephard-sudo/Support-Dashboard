@@ -24,11 +24,13 @@ var IM_DAYS = 30;
 var IM_SAMPLE = 6;
 var IM_FIRM_LOOKBACK_DAYS = 150;
 var IM_GOOD_DAYS = 70;
-var IM_ACCOUNT_FIELDS = 'Id,Name,StartDate,IsActive,PrimaryChurnScoreValue,UsageFrequency,Cf/FirmId,Cf/AccountManager,Cf/CurrentTermStart,' +
+var IM_ACCOUNT_FIELDS = 'Id,Name,StartDate,IsActive,PrimaryChurnScoreValue,TotalContractAmount,Cf/FirmId,Cf/AccountManager,Cf/CurrentTermStart,' +
   'Cf/OnboardingStatus,Cf/NewOnboardingCall,Cf/OnboardingCompletedDate,Cf/NewTimeInOnboarding,Cf/DateOnboardingPaused,Cf/DateOnboardingResumed,' +
   'Cf/TimeOnboardingPaused,Cf/LeadSourcesConnected,Cf/DocumentsFormsApproved,Cf/FirstHalfOfAutomationsApproved,Cf/SecondHalfOfAutomationsApproved,' +
-  'Cf/TeamTrainingComplete,Cf/OnboardingDocumentsUploaded,Cf/OfMessagesSentl30,Cf/OfActivitiesLoggedl30,Cf/OfMeetingsl30,Cf/AvgMattersCreatedmonth,' +
-  'Cf/TotalSmsSent,Cf/AiCreditsUsedThisCycle,Cf/OfMerlinEngageSessionsp30,Cf/AgencyFirm,Cf/AgencyClientFirm,Cf/Consultant,Cf/SalesOnboardingNotes,Cf/KeyChallenges';
+  'Cf/TeamTrainingComplete,Cf/OnboardingDocumentsUploaded,Cf/OfMessagesSentl30,Cf/OfMeetingsl30,Cf/AvgMattersCreatedmonth,Cf/AvgMonthlyLeadVolumelifetime,' +
+  'Cf/TotalSmsSent,Cf/OfMerlinEngageSessionsp30,Cf/AgencyFirm,Cf/AgencyClientFirm,Cf/Consultant,Cf/SalesOnboardingNotes,Cf/KeyChallenges,' +
+  'Cf/CancellationRequested,Cf/DangerZone,Cf/AverageCsatLast60,Cf/OutstandingOnboardingBugs,Cf/OnboardingFeatureRequests,Cf/ProductPainPoints';
+var IM_HIGH_CHURN = 67;     // ChurnZero churn score: lower is healthier (same bands as the CSM tab)
 var IM_MILESTONES = [['LeadSourcesConnected', 'Lead sources connected'], ['OnboardingDocumentsUploaded', 'Docs uploaded'],
   ['DocumentsFormsApproved', 'Docs & forms approved'], ['FirstHalfOfAutomationsApproved', 'Automations (1st half) approved'],
   ['SecondHalfOfAutomationsApproved', 'Automations (2nd half) approved'], ['TeamTrainingComplete', 'Team trained']];
@@ -46,29 +48,48 @@ var IM_RUBRIC = [
 ].join('\n');
 
 var IM_REP_PROMPT = [
-  'You help the Customer Success managers at Lawmatics coach one implementation manager (IM, called "AM" until January).',
-  IM_RUBRIC,
+  'You help the Customer Success managers at Lawmatics coach one account manager (AM; called implementation manager from January).',
+  'An AM owns firms in two very different states, and the report treats them separately:',
   '',
-  'You get: the IM\'s numbers for the last 30 days next to the team; one line per firm in their book (stage, days, milestones, usage);',
-  'Gong summaries of every call they led, labeled [gong:ID] with the firm; email response-time facts; and a closer timeline for a few',
-  'sample firms [firm:FIRMID]. Calls show how much of the call the IM spent talking, longest monologue and question counts.',
+  'IN ONBOARDING (getting a newly signed firm live in under 70 days). Judge: SENTIMENT (how the customer feels on calls and in email:',
+  'confident, engaged, frustrated, confused, doubting the purchase), RESPONSIVENESS (email reply speed, gaps with no contact),',
+  'ONBOARDING TIME (days vs 70 and vs the team), ROADBLOCKS (what is stalling each firm and whose side it is on: firm, AM, or product),',
+  'and CALLS SCHEDULED (does every firm have its next call on the calendar). Do NOT judge product usage for these firms.',
   '',
-  'Find PATTERNS across firms and calls, not one-offs. Be specific, fair and kind; this is for coaching. Keep apart: product limits or',
-  'bugs, and firms that stall for their own reasons (busy, no-shows), vs. the IM\'s own process and skills. Credit what goes well.',
-  'Every claim needs refs ("gong:ID" or "firm:FIRMID") from the material; never invent refs. If the material is thin, say so.',
+  'LIVE ACCOUNTS (finished onboarding; the AM keeps them healthy). Judge: SENTIMENT, RESPONSIVENESS, ROADBLOCKS / FRUSTRATIONS',
+  '(bugs, missing features, billing, confusion), and a USAGE DEEP DIVE: who is barely using Lawmatics, who never engaged, who is at churn',
+  'risk, and whether the AM is doing anything about it. The whole book is summarized by counts; you see the flagged accounts and every',
+  'account the AM touched in the last 30 days.',
+  '',
+  'DATA CAVEATS: ChurnZero milestone checkboxes are often stale (finished firms show them unchecked); treat them as a hint only.',
+  'Usage numbers are 30-day ChurnZero totals (no trends). Don\'t comment on data quality unless it changes a conclusion.',
+  '',
+  'Find PATTERNS, not one-offs. Be specific, fair and kind; this is for coaching. Separate the AM\'s actions from the firm\'s own delays',
+  'and from product limits. Credit what goes well. Every claim needs refs ("gong:ID" or "firm:FIRMID") from the material; never invent refs.',
   '',
   'Return ONLY a JSON object (no code fence) with exactly these keys:',
-  '{"headline": "one or two sentences: the overall read",',
+  '{"headline": "one or two sentences: the overall read across both groups",',
   ' "strengths": [{"point": "...", "refs": []}],',
-  ' "progression": [{"point": "pace, stalls, gaps, 70-day risk", "refs": []}],',
-  ' "adoption": [{"point": "are their firms actually using Lawmatics, and what the IM does about it", "refs": []}],',
-  ' "sentiment": {"overview": "how customers feel on this IM\'s calls and emails", "observations": [{"point": "...", "refs": []}]},',
-  ' "call_craft": [{"point": "agenda, discovery, talk ratio, homework with dates, next steps", "refs": []}],',
-  ' "communication": [{"point": "email speed and clarity, follow-up between calls", "refs": []}],',
-  ' "firm_spotlights": [{"firm": "firm name", "firm_id": "id", "status": "on track | at risk | stalled | done", "what_happened": "...", "next_step": "...", "refs": []}],',
+  ' "onboarding": {',
+  '   "sentiment": [{"point": "...", "refs": []}],',
+  '   "responsiveness": [{"point": "...", "refs": []}],',
+  '   "onboarding_time": [{"point": "pace vs 70 days and the team; stalls", "refs": []}],',
+  '   "roadblocks": [{"point": "what is blocking which firms, and whose side", "refs": []}],',
+  '   "scheduling": [{"point": "firms without a next call, gaps between calls", "refs": []}],',
+  '   "spotlights": [{"firm": "name", "firm_id": "id", "status": "on track | at risk | stalled", "what_happened": "...", "next_step": "...", "refs": []}]},',
+  ' "live": {',
+  '   "sentiment": [{"point": "...", "refs": []}],',
+  '   "responsiveness": [{"point": "...", "refs": []}],',
+  '   "frustrations": [{"point": "roadblocks and frustrations live customers raise", "refs": []}],',
+  '   "usage": [{"point": "who is and isn\'t using Lawmatics, never-engaged and churn-risk accounts, what the AM is doing about it", "refs": []}],',
+  '   "spotlights": [{"firm": "name", "firm_id": "id", "status": "healthy | low usage | at risk", "what_happened": "...", "next_step": "...", "refs": []}]},',
+  ' "bugs": [{"issue": "a Lawmatics bug customers hit", "firms": "which firms", "status": "what is known: fixed, ticket open, no update", "refs": []}],',
+  ' "feature_requests": [{"request": "what customers asked Lawmatics to add or change", "firms": "which firms", "refs": []}],',
   ' "coaching": [{"action": "a concrete thing to work on", "why": "the evidence, briefly"}],',
   ' "follow_up": [{"item": "a firm or issue a manager should look at now", "refs": []}]}',
-  'Keep each list to the 3-5 most important items (coaching: 3-4, firm_spotlights: one per sample firm). Plain language.',
+  'BUGS and FEATURE REQUESTS: list every distinct one raised on calls, in email, or in the ChurnZero bug / feature-request fields, from both',
+  'groups, combining duplicates across firms (most firms first). These are product issues, not the AM\'s fault.',
+  'Other lists: 2-4 items each (coaching 3-4, spotlights 3-5 per group). Plain language.',
 ].join('\n');
 
 var IM_FIRM_PROMPT = [
@@ -78,6 +99,9 @@ var IM_FIRM_PROMPT = [
   'You get: the firm\'s profile (stage, days, pauses, milestones, 30-day usage, sales notes); every recorded call with Gong\'s summary',
   '[gong:ID]; the full transcript of the latest call; the email threads with the firm; and any real call signals (churn risk, blocked by',
   'a bug, sold vs reality). Be specific and fair: separate the IM\'s actions from the firm\'s own delays and from product limits.',
+  'If the firm is still IN ONBOARDING, focus on sentiment, responsiveness, onboarding time, roadblocks and whether the next call is scheduled;',
+  'leave product usage out of "adoption" (say "in onboarding" there). If it is LIVE, go deep on usage in "adoption".',
+  'List every bug and feature request the firm raised (calls, email, ChurnZero fields).',
   'Every claim needs refs ("gong:ID") where they exist; never invent refs.',
   '',
   'Return ONLY a JSON object (no code fence) with exactly these keys:',
@@ -88,6 +112,8 @@ var IM_FIRM_PROMPT = [
   ' "adoption": [{"point": "...", "refs": []}],',
   ' "sentiment": {"overview": "how the firm feels now and how that changed", "observations": [{"point": "...", "refs": []}]},',
   ' "risks": [{"risk": "...", "detail": "...", "refs": []}],',
+  ' "bugs": [{"issue": "a Lawmatics bug this firm hit", "status": "fixed / ticket open / no update", "refs": []}],',
+  ' "feature_requests": [{"request": "what the firm asked Lawmatics to add or change", "refs": []}],',
   ' "went_well": [{"point": "...", "refs": []}],',
   ' "next_steps": [{"action": "...", "owner": "IM | firm | manager | product"}],',
   ' "im_notes": [{"point": "coaching notes on how the IM ran this one", "refs": []}]}',
@@ -365,13 +391,52 @@ function imTeam_(repName) {
 
 /* ---------- rep audit ---------- */
 
+// Next scheduled ChurnZero meeting per open firm, from the Implementation tab ("" = needs scheduling).
+function imNextMeetings_() {
+  var sh = SpreadsheetApp.openById(SIGNAL_SHEET_ID).getSheetByName('Impl - Open Firms');
+  var out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  var rows = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getDisplayValues();
+  var h = rows.shift(), ix = function (k) { return h.indexOf(k); };
+  rows.forEach(function (r) { out[r[ix('FirmId')]] = r[ix('NextMeeting')] || ''; });
+  return out;
+}
+
+// ChurnZero's free-text bug / feature-request / pain-point fields, when filled in.
+function imProductNotes_(cf) {
+  var out = [];
+  if (cf.OutstandingOnboardingBugs) out.push('BUGS (ChurnZero): ' + String(cf.OutstandingOnboardingBugs).slice(0, 300));
+  if (cf.OnboardingFeatureRequests) out.push('FEATURE REQUESTS (ChurnZero): ' + String(cf.OnboardingFeatureRequests).slice(0, 300));
+  if (cf.ProductPainPoints) out.push('PAIN POINTS (ChurnZero): ' + String(cf.ProductPainPoints).slice(0, 300));
+  return out.length ? '\n   ' + out.join(' · ') : '';
+}
+
+function imUsageLine_(a) {
+  var cf = a.Cf || {};
+  return 'msgs30 ' + (cf.OfMessagesSentl30 || 0) + ', SMS ' + (cf.TotalSmsSent || 0) + ', matters/mo ' + Math.round(cf.AvgMattersCreatedmonth || 0) +
+    ', leads/mo ' + Math.round(cf.AvgMonthlyLeadVolumelifetime || 0) + ', meetings30 ' + (cf.OfMeetingsl30 || 0) +
+    (cf.OfMerlinEngageSessionsp30 ? ', Engage30 ' + cf.OfMerlinEngageSessionsp30 : '');
+}
+
+// Live account flags (no AI): what makes it worth a look.
+function imLiveFlags_(a) {
+  var cf = a.Cf || {}, f = [];
+  if (/never engaged/i.test(cf.OnboardingStatus || '')) f.push('never engaged');
+  if ((cf.OfMessagesSentl30 || 0) < 10 && (cf.AvgMattersCreatedmonth || 0) < 2) f.push('low usage');
+  if (a.PrimaryChurnScoreValue != null && a.PrimaryChurnScoreValue >= IM_HIGH_CHURN) f.push('churn ' + a.PrimaryChurnScoreValue);
+  if (cf.CancellationRequested === true) f.push('cancellation requested');
+  if (cf.DangerZone === true) f.push('danger zone');
+  return f;
+}
+
 function imAuditRep_(rep, id) {
   var fromMs = Date.now() - IM_DAYS * 864e5, fromIso = new Date(fromMs).toISOString(), fromDay = fromIso.slice(0, 10);
   var accounts = czGet_('/Account', { $filter: "IsActive eq true and Cf/AccountManager eq '" + rep.name.replace(/'/g, "''") + "'", $select: IM_ACCOUNT_FIELDS })
-    .filter(function (a) { var cf = a.Cf || {}; return !cf.AgencyFirm && !cf.AgencyClientFirm && !cf.Consultant && (imOpen_(a) || (cf.OnboardingCompletedDate && imDay_(cf.OnboardingCompletedDate) >= fromDay)); });
+    .filter(function (a) { var cf = a.Cf || {}; return !cf.AgencyFirm && !cf.AgencyClientFirm && !cf.Consultant; });
   var contacts = imContacts_(accounts.map(function (a) { return a.Id; }));
   var matcher = imFirmMatcher_(accounts, contacts);
   var byId = {}; accounts.forEach(function (a) { byId[a.Id] = a; });
+  var next = imNextMeetings_();
 
   var uid = gongUserId_(rep.email);
   var calls = uid ? imGongCalls_(uid, fromIso).map(function (c) { return imCallInfo_(c, rep.email); }) : [];
@@ -385,75 +450,100 @@ function imAuditRep_(rep, id) {
   var signals = imSignals_(rep.name, fromDay);
   var csat = imCsat_(rep.name, new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10));
   var team = imTeam_(rep.name);
+  var med = function (v) { v = v.slice().sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : null; };
 
-  // Per-firm facts → risk score → sample.
   var facts = accounts.map(function (a) {
     var cf = a.Cf || {};
     var myCalls = calls.filter(function (c) { return c.accountId === a.Id; });
     var myThreads = threads.filter(function (t) { return t.accountId === a.Id; });
     var lastTouch = [myCalls.length ? myCalls[myCalls.length - 1].date : '', myThreads.reduce(function (m, t) { return t.last > m ? t.last : m; }, '')].sort().pop() || '';
-    var days = cf.OnboardingCompletedDate ? Number(cf.NewTimeInOnboarding) || 0 : imDaysSince_(imStart_(a)) || 0;
-    var done = IM_MILESTONES.filter(function (m) { return cf[m[0]] === true; }).length;
+    var onboarding = imOpen_(a);
+    var days = onboarding ? imDaysSince_(imStart_(a)) || 0 : Number(cf.NewTimeInOnboarding) || 0;
     var mySignals = signals.filter(function (s) { return s.firmId === String(cf.FirmId); });
     var myCsat = csat.filter(function (s) { return s.firmId === String(cf.FirmId); });
-    var risk = 0;
-    if (!cf.OnboardingCompletedDate) {
+    var waits = myThreads.reduce(function (acc, t) { return acc.concat(t.waits); }, []);
+    var nextCall = onboarding ? (next[String(cf.FirmId)] || '') : '';
+    var risk = 0, flags = onboarding ? [] : imLiveFlags_(a);
+    if (onboarding) {
       if (days > IM_GOOD_DAYS) risk += 4; else if (days > 50) risk += 2;
       if (!lastTouch || imDaysSince_(lastTouch) > 14) risk += 3;
-      if ((cf.OfMessagesSentl30 || 0) + (cf.TotalSmsSent || 0) < 5 && days > 30) risk += 1;
+      if (!nextCall) risk += 2;
+    } else {
+      risk += flags.length * 2 + (myCalls.length || myThreads.length ? 1 : 0);
     }
     risk += 3 * mySignals.length;
     if (myCsat.some(function (s) { return s.score && s.score <= 3; })) risk += 3;
-    return { a: a, days: days, done: done, calls: myCalls, threads: myThreads, lastTouch: lastTouch, signals: mySignals, csat: myCsat, risk: risk, finished: !!cf.OnboardingCompletedDate };
+    if (waits.some(function (w) { return w > 24; })) risk += 1;
+    return { a: a, onboarding: onboarding, days: days, calls: myCalls, threads: myThreads, lastTouch: lastTouch, signals: mySignals, csat: myCsat,
+      waits: waits, nextCall: nextCall, flags: flags, risk: risk, touched: myCalls.length + myThreads.length > 0 };
   });
-  var openF = facts.filter(function (f) { return !f.finished; }).sort(function (x, y) { return y.risk - x.risk; });
-  var doneF = facts.filter(function (f) { return f.finished; }).sort(function (x, y) { return x.days - y.days; });
-  var sample = openF.slice(0, 3).concat(doneF.slice(0, 2));
-  var mid = openF.slice(3).filter(function (f) { return f.risk === 0 || f.risk < 3; });
-  if (mid.length) sample.push(mid[Math.floor(mid.length / 2)]);
-  sample = sample.slice(0, IM_SAMPLE);
+  var onb = facts.filter(function (f) { return f.onboarding; }).sort(function (x, y) { return y.risk - x.risk; });
+  var live = facts.filter(function (f) { return !f.onboarding; }).sort(function (x, y) { return y.risk - x.risk; });
+  // Closer look: 4 onboarding (3 riskiest + 1 steady) and 4 live (3 riskiest touched/flagged + 1 healthy touched).
+  var pickOnb = onb.slice(0, 3).concat(onb.slice(3).filter(function (f) { return f.risk < 3; }).slice(0, 1));
+  var pickLive = live.filter(function (f) { return f.flags.length || f.touched; }).slice(0, 3)
+    .concat(live.filter(function (f) { return !f.flags.length && f.touched; }).slice(0, 1));
+  var sample = pickOnb.concat(pickLive);
 
-  var waits = threads.reduce(function (acc, t) { return acc.concat(t.waits); }, []).sort(function (a, b) { return a - b; });
-  var talk = calls.map(function (c) { return c.talk; }).filter(function (x) { return x != null; }).sort(function (a, b) { return a - b; });
-  var mono = calls.map(function (c) { return c.monologue; }).filter(function (x) { return x != null; }).sort(function (a, b) { return a - b; });
-  var med = function (v) { return v.length ? v[Math.floor(v.length / 2)] : null; };
+  var waitsAll = function (list) { return list.reduce(function (acc, f) { return acc.concat(f.waits); }, []); };
+  var talk = calls.map(function (c) { return c.talk; }).filter(function (x) { return x != null; });
+  var lf = function (k) { return live.filter(function (f) { return f.flags.some(function (x) { return x.indexOf(k) === 0; }); }).length; };
   var stats = {
-    kind: 'im', firms: accounts.length, open: team ? team.rep.openNow : openF.length, finished: doneF.length,
-    over70: team ? team.rep.openOver70Days : openF.filter(function (f) { return f.days > IM_GOOD_DAYS; }).length,
-    medianDaysOpen: team ? team.rep.medianDaysOpenFirms : null,
-    quiet14: openF.filter(function (f) { return !f.lastTouch || imDaysSince_(f.lastTouch) > 14; }).length,
-    finishedMedianDays: med(doneF.map(function (f) { return f.days; }).sort(function (a, b) { return a - b; })),
-    callsLed: calls.length, callsMatched: calls.filter(function (c) { return c.accountId; }).length,
-    talkMedian: med(talk), monologueMedian: med(mono),
-    emailThreads: threads.length, replyMedianHours: med(waits), slowReplies: waits.filter(function (w) { return w > 24; }).length,
+    kind: 'im', firms: accounts.length, callsLed: calls.length, callsMatched: calls.filter(function (c) { return c.accountId; }).length, talkMedian: med(talk),
+    emailThreads: threads.length, replyMedianHours: med(waitsAll(facts)), slowReplies: waitsAll(facts).filter(function (w) { return w > 24; }).length,
     signals: signals.length, csatN: csat.length, csatPct: csat.length ? Math.round(100 * csat.filter(function (s) { return s.score >= 4; }).length / csat.length) : null,
     team: team,
-    sampled: sample.map(function (f) { return { firmId: String(f.a.Cf.FirmId), name: f.a.Name, risk: f.risk, finished: f.finished }; }),
+    onboarding: { open: team ? team.rep.openNow : onb.length, over70: team ? team.rep.openOver70Days : onb.filter(function (f) { return f.days > IM_GOOD_DAYS; }).length,
+      medianDaysOpen: team ? team.rep.medianDaysOpenFirms : med(onb.map(function (f) { return f.days; })),
+      noNextCall: onb.filter(function (f) { return !f.nextCall; }).length, quiet14: onb.filter(function (f) { return !f.lastTouch || imDaysSince_(f.lastTouch) > 14; }).length,
+      replyMedianHours: med(waitsAll(onb)) },
+    live: { accounts: live.length, touched: live.filter(function (f) { return f.touched; }).length, lowUsage: lf('low usage'), neverEngaged: lf('never engaged'),
+      highChurn: lf('churn'), cancelling: lf('cancellation'), replyMedianHours: med(waitsAll(live)),
+      mrrAtRisk: Math.round(live.filter(function (f) { return f.flags.length; }).reduce(function (t, f) { return t + (Number(f.a.TotalContractAmount) || 0); }, 0)) },
+    sampled: sample.map(function (f) { return { firmId: String(f.a.Cf.FirmId), name: f.a.Name, onboarding: f.onboarding }; }),
     firmNames: {}, callList: calls.map(function (c) { return { id: c.id, title: c.title, date: c.date, url: c.url, firmId: c.accountId && byId[c.accountId] ? String(byId[c.accountId].Cf.FirmId) : '' }; }),
   };
   accounts.forEach(function (a) { stats.firmNames[String(a.Cf.FirmId)] = a.Name; });
 
   var firmName = function (accountId) { return accountId && byId[accountId] ? byId[accountId].Name : ''; };
-  var context = 'IM: ' + rep.name + '\nWINDOW: last ' + IM_DAYS + ' days\n\nIMPLEMENTATION TAB NUMBERS (this rep vs the median AM; compare like with like): ' + JSON.stringify(team) +
-    '\nTHIS AUDIT (last 30 days): ' + JSON.stringify({ firmsReviewed: stats.firms, finishedInWindow: stats.finished, finishedMedianDays: stats.finishedMedianDays,
-      openWithNoTouch14Days: stats.quiet14, callsLed: stats.callsLed, imTalkRatioMedianPct: stats.talkMedian,
-      longestMonologueMedianSec: stats.monologueMedian, emailThreads: stats.emailThreads, emailReplyMedianBusinessHours: stats.replyMedianHours,
-      emailRepliesOver24BusinessHours: stats.slowReplies, realCallSignals: stats.signals, onboardingCsat90d: { pct: stats.csatPct, n: stats.csatN } }) +
-    '\n\nBOOK (one line per firm):\n' + facts.map(function (f) {
-      return imFirmLine_(f.a, '\n   last touch ' + (f.lastTouch || 'none in 30 days') + ' · calls ' + f.calls.length + ' · email threads ' + f.threads.length +
-        (f.signals.length ? ' · SIGNALS: ' + f.signals.map(function (s) { return s.signal; }).join(', ') : '') +
-        (f.csat.length ? ' · CSAT ' + f.csat.map(function (s) { return s.score; }).join('/') : ''));
+  var touch = function (f) {
+    return ' · last touch ' + (f.lastTouch || 'none in 30 days') + ' · calls ' + f.calls.length + ' · email threads ' + f.threads.length +
+      (f.waits.length ? ' · slowest reply ' + Math.max.apply(null, f.waits) + 'h' : '') +
+      (f.signals.length ? ' · SIGNALS: ' + f.signals.map(function (s) { return s.signal; }).join(', ') : '') +
+      (f.csat.length ? ' · CSAT ' + f.csat.map(function (s) { return s.score; }).join('/') : '');
+  };
+  var liveShown = live.filter(function (f) { return f.flags.length || f.touched; }).slice(0, 70);
+  var context = 'AM: ' + rep.name + '\nWINDOW: last ' + IM_DAYS + ' days for calls and email\n\nIMPLEMENTATION TAB NUMBERS (this AM vs the median AM): ' + JSON.stringify(team) +
+    '\nCALLS: ' + calls.length + ' led, AM talked ' + (stats.talkMedian == null ? '?' : stats.talkMedian + '%') + ' of the call (median)' +
+    '\nEMAIL: ' + threads.length + ' customer threads, AM reply median ' + stats.replyMedianHours + ' business hours, ' + stats.slowReplies + ' replies over 24 business hours' +
+    '\nONBOARDING CSAT (90 days): ' + (csat.map(function (s) { return s.firm + ' ' + s.score + '/5' + (s.comment ? ' — ' + s.comment : ''); }).join('; ') || 'none') +
+    '\nREAL CALL SIGNALS: ' + (signals.map(function (s) { return '[gong:' + s.callId + '] ' + s.firm + ' — ' + s.signal + ': ' + s.reason; }).join('; ') || 'none') +
+    '\n\n=== IN ONBOARDING (' + onb.length + ' firms) — numbers: ' + JSON.stringify(stats.onboarding) + '\n' +
+    onb.map(function (f) {
+      var cf = f.a.Cf || {};
+      return '[firm:' + cf.FirmId + '] ' + f.a.Name + ' — ' + (cf.OnboardingStatus || '') + ', stage "' + (cf.NewOnboardingCall || 'none') + '", day ' + f.days +
+        (cf.DateOnboardingPaused && !cf.DateOnboardingResumed ? ' (PAUSED since ' + imDay_(cf.DateOnboardingPaused) + ')' : '') +
+        ' · next call ' + (f.nextCall || 'NONE SCHEDULED') + touch(f) + imProductNotes_(cf);
     }).join('\n') +
-    '\n\nREAL CALL SIGNALS:\n' + (signals.map(function (s) { return '[gong:' + s.callId + '] ' + s.date + ' ' + s.firm + ' — ' + s.signal + ': ' + s.reason + (s.quote ? ' “' + s.quote + '”' : ''); }).join('\n') || '(none)') +
-    '\n\nONBOARDING CSAT (90 days):\n' + (csat.map(function (s) { return s.date + ' ' + s.firm + ' ' + s.score + '/5' + (s.comment ? ' — ' + s.comment : ''); }).join('\n') || '(none)') +
-    '\n\nSAMPLE FIRMS (closer look):\n' + sample.map(function (f) {
-      return '=== [firm:' + f.a.Cf.FirmId + '] ' + f.a.Name + (f.finished ? ' (finished)' : '') + ' ===\n' +
-        (f.a.Cf.SalesOnboardingNotes ? 'Sales notes: ' + String(f.a.Cf.SalesOnboardingNotes).slice(0, 500) + '\n' : '') +
-        f.threads.slice(-3).map(function (t) { return imThreadText_(t, rep.email, 1800); }).join('\n\n');
+    '\n\n=== LIVE ACCOUNTS (' + live.length + ' in the whole book) — numbers: ' + JSON.stringify(stats.live) +
+    '\nShown: every flagged account and every account the AM talked to in the window (' + liveShown.length + '). Unflagged, untouched accounts are left out.\n' +
+    liveShown.map(function (f) {
+      var cf = f.a.Cf || {};
+      return '[firm:' + cf.FirmId + '] ' + f.a.Name + ' — live' + (cf.OnboardingCompletedDate ? ' since ' + imDay_(cf.OnboardingCompletedDate) : '') +
+        ', MRR $' + Math.round(f.a.TotalContractAmount || 0) + (f.a.PrimaryChurnScoreValue != null ? ', churn ' + f.a.PrimaryChurnScoreValue : '') +
+        (f.flags.length ? ' · FLAGS: ' + f.flags.join(', ') : '') + '\n   usage: ' + imUsageLine_(f.a) + touch(f) + imProductNotes_(cf);
+    }).join('\n') +
+    '\n\nCLOSER LOOK (email text):\n' + sample.map(function (f) {
+      return '=== [firm:' + f.a.Cf.FirmId + '] ' + f.a.Name + (f.onboarding ? ' (onboarding)' : ' (live)') + ' ===\n' +
+        (f.onboarding && f.a.Cf.SalesOnboardingNotes ? 'Sales notes: ' + String(f.a.Cf.SalesOnboardingNotes).slice(0, 400) + '\n' : '') +
+        (f.threads.slice(-3).map(function (t) { return imThreadText_(t, rep.email, 1600); }).join('\n\n') || '(no email in the window)');
     }).join('\n\n');
-  var callsText = calls.map(function (c) { return imCallText_(c, firmName(c.accountId)); }).join('\n\n---\n\n') || '(No Gong calls led by this IM in the window.)';
-  if (context.length > 70000) context = context.slice(0, 70000) + '\n…(trimmed)';
-  if (callsText.length > 60000) callsText = callsText.slice(0, 60000) + '\n…(trimmed)';
+  var callsText = calls.map(function (c) {
+    var f = c.accountId ? facts.filter(function (x) { return x.a.Id === c.accountId; })[0] : null;
+    return imCallText_(c, firmName(c.accountId) + (f ? (f.onboarding ? ' (onboarding)' : ' (live)') : ''));
+  }).join('\n\n---\n\n') || '(No Gong calls led by this AM in the window.)';
+  if (context.length > 75000) context = context.slice(0, 75000) + '\n…(trimmed)';
+  if (callsText.length > 55000) callsText = callsText.slice(0, 55000) + '\n…(trimmed)';
   return { stats: stats, context: context, callsText: callsText, prompt: IM_REP_PROMPT };
 }
 
@@ -497,7 +587,8 @@ function imAuditFirm_(firmId) {
     firmNames: {},
   };
   stats.firmNames[String(cf.FirmId)] = a.Name;
-  var context = 'FIRM PROFILE\n' + imFirmLine_(a, '') + '\nIM: ' + repName + ' · started ' + imDay_(start) +
+  var context = 'FIRM PROFILE (' + (imOpen_(a) ? 'IN ONBOARDING' : 'LIVE') + ')\n' + imFirmLine_(a, imProductNotes_(cf)) + (imOpen_(a) ? '' : '\n   full usage: ' + imUsageLine_(a)) +
+    '\nAM: ' + repName + ' · started ' + imDay_(start) +
     (cf.SalesOnboardingNotes ? '\nSales notes: ' + String(cf.SalesOnboardingNotes).slice(0, 1500) : '') +
     (cf.KeyChallenges ? '\nKey challenges: ' + String(cf.KeyChallenges).slice(0, 800) : '') +
     '\n\nREAL CALL SIGNALS:\n' + (signals.map(function (s) { return '[gong:' + s.callId + '] ' + s.date + ' — ' + s.signal + ': ' + s.reason + (s.quote ? ' “' + s.quote + '”' : ''); }).join('\n') || '(none)') +
@@ -559,7 +650,7 @@ function checkImAudit() {
   if (!rep) return;
   var built = imAuditRep_(rep, 'check');
   var s = built.stats;
-  Logger.log(rep.name + ': ' + s.firms + ' firms (' + s.open + ' open, ' + s.finished + ' finished) · ' + s.callsLed + ' Gong calls (' + s.callsMatched + ' matched to a firm) · talk median ' + s.talkMedian +
+  Logger.log(rep.name + ': ' + s.firms + ' accounts · onboarding ' + JSON.stringify(s.onboarding) + ' · live ' + JSON.stringify(s.live) + ' · ' + s.callsLed + ' Gong calls (' + s.callsMatched + ' matched to a firm) · talk median ' + s.talkMedian +
     '% · ' + s.emailThreads + ' email threads · reply median ' + s.replyMedianHours + 'h · ' + s.signals + ' signals · context ' + built.context.length + ' + calls ' + built.callsText.length + ' chars');
   Logger.log('First call brief: ' + built.callsText.slice(0, 400));
   var uid = gongUserId_(rep.email);

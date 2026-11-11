@@ -207,6 +207,9 @@ function renderAudit(a) {
       ${raSection('Knowledge gaps', '📚', r.knowledge_gaps, (x) => `<li><b>${esc(x.topic)}</b><p>${esc(x.detail)}</p>${raRefs(x.refs, a)}</li>`)}
       ${raSection('Product limits (not on the rep)', '🧩', r.product_limits, (x) => `<li><b>${esc(x.issue)}</b><p>${esc(x.detail)}</p>${raRefs(x.refs, a)}</li>`)}
     </div>
+    ${raProductSections(r, a)}
+    <div class="ra-grid">
+    </div>
     ${r.calls ? `<section class="ra-sec wide"><h3>🎥 Customer calls</h3><p>${esc(r.calls.overview || '')}</p>
       ${(r.calls.observations || []).length ? `<ul>${r.calls.observations.map((x) => `<li><p>${esc(x.point)}</p>${raRefs(x.refs, a)}</li>`).join('')}</ul>` : ''}</section>` : ''}
     ${raSection('Coaching focus', '🎯', r.coaching, (x) => `<li><b>${esc(x.action)}</b><p>${esc(x.why)}</p></li>`).replace('ra-sec', 'ra-sec wide coach')}
@@ -278,6 +281,19 @@ function setupAudits() {
   document.getElementById('raRefresh').addEventListener('click', () => { if (RA.open) openAudit(RA.open); else loadAudits(); });
 }
 
+/* ---- Bugs + feature requests (both teams) ---- */
+function raProductSections(r, a) {
+  return raSection('Bugs', '🐞', r.bugs, (x) => `<li><b>${esc(x.issue)}</b>${x.firms ? `<p>${esc(x.firms)}</p>` : ''}${x.detail || x.status ? `<p>${esc([x.detail, x.status].filter(Boolean).join(' · '))}</p>` : ''}${raRefs(x.refs, a)}</li>`).replace('ra-sec', 'ra-sec wide ra-bugs')
+    + raSection('Feature requests', '💡', r.feature_requests, (x) => `<li><b>${esc(x.request)}</b>${x.firms ? `<p>${esc(x.firms)}</p>` : ''}${x.detail ? `<p>${esc(x.detail)}</p>` : ''}${raRefs(x.refs, a)}</li>`).replace('ra-sec', 'ra-sec wide ra-frs');
+}
+
+function raSpots(list, a) {
+  return (list || []).length ? `<div class="ra-spots">${list.map((f) => `<div class="ra-spot">
+      <div class="ra-spot-head"><b>${esc(f.firm)}</b><span class="ra-status ${esc(String(f.status || '').replace(/\s+/g, '-'))}">${esc(f.status || '')}</span></div>
+      <p>${esc(f.what_happened || '')}</p>${f.next_step ? `<p class="ra-next">Next: ${esc(f.next_step)}</p>` : ''}${raRefs(f.refs, a)}
+      ${f.firm_id ? `<button type="button" class="pill-btn" data-ra-firm="${esc(f.firm_id)}" data-name="${esc(f.firm)}">Audit this account</button>` : ''}</div>`).join('')}</div>` : '';
+}
+
 /* ---- Implementation reports (AM and single firm) ---- */
 function renderImAudit(a) {
   const body = document.getElementById('raBody');
@@ -305,6 +321,17 @@ function renderImAudit(a) {
       ${kpi(s.replyMedianHours == null ? null : s.replyMedianHours + 'h', 'IM email reply (median)', s.replyMedianHours > 24)}
       ${kpi(s.signals, 'Real call signals', s.signals > 0)}
       ${kpi((s.csat || []).length ? s.csat.join(', ') : null, 'Onboarding CSAT')}` : `
+      ${s.onboarding ? `
+      ${kpi(s.onboarding.open, 'In onboarding', false, vs(t.open))}
+      ${kpi(s.onboarding.over70, 'Over 70 days', s.onboarding.over70 > 0, vs(t.over70))}
+      ${kpi(s.onboarding.medianDaysOpen, 'Median days in onboarding', s.onboarding.medianDaysOpen > 70, vs(t.days))}
+      ${kpi(s.onboarding.noNextCall, 'No next call scheduled', s.onboarding.noNextCall > 0)}
+      ${kpi(s.replyMedianHours == null ? null : s.replyMedianHours + 'h', 'Email reply (median)', s.replyMedianHours > 24, s.slowReplies ? `${s.slowReplies} over 24h` : '')}
+      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `Onboarding CSAT (${s.csatN || 0})`, s.csatPct != null && s.csatPct < 80, 'last 90 days')}
+      ${kpi(s.live.accounts, 'Live accounts', false, `${s.live.touched} contacted in 30 days`)}
+      ${kpi(s.live.lowUsage, 'Live · low usage', s.live.lowUsage > 0, s.live.neverEngaged ? `${s.live.neverEngaged} never engaged` : '')}
+      ${kpi(s.live.highChurn, 'Live · high churn score', s.live.highChurn > 0, s.live.cancelling ? `${s.live.cancelling} cancellation requested` : '')}
+      ${kpi(s.talkMedian == null ? null : s.talkMedian + '%', 'IM talking (share of call)', s.talkMedian > 60)}` : `
       ${kpi(s.open, 'Open onboardings', false, vs(t.open))}
       ${kpi(s.over70, 'Open over 70 days', s.over70 > 0, vs(t.over70))}
       ${s.medianDaysOpen != null ? kpi(s.medianDaysOpen, 'Median days (open firms)', s.medianDaysOpen > 70, vs(t.days)) : ''}
@@ -313,10 +340,40 @@ function renderImAudit(a) {
       ${kpi(s.callsLed, 'Calls led')}
       ${kpi(s.talkMedian == null ? null : s.talkMedian + '%', 'IM talking (share of call, median)', s.talkMedian > 60)}
       ${kpi(s.replyMedianHours == null ? null : s.replyMedianHours + 'h', 'Email reply (median)', s.replyMedianHours > 24, s.slowReplies ? `${s.slowReplies} over 24h` : '')}
-      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `Onboarding CSAT (${s.csatN || 0})`, s.csatPct != null && s.csatPct < 80, 'last 90 days')}`;
+      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `Onboarding CSAT (${s.csatN || 0})`, s.csatPct != null && s.csatPct < 80, 'last 90 days')}`}`;
   const usage = firm && s.usage ? `<p class="ra-usage"><b>Milestones:</b> ${(s.milestones || []).map((m) => `<span class="ra-ms${m.done ? ' done' : ''}">${m.done ? '✓' : '○'} ${esc(m.name)}</span>`).join(' ')}<br>
       <b>30-day usage:</b> ${s.usage.messages} messages · ${s.usage.meetings} meetings · ${s.usage.matters} matters/mo · ${s.usage.sms} SMS</p>` : '';
   const pts = (x) => `<li><p>${esc(x.point)}</p>${raRefs(x.refs, a)}</li>`;
+  if (!firm && (r.onboarding || r.live)) {
+    const o = r.onboarding || {}, l = r.live || {};
+    body.innerHTML = head + `
+      <div class="ra-kpis">${kpis}</div>
+      ${r.headline ? `<div class="ra-headline">${esc(r.headline)}</div>` : ''}
+      ${raSection('Strengths', '💪', r.strengths, pts).replace('ra-sec', 'ra-sec wide')}
+      <h3 class="ra-group">🚀 In onboarding</h3>
+      <div class="ra-grid">
+        ${raSection('Sentiment', '💬', o.sentiment, pts)}
+        ${raSection('Responsiveness', '⏱', o.responsiveness, pts)}
+        ${raSection('Onboarding time', '📈', o.onboarding_time, pts)}
+        ${raSection('Roadblocks', '🧱', o.roadblocks, pts)}
+        ${raSection('Calls scheduled', '📅', o.scheduling, pts)}
+      </div>
+      ${raSpots(o.spotlights, a)}
+      <h3 class="ra-group">✅ Live accounts</h3>
+      <div class="ra-grid">
+        ${raSection('Sentiment', '💬', l.sentiment, pts)}
+        ${raSection('Responsiveness', '⏱', l.responsiveness, pts)}
+        ${raSection('Roadblocks & frustrations', '🧱', l.frustrations, pts)}
+        ${raSection('Usage', '📊', l.usage, pts)}
+      </div>
+      ${raSpots(l.spotlights, a)}
+      <h3 class="ra-group">🧩 Product</h3>
+      ${raProductSections(r, a) || '<p class="loop-muted">No bugs or feature requests came up.</p>'}
+      ${raSection('Coaching focus', '🎯', r.coaching, (x) => `<li><b>${esc(x.action)}</b><p>${esc(x.why)}</p></li>`).replace('ra-sec', 'ra-sec wide coach')}
+      ${raSection('Follow up', '🚩', r.follow_up, (x) => `<li><p>${esc(x.item)}</p>${raRefs(x.refs, a)}</li>`).replace('ra-sec', 'ra-sec wide')}
+      <p class="loop-foot">AI-written from ChurnZero, Gong and email. Live-account usage is ChurnZero’s 30-day totals; the whole book is counted, and flagged or recently contacted accounts are read. Click a 📞 chip to open the call in Gong.</p>`;
+    return;
+  }
   body.innerHTML = head + `
     <div class="ra-kpis">${kpis}</div>
     ${usage}
@@ -334,6 +391,7 @@ function renderImAudit(a) {
         <div class="ra-spot-head"><b>${esc(f.firm)}</b><span class="ra-status ${esc(String(f.status || '').replace(/\s+/g, '-'))}">${esc(f.status || '')}</span></div>
         <p>${esc(f.what_happened || '')}</p>${f.next_step ? `<p class="ra-next">Next: ${esc(f.next_step)}</p>` : ''}${raRefs(f.refs, a)}
         ${f.firm_id ? `<button type="button" class="pill-btn" data-ra-firm="${esc(f.firm_id)}" data-name="${esc(f.firm)}">Audit this onboarding</button>` : ''}</div>`).join('')}</div></section>` : ''}
+    ${firm ? raProductSections(r, a) : ''}
     ${firm ? raSection('Next steps', '➡️', r.next_steps, (x) => `<li><b>${esc(x.action)}</b><p>Owner: ${esc(x.owner || '')}</p></li>`).replace('ra-sec', 'ra-sec wide coach')
       : raSection('Coaching focus', '🎯', r.coaching, (x) => `<li><b>${esc(x.action)}</b><p>${esc(x.why)}</p></li>`).replace('ra-sec', 'ra-sec wide coach')}
     ${!firm ? raSection('Follow up', '🚩', r.follow_up, (x) => `<li><p>${esc(x.item)}</p>${raRefs(x.refs, a)}</li>`).replace('ra-sec', 'ra-sec wide') : ''}
