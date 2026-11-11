@@ -294,7 +294,8 @@ function renderImAudit(a) {
   }
   if (a.status !== 'done') { body.innerHTML = head + `<div class="error-banner">This audit failed: ${esc(a.error || 'unknown error')}. Try running it again.</div>`; return; }
   const kpi = (v, l, bad, sub) => `<div class="ra-kpi${bad ? ' bad' : ''}"><b>${v == null || v === '' ? '—' : esc(String(v))}</b><span>${esc(l)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
-  const t = (s.team && s.team.team) || {};
+  const tm = (s.team && (s.team.teamMedianPerAm || s.team.team)) || {};
+  const t = { open: tm.openNow ?? tm.open, over70: tm.openOver70Days ?? tm.over70, days: tm.medianDaysOpenFirms };
   const vs = (v) => (v == null ? '' : `team ${v}`);
   const kpis = firm ? `
       ${kpi(s.status === 'Open' || s.status === 'Pre-Kickoff' ? 'Day ' + s.days : s.days + ' days', s.completed ? 'Finished ' + s.completed : (s.stage || s.status), s.days > 70)}
@@ -306,14 +307,15 @@ function renderImAudit(a) {
       ${kpi((s.csat || []).length ? s.csat.join(', ') : null, 'Onboarding CSAT')}` : `
       ${kpi(s.open, 'Open onboardings', false, vs(t.open))}
       ${kpi(s.over70, 'Open over 70 days', s.over70 > 0, vs(t.over70))}
+      ${s.medianDaysOpen != null ? kpi(s.medianDaysOpen, 'Median days (open firms)', s.medianDaysOpen > 70, vs(t.days)) : ''}
       ${kpi(s.quiet14, 'No touch in 14+ days', s.quiet14 > 0)}
       ${kpi(s.finished, 'Finished (30 days)', false, s.finishedMedianDays != null ? `median ${s.finishedMedianDays} days` : '')}
       ${kpi(s.callsLed, 'Calls led')}
       ${kpi(s.talkMedian == null ? null : s.talkMedian + '%', 'IM talking (share of call, median)', s.talkMedian > 60)}
       ${kpi(s.replyMedianHours == null ? null : s.replyMedianHours + 'h', 'Email reply (median)', s.replyMedianHours > 24, s.slowReplies ? `${s.slowReplies} over 24h` : '')}
-      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `Onboarding CSAT (${s.csatN || 0})`, s.csatPct != null && s.csatPct < 80, vs(t.csatPct == null ? null : t.csatPct + '%'))}`;
+      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `Onboarding CSAT (${s.csatN || 0})`, s.csatPct != null && s.csatPct < 80, 'last 90 days')}`;
   const usage = firm && s.usage ? `<p class="ra-usage"><b>Milestones:</b> ${(s.milestones || []).map((m) => `<span class="ra-ms${m.done ? ' done' : ''}">${m.done ? '✓' : '○'} ${esc(m.name)}</span>`).join(' ')}<br>
-      <b>30-day usage:</b> ${s.usage.messages} messages · ${s.usage.activities} activities · ${s.usage.meetings} meetings · ${s.usage.matters} matters/mo · ${s.usage.sms} SMS · ${s.usage.ai} AI credits</p>` : '';
+      <b>30-day usage:</b> ${s.usage.messages} messages · ${s.usage.meetings} meetings · ${s.usage.matters} matters/mo · ${s.usage.sms} SMS</p>` : '';
   const pts = (x) => `<li><p>${esc(x.point)}</p>${raRefs(x.refs, a)}</li>`;
   body.innerHTML = head + `
     <div class="ra-kpis">${kpis}</div>

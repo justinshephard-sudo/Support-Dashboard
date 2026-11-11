@@ -41,6 +41,8 @@ var IM_RUBRIC = [
   'leads, automations live), not just configuring it; (3) SENTIMENT: how the customer feels on calls and in email (confident, engaged,',
   'frustrated, confused, doubting the purchase). Strong IMs set a clear agenda, assign homework with dates, follow up between calls,',
   'answer email quickly, ask questions instead of monologuing, and spot and escalate risk early.',
+  'DATA CAVEATS: ChurnZero milestone checkboxes are often not kept up to date (even finished firms show them unchecked), so treat them',
+  'as a hint only and judge progress from stage, calls and emails. Don\'t comment on the data quality itself unless it changes a conclusion.',
 ].join('\n');
 
 var IM_REP_PROMPT = [
@@ -96,7 +98,8 @@ var IM_FIRM_PROMPT = [
 
 function imDay_(iso) { return String(iso || '').slice(0, 10); }
 function imDaysSince_(iso) { return iso ? Math.round((Date.now() - new Date(iso).getTime()) / 864e5) : null; }
-function imStart_(a) { return (a.Cf && a.Cf.CurrentTermStart) || a.StartDate || ''; }
+// Same start date as the Implementation tab: StartDate, else the term start.
+function imStart_(a) { return a.StartDate || (a.Cf && a.Cf.CurrentTermStart) || ''; }
 function imOpen_(a) { return ['Pre-Kickoff', 'Open'].indexOf(String((a.Cf || {}).OnboardingStatus || '')) > -1; }
 function imNorm_(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -137,8 +140,8 @@ function imFirmLine_(a, extra) {
   var cf = a.Cf || {};
   var days = cf.OnboardingCompletedDate ? Number(cf.NewTimeInOnboarding) || null : imDaysSince_(imStart_(a));
   var ms = IM_MILESTONES.map(function (m) { return (cf[m[0]] === true ? '✓ ' : '✗ ') + m[1]; }).join(', ');
-  var use = 'messages ' + (cf.OfMessagesSentl30 || 0) + ', activities ' + (cf.OfActivitiesLoggedl30 || 0) + ', meetings ' + (cf.OfMeetingsl30 || 0) +
-    ', matters/mo ' + Math.round(cf.AvgMattersCreatedmonth || 0) + ', SMS ' + (cf.TotalSmsSent || 0) + ', AI credits ' + (cf.AiCreditsUsedThisCycle || 0) +
+  var use = 'messages ' + (cf.OfMessagesSentl30 || 0) + ', meetings ' + (cf.OfMeetingsl30 || 0) +
+    ', matters/mo ' + Math.round(cf.AvgMattersCreatedmonth || 0) + ', SMS ' + (cf.TotalSmsSent || 0) +
     (cf.OfMerlinEngageSessionsp30 ? ', Engage sessions ' + cf.OfMerlinEngageSessionsp30 : '');
   return '[firm:' + cf.FirmId + '] ' + a.Name + ' — ' + (cf.OnboardingCompletedDate ? 'DONE ' + imDay_(cf.OnboardingCompletedDate) + ' in ' + days + ' days'
     : (cf.OnboardingStatus || '') + ', stage "' + (cf.NewOnboardingCall || 'none') + '", day ' + days) +
@@ -319,19 +322,45 @@ function imCsat_(repName, fromDay, firmId) {
     .map(function (r) { return { firmId: r[ix('FirmId')], firm: r[ix('Name')], score: Number(r[ix('Score')]) || 0, comment: String(r[ix('Comment')] || '').slice(0, 300), date: r[ix('Date')] }; });
 }
 
-// This month's Implementation-tab numbers for the rep and the team (medians across reps).
+// The Implementation tab's numbers for the rep and the team median across AMs, so the audit matches that tab:
+// open / over 70 / median days open from "Impl - Open Firms"; finished + CSAT this month from "Impl - Monthly".
 function imTeam_(repName) {
-  var sh = SpreadsheetApp.openById(SIGNAL_SHEET_ID).getSheetByName('Impl - Monthly');
-  if (!sh || sh.getLastRow() < 2) return null;
-  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  var row = sh.getRange(sh.getLastRow(), 1, 1, sh.getLastColumn()).getDisplayValues()[0];
-  var stats = {};
-  try { stats = JSON.parse(row[head.indexOf('RepStats')] || '{}'); } catch (e) { stats = {}; }
-  var reps = Object.keys(stats).filter(function (k) { return k !== 'Unassigned'; });
-  var med = function (f) { var v = reps.map(function (k) { return Number(stats[k][f]); }).filter(function (x) { return !isNaN(x) && x > 0; }).sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : null; };
-  var me = stats[repName] || {};
-  return { month: row[0], rep: { open: me.open, over70: me.over70, closed: me.closed, medianDays: me.medianDays, csatPct: me.csatPct },
-    team: { open: med('open'), over70: med('over70'), closed: med('closed'), medianDays: med('medianDays'), csatPct: med('csatPct') } };
+  var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+  var med = function (v) { v = v.filter(function (x) { return x != null && !isNaN(x); }).sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : null; };
+  var by = {};
+  var os = ss.getSheetByName('Impl - Open Firms');
+  if (os && os.getLastRow() > 1) {
+    var rows = os.getRange(1, 1, os.getLastRow(), os.getLastColumn()).getDisplayValues();
+    var h = rows.shift(), ix = function (k) { return h.indexOf(k); };
+    rows.forEach(function (r) {
+      if (r[ix('Excluded')] === '1') return;
+      var rep = r[ix('AccountManager')] || 'Unassigned';
+      if (rep === 'Unassigned') return;
+      var d = Number(r[ix('DaysInOnboarding')]) || 0;
+      var o = by[rep] = by[rep] || { open: 0, over70: 0, days: [] };
+      o.open++; if (d > IM_GOOD_DAYS) o.over70++; o.days.push(d);
+    });
+  }
+  var stats = {}, month = '';
+  var ms = ss.getSheetByName('Impl - Monthly');
+  if (ms && ms.getLastRow() > 1) {
+    var head = ms.getRange(1, 1, 1, ms.getLastColumn()).getValues()[0];
+    var row = ms.getRange(ms.getLastRow(), 1, 1, ms.getLastColumn()).getDisplayValues()[0];
+    month = row[0];
+    try { stats = JSON.parse(row[head.indexOf('RepStats')] || '{}'); } catch (e) { stats = {}; }
+  }
+  var reps = Object.keys(by);
+  var pick = function (rep) {
+    var o = by[rep] || { open: 0, over70: 0, days: [] }, m = stats[rep] || {};
+    return { openNow: o.open, openOver70Days: o.over70, medianDaysOpenFirms: med(o.days),
+      finishedThisMonth: m.closed || 0, finishedThisMonthMedianDays: m.medianDays || null, onboardingCsatPctThisMonth: m.csatPct == null ? null : m.csatPct };
+  };
+  var all = reps.map(pick);
+  var team = {};
+  ['openNow', 'openOver70Days', 'medianDaysOpenFirms', 'finishedThisMonth', 'finishedThisMonthMedianDays', 'onboardingCsatPctThisMonth'].forEach(function (k) {
+    team[k] = med(all.map(function (x) { return x[k]; }).filter(function (x) { return x !== null && x !== ''; }));
+  });
+  return { month: month, rep: pick(repName), teamMedianPerAm: team };
 }
 
 /* ---------- rep audit ---------- */
@@ -371,8 +400,7 @@ function imAuditRep_(rep, id) {
     if (!cf.OnboardingCompletedDate) {
       if (days > IM_GOOD_DAYS) risk += 4; else if (days > 50) risk += 2;
       if (!lastTouch || imDaysSince_(lastTouch) > 14) risk += 3;
-      if (days > 30 && done < 2) risk += 2;
-      if ((cf.OfMessagesSentl30 || 0) + (cf.OfActivitiesLoggedl30 || 0) < 5 && days > 30) risk += 1;
+      if ((cf.OfMessagesSentl30 || 0) + (cf.TotalSmsSent || 0) < 5 && days > 30) risk += 1;
     }
     risk += 3 * mySignals.length;
     if (myCsat.some(function (s) { return s.score && s.score <= 3; })) risk += 3;
@@ -390,8 +418,9 @@ function imAuditRep_(rep, id) {
   var mono = calls.map(function (c) { return c.monologue; }).filter(function (x) { return x != null; }).sort(function (a, b) { return a - b; });
   var med = function (v) { return v.length ? v[Math.floor(v.length / 2)] : null; };
   var stats = {
-    kind: 'im', firms: accounts.length, open: openF.length, finished: doneF.length,
-    over70: openF.filter(function (f) { return f.days > IM_GOOD_DAYS; }).length,
+    kind: 'im', firms: accounts.length, open: team ? team.rep.openNow : openF.length, finished: doneF.length,
+    over70: team ? team.rep.openOver70Days : openF.filter(function (f) { return f.days > IM_GOOD_DAYS; }).length,
+    medianDaysOpen: team ? team.rep.medianDaysOpenFirms : null,
     quiet14: openF.filter(function (f) { return !f.lastTouch || imDaysSince_(f.lastTouch) > 14; }).length,
     finishedMedianDays: med(doneF.map(function (f) { return f.days; }).sort(function (a, b) { return a - b; })),
     callsLed: calls.length, callsMatched: calls.filter(function (c) { return c.accountId; }).length,
@@ -405,9 +434,9 @@ function imAuditRep_(rep, id) {
   accounts.forEach(function (a) { stats.firmNames[String(a.Cf.FirmId)] = a.Name; });
 
   var firmName = function (accountId) { return accountId && byId[accountId] ? byId[accountId].Name : ''; };
-  var context = 'IM: ' + rep.name + '\nWINDOW: last ' + IM_DAYS + ' days\n\nNUMBERS (rep vs team median, this month from the Implementation tab): ' + JSON.stringify(team) +
-    '\nTHIS AUDIT: ' + JSON.stringify({ firmsInBook: stats.firms, open: stats.open, finishedInWindow: stats.finished, finishedMedianDays: stats.finishedMedianDays,
-      openOver70Days: stats.over70, openWithNoTouch14Days: stats.quiet14, callsLed: stats.callsLed, imTalkRatioMedianPct: stats.talkMedian,
+  var context = 'IM: ' + rep.name + '\nWINDOW: last ' + IM_DAYS + ' days\n\nIMPLEMENTATION TAB NUMBERS (this rep vs the median AM; compare like with like): ' + JSON.stringify(team) +
+    '\nTHIS AUDIT (last 30 days): ' + JSON.stringify({ firmsReviewed: stats.firms, finishedInWindow: stats.finished, finishedMedianDays: stats.finishedMedianDays,
+      openWithNoTouch14Days: stats.quiet14, callsLed: stats.callsLed, imTalkRatioMedianPct: stats.talkMedian,
       longestMonologueMedianSec: stats.monologueMedian, emailThreads: stats.emailThreads, emailReplyMedianBusinessHours: stats.replyMedianHours,
       emailRepliesOver24BusinessHours: stats.slowReplies, realCallSignals: stats.signals, onboardingCsat90d: { pct: stats.csatPct, n: stats.csatN } }) +
     '\n\nBOOK (one line per firm):\n' + facts.map(function (f) {
@@ -461,7 +490,7 @@ function imAuditFirm_(firmId) {
   var stats = {
     kind: 'firm', firmId: String(cf.FirmId), firm: a.Name, rep: repName, status: cf.OnboardingStatus || '', stage: cf.NewOnboardingCall || '', days: days,
     started: imDay_(start), completed: imDay_(cf.OnboardingCompletedDate), milestones: IM_MILESTONES.map(function (m) { return { name: m[1], done: cf[m[0]] === true }; }),
-    usage: { messages: cf.OfMessagesSentl30 || 0, activities: cf.OfActivitiesLoggedl30 || 0, meetings: cf.OfMeetingsl30 || 0, matters: Math.round(cf.AvgMattersCreatedmonth || 0), sms: cf.TotalSmsSent || 0, ai: cf.AiCreditsUsedThisCycle || 0 },
+    usage: { messages: cf.OfMessagesSentl30 || 0, meetings: cf.OfMeetingsl30 || 0, matters: Math.round(cf.AvgMattersCreatedmonth || 0), sms: cf.TotalSmsSent || 0 },
     callsFound: calls.length, emailThreads: threads.length, replyMedianHours: waits.length ? waits[Math.floor(waits.length / 2)] : null, signals: signals.length,
     csat: csat.map(function (s) { return s.score; }),
     callList: calls.map(function (c) { return { id: c.id, title: c.title, date: c.date, url: c.url, firmId: String(cf.FirmId) }; }),
