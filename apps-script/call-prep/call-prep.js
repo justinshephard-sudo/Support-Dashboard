@@ -65,6 +65,7 @@ function doPost(e) {
   try {
     if (b.action === 'prepResult') return dashJson_(prepResult_(b));   // Zapier; checked by its token
     if (b.action === 'signalVerdicts') return dashJson_(signalVerdicts_(b));   // Zapier; checked by its token
+    if (b.action === 'auditResult') return dashJson_(auditResult_(b));   // Zapier; checked by its token (rep-audit.js)
     var who = dashAuth_(b.token);
     if (!who.ok) return dashJson_(who);
     if (b.action === 'prep') return dashJson_(prep_(b, who));
@@ -74,6 +75,7 @@ function doPost(e) {
     if (b.action === 'partners') return dashJson_(partners_(b, who));
     if (b.action === 'closeThirdParty') return dashJson_(closeThirdParty_(b, who));
     if (b.action === 'reviewSignal') return dashJson_(reviewSignal_(b, who));
+    if (/^audit/.test(b.action)) { var au = auditDoPost_(b, who); if (au) return dashJson_(au); }
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);

@@ -71,6 +71,7 @@ function bootstrap() {
   setupLoop();
   setupFR();
   setupBugs();
+  setupAudits();
   setupMrr();
   setupCsm();
   setupExclusions();

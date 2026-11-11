@@ -1,12 +1,16 @@
-// NOTE 2026-11-10: the live workflow (01a18341) also handles kind "signals" (AI check of Call signals); get_workflow has the current source.
 import { defineDurable } from "@zapier/zapier-durable";
 import { createZapierSdk } from "@zapier/zapier-sdk";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 
-// CS Dashboard "Call prep": the call-prep Apps Script sends the prompt, the firm context and the
-// last Gong transcript; Claude (through AI by Zapier) writes the prep sheet as JSON; this posts
-// it back to the Apps Script, which hands it to the dashboard pop-up.
+// CS Dashboard AI jobs, all started only by the call-prep Apps Script:
+//  - "Call prep" (default): the script sends the prompt, the firm context and the last Gong transcript;
+//    Claude (through AI by Zapier) writes the prep sheet as JSON; this posts it back to the script.
+//  - kind "signals": the script sends Gong tracker hits with the transcript around each one; Claude judges
+//    which are real alarms (not talk about the old system / current process); this posts the verdicts back.
+//  - kind "audit": a manager's Rep Audit. The script sends the rep's Intercom digest and the Zoom meeting
+//    numbers of their customer calls; this pulls each call's AI Companion summary (Zoom connection), Claude
+//    writes the coaching report, and this posts it back.
 const sdk = createZapierSdk();
 
 // Only the call-prep Apps Script can start a run: it sends hookKey (kept in its git-ignored secret.js), and
@@ -20,8 +24,10 @@ const InputSchema = z.object({
   token: z.string(),
   hookKey: z.string(),
   instructions: z.string(),
+  kind: z.string().nullable().optional(),
   context: z.string().nullable().optional(),
   transcript: z.string().nullable().optional(),
+  items: z.string().nullable().optional(),
 }).loose();
 type Input = z.infer<typeof InputSchema>;
 
@@ -46,12 +52,123 @@ function parsePrep(text: string): unknown {
   try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
 }
 
+// Verdicts come back as { "verdicts": [ { key, real, reason } ] }.
+function parseVerdicts(text: string): unknown[] | null {
+  const o = parsePrep(text) as { verdicts?: unknown } | null;
+  return o && Array.isArray(o.verdicts) ? o.verdicts : null;
+}
+
 export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ctx, rawInput) => {
   // The hook URL also gets empty pings (no body) from outside checks; skip those quietly instead of failing.
   const parsed = InputSchema.safeParse(normalizeInput(rawInput));
   if (!parsed.success) return { skipped: true, reason: "not a call-prep request" };
   const input = parsed.data;
   if (createHash("sha256").update(input.hookKey).digest("hex") !== HOOK_KEY_SHA256) return { skipped: true, reason: "bad key" };
+
+  if (input.kind === "audit") {
+    // Rep audit: the script sends the rep's Intercom digest (context) and the Zoom meeting numbers of their
+    // customer calls (items). Pull each call's AI Companion summary, have Claude write the report, post it back.
+    let meetings: { id: string; topic?: string; date?: string }[] = [];
+    try { meetings = JSON.parse(input.items ?? "[]"); } catch { meetings = []; }
+    meetings = meetings.filter((m) => /^\d{9,11}$/.test(String(m.id))).slice(0, 30);
+
+    const calls = await ctx.step("fetch-zoom-summaries", async () => {
+      const out: { id: string; uuid: string; topic: string; date: string; minutes: number; summary: string }[] = [];
+      for (const m of meetings) {
+        const row = { id: String(m.id), uuid: "", topic: m.topic ?? "", date: m.date ?? "", minutes: 0, summary: "" };
+        try {
+          const rec = await sdk.fetch(`https://api.zoom.us/v2/meetings/${m.id}/recordings`, { connection: "zoom", method: "GET" });
+          if (!rec.ok) continue;  // not recorded (or deleted): skip it
+          const r = (await rec.json()) as { uuid?: string; topic?: string; duration?: number; start_time?: string };
+          row.uuid = r.uuid ?? ""; row.topic = r.topic ?? row.topic; row.minutes = r.duration ?? 0;
+          row.date = (r.start_time ?? "").slice(0, 10) || row.date;
+          if (row.uuid) {
+            const u = row.uuid.startsWith("/") || row.uuid.includes("//") ? encodeURIComponent(encodeURIComponent(row.uuid)) : encodeURIComponent(row.uuid);
+            const s = await sdk.fetch(`https://api.zoom.us/v2/meetings/${u}/meeting_summary`, { connection: "zoom", method: "GET" });
+            if (s.ok) {
+              const j = (await s.json()) as { summary_overview?: string; summary_details?: { label?: string; summary?: string }[]; next_steps?: string[] };
+              const parts = [j.summary_overview ?? ""]
+                .concat((j.summary_details ?? []).map((d) => `${d.label ?? ""}: ${d.summary ?? ""}`))
+                .concat((j.next_steps ?? []).length ? ["Next steps: " + (j.next_steps ?? []).join("; ")] : []);
+              row.summary = parts.filter(Boolean).join("\n").slice(0, 1800);
+            }
+          }
+        } catch { /* one bad call shouldn't sink the audit */ }
+        out.push(row);
+      }
+      return out;
+    });
+
+    const callText = calls.filter((c) => c.summary).map((c) => `[zoom:${c.id}] ${c.date} · ${c.topic} · ${c.minutes} min\n${c.summary}`).join("\n\n---\n\n")
+      || "(No Zoom AI Companion summaries found for this rep's customer calls in the window.)";
+
+    const written = await ctx.step("write-rep-audit", async () =>
+      sdk.runAction({
+        appKey: "AICLIAPI",
+        actionType: "write",
+        actionKey: "get_completion",
+        inputs: {
+          provider_id: "anthropic",
+          authentication_id: "0",
+          model_id: "anthropic/claude-sonnet-5-5",
+          instructions: input.instructions,
+          inputFields: { intercom: input.context ?? "", calls: callText },
+          includeWorkflowData: false,
+          outputFields: [{ name: "report_json", type: "text", isRequired: true }],
+        },
+      }),
+    );
+    const w = (written.data[0] ?? {}) as Record<string, unknown>;
+    const report = parsePrep(String(w.report_json ?? w.output ?? ""));
+    const back = JSON.stringify({
+      action: "auditResult", requestId: input.requestId, token: input.token, report,
+      calls: calls.map((c) => ({ id: c.id, uuid: c.uuid, topic: c.topic, date: c.date, minutes: c.minutes, summary: !!c.summary })),
+      error: report ? null : "The AI's answer couldn't be read.",
+    });
+    const sentAudit = await ctx.step("send-rep-audit", async () =>
+      sdk.runAction({
+        appKey: "WebHookCLIAPI",
+        actionType: "write",
+        actionKey: "custom",
+        inputs: { url: CALLBACK_URL, method: "POST", data: back, headers: { "Content-Type": "text/plain;charset=utf-8" }, unflatten: "no" },
+      }),
+    );
+    return { requestId: input.requestId, calls: calls.length, summaries: calls.filter((c) => c.summary).length, parsed: !!report, delivered: sentAudit.data[0] ?? null };
+  }
+
+  if (input.kind === "signals") {
+    const judged = await ctx.step("judge-call-signals", async () =>
+      sdk.runAction({
+        appKey: "AICLIAPI",
+        actionType: "write",
+        actionKey: "get_completion",
+        inputs: {
+          provider_id: "anthropic",
+          authentication_id: "0",
+          model_id: "anthropic/claude-sonnet-5-5",
+          instructions: input.instructions,
+          inputFields: { hits: input.items ?? "[]" },
+          includeWorkflowData: false,
+          outputFields: [{ name: "verdicts_json", type: "text", isRequired: true }],
+        },
+      }),
+    );
+    const it = (judged.data[0] ?? {}) as Record<string, unknown>;
+    const verdicts = parseVerdicts(String(it.verdicts_json ?? it.output ?? ""));
+    const back = JSON.stringify({
+      action: "signalVerdicts", requestId: input.requestId, token: input.token,
+      verdicts, error: verdicts ? null : "The AI's answer couldn't be read.",
+    });
+    const sent = await ctx.step("send-signal-verdicts", async () =>
+      sdk.runAction({
+        appKey: "WebHookCLIAPI",
+        actionType: "write",
+        actionKey: "custom",
+        inputs: { url: CALLBACK_URL, method: "POST", data: back, headers: { "Content-Type": "text/plain;charset=utf-8" }, unflatten: "no" },
+      }),
+    );
+    return { requestId: input.requestId, judged: verdicts ? verdicts.length : 0, delivered: sent.data[0] ?? null };
+  }
 
   const completion = await ctx.step("write-call-prep", async () =>
     sdk.runAction({
