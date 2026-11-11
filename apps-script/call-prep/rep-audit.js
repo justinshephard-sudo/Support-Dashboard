@@ -401,3 +401,12 @@ function auditDoPost_(b, who) {
   if (b.action === 'auditRunIm') return imRun_(b, who);
   return null;
 }
+
+// Editor-only: deletes every saved audit (all rows under the header on the "Rep Audits" tab).
+// The sheet's version history still has them if they're ever needed.
+function clearAuditHistory() {
+  var sh = auditSheet_();
+  var n = sh.getLastRow() - 1;
+  if (n > 0) sh.deleteRows(2, n);
+  Logger.log('Removed ' + Math.max(n, 0) + ' audits.');
+}
