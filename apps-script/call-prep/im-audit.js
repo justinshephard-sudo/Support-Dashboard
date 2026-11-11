@@ -298,6 +298,7 @@ function imThreads_(repEmail, fromIso, matcher, onlyAccount) {
     var waits = [];
     msgs.forEach(function (m, i) {
       if (/@lawmatics\.com$/i.test(m.EmailFromAddress || '')) return;
+      if (m.DeliveryDate < fromIso) return;   // only questions asked inside the window (old threads skew the waits)
       var reply = msgs.slice(i + 1).filter(function (x) { return String(x.EmailFromAddress || '').toLowerCase() === repEmail; })[0];
       if (reply) waits.push(imBusinessHours_(m.DeliveryDate, reply.DeliveryDate));
     });
