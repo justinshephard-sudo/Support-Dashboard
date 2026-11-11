@@ -73,17 +73,18 @@ function ic_(method, path, payload) {
 // Support reps = members of the CS team in Intercom (so new reps show up on their own).
 function auditReps_() {
   var cache = CacheService.getScriptCache();
-  var hit = cache.get('audit_reps');
+  var hit = cache.get('audit_reps2');
   if (hit) return JSON.parse(hit);
   var team = ic_('get', '/teams/' + AUDIT_CS_TEAM);
   var ids = (team.admin_ids || []).map(String);
+  var managers = dashManagers_();   // managers aren't audited (Dashboard Config list)
   var admins = (ic_('get', '/admins').admins || []).filter(function (a) {
-    return ids.indexOf(String(a.id)) > -1 && AUDIT_SKIP_ADMINS.indexOf(String(a.id)) === -1 && a.email && /@lawmatics\.com$/i.test(a.email);
+    return ids.indexOf(String(a.id)) > -1 && managers.indexOf(String(a.email || '').toLowerCase()) === -1 && AUDIT_SKIP_ADMINS.indexOf(String(a.id)) === -1 && a.email && /@lawmatics\.com$/i.test(a.email);
   }).map(function (a) { return { id: String(a.id), name: a.name, email: String(a.email).toLowerCase() }; })
     .sort(function (a, b) { return a.name.localeCompare(b.name); });
   var me = ic_('get', '/me');
   var out = { reps: admins, appId: (me.app && me.app.id_code) || '' };
-  cache.put('audit_reps', JSON.stringify(out), 6 * 3600);
+  cache.put('audit_reps2', JSON.stringify(out), 6 * 3600);
   return out;
 }
 
@@ -340,7 +341,7 @@ function auditResult_(b) {
 
 // Editor check after adding INTERCOM_TOKEN: lists the reps and counts one rep's conversations.
 function checkAudit() {
-  CacheService.getScriptCache().remove('audit_reps');
+  CacheService.getScriptCache().remove('audit_reps2');
   var r = auditReps_();
   Logger.log('Intercom app ' + r.appId + ' · reps: ' + r.reps.map(function (x) { return x.name + ' (' + x.id + ')'; }).join(', '));
   if (r.reps.length) {
