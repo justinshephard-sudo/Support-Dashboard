@@ -18,7 +18,7 @@ var AUDIT_TAB = 'Rep Audits';
 var AUDIT_DAYS = 30;
 var AUDIT_SAMPLE = 22;          // most-friction conversations read in full
 var AUDIT_TYPICAL = 4;          // plus a few ordinary ones, for balance
-var AUDIT_CONVO_CHARS = 2600;   // per conversation, after trimming
+var AUDIT_CONVO_CHARS = 4200;   // per conversation, after trimming (keeps how the hardest threads ended)
 var AUDIT_MAX_CALLS = 30;
 var AUDIT_CS_TEAM = '8108094';
 var AUDIT_SKIP_ADMINS = ['6504887'];   // Fin / "The Lawmatician"
@@ -46,7 +46,9 @@ var AUDIT_PROMPT = [
   '  friction, check why it ran long. If the cause was a bug, put it under product_limits, not friction.',
   '- Ratings tagged "Excluded Review" were reviewed and excused by a manager; they are already left out. Do not bring them up.',
   '- A pattern needs at least 2 examples. A single clearly wrong answer may go under knowledge_gaps; otherwise leave one-offs out.',
-  '- First-reply times outside weekday business hours are not the rep\'s fault.',
+  '- First-reply times outside weekday business hours are not the rep\'s fault. Each conversation header shows when it started (PT) and says',
+  '  "(after hours)" when it began outside weekdays 6am-6pm; the FLAGGED reasons only list a slow first reply when it began in business hours.',
+  '- Fin\'s rating requests and an account manager joining a thread make it look longer; don\'t count those as the rep\'s back-and-forth.',
   '- Rank coaching by how many customers it would help, most first.',
   'If the material is thin, say so in the headline rather than guessing.',
   '',
@@ -317,7 +319,8 @@ function auditRun_(b, who) {
       var t = '';
       try { t = auditThread_(x.c.id, rep.id); } catch (e) { t = '(couldn’t load)'; }
       var title = auditStrip_(x.c.title || (x.c.source && x.c.source.subject) || '').slice(0, 120);
-      return '[ic:' + x.c.id + '] ' + (x.score ? 'FLAGGED (' + x.why.join(', ') + ')' : 'TYPICAL') + (title ? ' — ' + title : '') + '\n' + t;
+      var when = x.c.created_at ? Utilities.formatDate(new Date(x.c.created_at * 1000), 'America/Los_Angeles', 'EEE MMM d, h:mm a') + ' PT' + (auditBusinessHours_(x.c.created_at) ? '' : ' (after hours)') : '';
+      return '[ic:' + x.c.id + '] ' + (when ? when + ' · ' : '') + (x.score ? 'FLAGGED (' + x.why.join(', ') + ')' : 'TYPICAL') + (title ? ' — ' + title : '') + '\n' + t;
     });
     stats.sampled = sample.map(function (x) { return { id: String(x.c.id), why: x.why, title: auditStrip_(x.c.title || '').slice(0, 100) }; });
     var calls = auditCalls_(rep.email, since);
@@ -329,7 +332,7 @@ function auditRun_(b, who) {
         longThreadPct: stats.longThreadPct, csatPct: stats.csatPct, csatRated: stats.csatRated, excusedRatings: stats.excusedRatings, lowRatings: stats.lowRatings,
         topTags: stats.topTags, channels: stats.channels }) +
       '\n\nCONVERSATIONS (most difficult first, then a few typical ones):\n\n' + threads.join('\n\n---\n\n');
-    if (context.length > 85000) context = context.slice(0, 85000) + '\n…(trimmed)';
+    if (context.length > 120000) context = context.slice(0, 120000) + '\n…(trimmed)';
     auditSet_(id, { Stats: JSON.stringify(stats) });
 
     var hook = PropertiesService.getScriptProperties().getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? '' : ZAPIER_HOOK_SECRET_URL);
