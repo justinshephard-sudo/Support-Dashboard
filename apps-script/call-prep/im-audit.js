@@ -193,14 +193,19 @@ function imCallInfo_(c, repEmail) {
   var m = c.metaData || {}, content = c.content || {}, inter = c.interaction || {};
   var me = (c.parties || []).filter(function (p) { return String(p.emailAddress || '').toLowerCase() === repEmail; })[0];
   var stats = {};
-  ((inter.personInteractionStats || []).filter(function (s) { return (repEmail && String(s.personEmailAddress || '').toLowerCase() === repEmail) || (me && me.userId && s.personId === me.userId); })[0] || { stats: [] })
-    .stats.forEach(function (s) { stats[s.name] = s.value; });
+  var ids = me ? [me.userId, me.id, me.speakerId].filter(Boolean).map(String) : [];
+  var entry = (inter.personInteractionStats || []).filter(function (s) {
+    return (repEmail && String(s.personEmailAddress || s.emailAddress || '').toLowerCase() === repEmail) || ids.indexOf(String(s.personId || s.userId || s.speakerId || '')) > -1;
+  })[0];
+  // Stat names vary in spacing/case ("Talk Ratio", "talkRatio"): compare them squashed.
+  ((entry && entry.stats) || []).forEach(function (s) { stats[String(s.name || '').toLowerCase().replace(/[^a-z]/g, '')] = s.value; });
   var keyPoints = (content.keyPoints || []).map(function (k) { return k.text || k; }).filter(Boolean);
   return {
     id: String(m.id), title: m.title || 'Call', date: imDay_(m.started), minutes: Math.round((m.duration || 0) / 60), url: m.url || '',
     brief: String(content.brief || '').slice(0, 1400), keyPoints: keyPoints.slice(0, 8), outcome: content.callOutcome && content.callOutcome.name || '',
-    talk: stats['Talk Ratio'] != null ? Math.round(stats['Talk Ratio'] * 100) : null, monologue: stats['Longest Monologue'] != null ? Math.round(stats['Longest Monologue']) : null,
-    patience: stats['Patience'] != null ? Math.round(stats['Patience'] * 10) / 10 : null,
+    talk: stats.talkratio != null ? Math.round(stats.talkratio <= 1 ? stats.talkratio * 100 : stats.talkratio) : null,
+    monologue: stats.longestmonologue != null ? Math.round(stats.longestmonologue) : null,
+    patience: stats.patience != null ? Math.round(stats.patience * 10) / 10 : null,
     questions: inter.questions ? (inter.questions.companyCount || 0) : null,
     parties: (c.parties || []).map(function (p) { return { email: String(p.emailAddress || '').toLowerCase(), name: p.name || '', affiliation: p.affiliation || '' }; }),
     crmNames: (c.context || []).reduce(function (acc, ctx) {
@@ -242,6 +247,9 @@ function imThreads_(repEmail, fromIso, matcher, onlyAccount) {
       addrs.forEach(function (a) { if (!acct && !/@lawmatics\.com$/i.test(a || '')) acct = matcher.email(a); });
     });
     if (onlyAccount && acct !== onlyAccount) return;
+    // Internal-only threads (everyone @lawmatics.com) aren't customer email.
+    var external = msgs.some(function (m) { return !/@lawmatics\.com$/i.test(m.EmailFromAddress || '') || (m.ToRecipients || []).some(function (r) { return !/@lawmatics\.com$/i.test(r.Email || ''); }); });
+    if (!external) return;
     // Waits: a customer message → the rep's next reply (weekend days don't count).
     var waits = [];
     msgs.forEach(function (m, i) {
@@ -255,9 +263,14 @@ function imThreads_(repEmail, fromIso, matcher, onlyAccount) {
   return out;
 }
 
+// Hours between two times that fall on weekdays 6am–6pm Pacific (a 5pm email answered at 9am = 4h).
 function imBusinessHours_(fromIso, toIso) {
   var a = new Date(fromIso).getTime(), b = new Date(toIso).getTime(), h = 0;
-  for (var t = a; t < b; t += 3600e3) { var d = new Date(t).getUTCDay(); if (d !== 0 && d !== 6) h++; }
+  for (var t = a; t < b && h < 2000; t += 3600e3) {
+    var d = new Date(t);
+    var dow = Number(Utilities.formatDate(d, 'America/Los_Angeles', 'u')), hr = Number(Utilities.formatDate(d, 'America/Los_Angeles', 'H'));
+    if (dow <= 5 && hr >= 6 && hr < 18) h++;
+  }
   return h;
 }
 
@@ -505,5 +518,9 @@ function checkImAudit() {
   var s = built.stats;
   Logger.log(rep.name + ': ' + s.firms + ' firms (' + s.open + ' open, ' + s.finished + ' finished) · ' + s.callsLed + ' Gong calls (' + s.callsMatched + ' matched to a firm) · talk median ' + s.talkMedian +
     '% · ' + s.emailThreads + ' email threads · reply median ' + s.replyMedianHours + 'h · ' + s.signals + ' signals · context ' + built.context.length + ' + calls ' + built.callsText.length + ' chars');
-  Logger.log('First call brief: ' + built.callsText.slice(0, 600));
+  Logger.log('First call brief: ' + built.callsText.slice(0, 400));
+  var uid = gongUserId_(rep.email);
+  var raw = uid ? imGongCalls_(uid, new Date(Date.now() - 7 * 864e5).toISOString())[0] : null;
+  if (raw) Logger.log('Gong stats sample: ' + JSON.stringify({ me: (raw.parties || []).filter(function (p) { return String(p.emailAddress || '').toLowerCase() === rep.email; }),
+    stats: (raw.interaction || {}).personInteractionStats }).slice(0, 1500));
 }
