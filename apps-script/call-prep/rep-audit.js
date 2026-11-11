@@ -35,6 +35,19 @@ var AUDIT_PROMPT = [
   'Things worth noticing: questions the rep answered wrong or had to escalate, slow or missing follow-ups, long back-and-forth that a',
   'clearer first answer would have avoided, tone, ownership, setting expectations, documentation/links shared, how calls are run.',
   'Always say what the rep does well. Every claim needs refs (e.g. "ic:123", "zoom:85108515942") from the material; never invent refs.',
+  '',
+  'Fairness rules:',
+  '- Saved replies / macros / templated answers are standard team practice. Never criticize using them. Only flag a reply if it did not',
+  '  answer what the customer actually asked (e.g. a canned answer to a different question), not because it was generic.',
+  '- Judge only lines labeled "Rep". Lines from "Fin bot" (the AI agent before handoff) and from other teammates are not the rep\'s work.',
+  '- Escalating to engineering, a bug ticket, or a teammate with an internal note is correct behavior when the issue is a bug or outside',
+  '  support\'s scope; flag escalation only when the rep could clearly have answered it themselves.',
+  '- Long or reopened threads are often caused by a product bug, a pending fix, or the customer going quiet. Before calling a thread rep',
+  '  friction, check why it ran long. If the cause was a bug, put it under product_limits, not friction.',
+  '- Ratings tagged "Excluded Review" were reviewed and excused by a manager; they are already left out. Do not bring them up.',
+  '- A pattern needs at least 2 examples. A single clearly wrong answer may go under knowledge_gaps; otherwise leave one-offs out.',
+  '- First-reply times outside weekday business hours are not the rep\'s fault.',
+  '- Rank coaching by how many customers it would help, most first.',
   'If the material is thin, say so in the headline rather than guessing.',
   '',
   'Return ONLY a JSON object (no code fence) with exactly these keys:',
@@ -114,23 +127,38 @@ function auditMedian_(a) {
   return v.length ? v[Math.floor(v.length / 2)] : null;
 }
 
+function auditTags_(c) { return ((c.tags && c.tags.tags) || []).map(function (t) { return String(t.name || ''); }); }
+// A rating on a conversation tagged "Excluded Review" was reviewed and excused: it doesn't count as a rating.
+function auditRating_(c) {
+  var r = c.conversation_rating;
+  if (!r || !r.rating) return null;
+  if (auditTags_(c).some(function (t) { return /exclud\w*\s*review/i.test(t); })) return null;
+  return r;
+}
+// Weekdays 6am–6pm Pacific: a slow first reply outside those hours isn't the rep's doing.
+function auditBusinessHours_(unix) {
+  var d = new Date(unix * 1000);
+  var dow = Number(Utilities.formatDate(d, 'America/Los_Angeles', 'u')), h = Number(Utilities.formatDate(d, 'America/Los_Angeles', 'H'));
+  return dow <= 5 && h >= 6 && h < 18;
+}
+
 // One number per conversation: how much friction it shows.
 function auditFriction_(c) {
-  var s = c.statistics || {}, r = c.conversation_rating || {};
+  var s = c.statistics || {}, r = auditRating_(c) || {};
   var score = 0, why = [];
   if (s.count_reopens > 0) { score += 3 * Math.min(s.count_reopens, 3); why.push('reopened ' + s.count_reopens + '×'); }
   if (r.rating && r.rating <= 3) { score += 6; why.push('CSAT ' + r.rating + '/5'); }
   if (s.count_assignments > 2) { score += 2; why.push('reassigned'); }
   if (s.count_conversation_parts > 14) { score += 2; why.push(s.count_conversation_parts + ' messages'); }
   if (s.time_to_last_close > 3 * 86400) { score += 2; why.push('open ' + Math.round(s.time_to_last_close / 86400) + ' days'); }
-  if (s.time_to_admin_reply > 4 * 3600) { score += 1; why.push('first reply after ' + Math.round(s.time_to_admin_reply / 3600) + 'h'); }
+  if (s.time_to_admin_reply > 4 * 3600 && auditBusinessHours_(c.created_at)) { score += 1; why.push('first reply after ' + Math.round(s.time_to_admin_reply / 3600) + 'h'); }
   return { score: score, why: why };
 }
 
 function auditStats_(convos) {
   var n = convos.length, st = function (c) { return c.statistics || {}; };
-  var rated = convos.filter(function (c) { return c.conversation_rating && c.conversation_rating.rating; });
-  var good = rated.filter(function (c) { return c.conversation_rating.rating >= 4; }).length;
+  var rated = convos.filter(function (c) { return auditRating_(c); });
+  var good = rated.filter(function (c) { return auditRating_(c).rating >= 4; }).length;
   var tags = {};
   convos.forEach(function (c) { ((c.tags && c.tags.tags) || []).forEach(function (t) { tags[t.name] = (tags[t.name] || 0) + 1; }); });
   var channels = {};
@@ -145,7 +173,8 @@ function auditStats_(convos) {
     reassignedPct: pct(convos.filter(function (c) { return st(c).count_assignments > 2; }).length),
     longThreadPct: pct(convos.filter(function (c) { return st(c).count_conversation_parts > 14; }).length),
     csatRated: rated.length, csatPct: rated.length ? Math.round(100 * good / rated.length) : null,
-    lowRatings: rated.filter(function (c) { return c.conversation_rating.rating <= 3; }).map(function (c) {
+    excusedRatings: convos.filter(function (c) { return c.conversation_rating && c.conversation_rating.rating && !auditRating_(c); }).length,
+    lowRatings: rated.filter(function (c) { return auditRating_(c).rating <= 3; }).map(function (c) {
       return { id: String(c.id), rating: c.conversation_rating.rating, remark: auditStrip_(c.conversation_rating.remark || '').slice(0, 300) };
     }).slice(0, 15),
     topTags: Object.keys(tags).sort(function (a, b) { return tags[b] - tags[a]; }).slice(0, 12).map(function (k) { return { tag: k, count: tags[k] }; }),
@@ -274,7 +303,8 @@ function auditRun_(b, who) {
 
   try {
     var since = Date.now() - AUDIT_DAYS * 864e5;
-    var convos = auditConversations_(rep.id, since);
+    // Same rule as the CS reports: conversations tagged "exclude from metrics" don't count at all.
+    var convos = auditConversations_(rep.id, since).filter(function (c) { return !auditTags_(c).some(function (t) { return /exclude from metrics/i.test(t); }); });
     var stats = auditStats_(convos);
     var scored = convos.map(function (c) { var f = auditFriction_(c); return { c: c, score: f.score, why: f.why }; })
       .sort(function (a, b) { return b.score - a.score; });
@@ -296,7 +326,7 @@ function auditRun_(b, who) {
     var context = 'REP: ' + rep.name + '\nWINDOW: last ' + AUDIT_DAYS + ' days\n\nINTERCOM NUMBERS:\n' +
       JSON.stringify({ conversations: stats.conversations, stillOpen: stats.stillOpen, medianFirstReplyMin: stats.medianFirstReplyMin,
         medianCloseHours: stats.medianCloseHours, reopenedPct: stats.reopenedPct, reassignedPct: stats.reassignedPct,
-        longThreadPct: stats.longThreadPct, csatPct: stats.csatPct, csatRated: stats.csatRated, lowRatings: stats.lowRatings,
+        longThreadPct: stats.longThreadPct, csatPct: stats.csatPct, csatRated: stats.csatRated, excusedRatings: stats.excusedRatings, lowRatings: stats.lowRatings,
         topTags: stats.topTags, channels: stats.channels }) +
       '\n\nCONVERSATIONS (most difficult first, then a few typical ones):\n\n' + threads.join('\n\n---\n\n');
     if (context.length > 85000) context = context.slice(0, 85000) + '\n…(trimmed)';

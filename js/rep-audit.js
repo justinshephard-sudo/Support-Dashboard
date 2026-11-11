@@ -136,7 +136,7 @@ function renderAudit(a) {
       ${kpi(s.conversations, 'Conversations')}
       ${kpi(s.medianFirstReplyMin == null ? null : s.medianFirstReplyMin + 'm', 'Median first reply')}
       ${kpi(s.medianCloseHours == null ? null : s.medianCloseHours + 'h', 'Median time to close')}
-      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `CSAT (${s.csatRated || 0} rated)`, s.csatPct != null && s.csatPct < 90)}
+      ${kpi(s.csatPct == null ? null : s.csatPct + '%', `CSAT (${s.csatRated || 0} rated${s.excusedRatings ? `, ${s.excusedRatings} excused` : ''})`, s.csatPct != null && s.csatPct < 90)}
       ${kpi((s.reopenedPct ?? 0) + '%', 'Reopened', s.reopenedPct >= 10)}
       ${kpi((s.reassignedPct ?? 0) + '%', 'Reassigned', s.reassignedPct >= 15)}
       ${kpi((s.longThreadPct ?? 0) + '%', 'Long threads (15+ msgs)', s.longThreadPct >= 15)}
