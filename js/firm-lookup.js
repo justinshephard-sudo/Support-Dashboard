@@ -296,6 +296,7 @@ function openFirm(firmId, name) {
         ${odBadge}${dangerBadge}
         ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
         ${typeof spButtonHtml === 'function' ? spButtonHtml() : ''}
+        ${f.firmId && overridesUnlocked && AUTH.email && MANAGER_EMAILS.includes(AUTH.email.toLowerCase()) && typeof raAuditFirm === 'function' ? `<button type="button" class="pill-btn" id="pfAudit" data-firm="${esc(f.firmId)}" data-name="${esc(f.name)}">🔍 Audit onboarding</button>` : ''}
       </div>
     </div>
     <div class="pf-grid">
@@ -331,5 +332,6 @@ function openFirm(firmId, name) {
     b.addEventListener('click', () => openContract(b.dataset.contract, b));
   });
   document.getElementById('profile').querySelector('[data-sp-open]')?.addEventListener('click', () => openServicePortal(f));
+  document.getElementById('pfAudit')?.addEventListener('click', (e) => raAuditFirm(e.currentTarget.dataset.firm, e.currentTarget.dataset.name));
   document.getElementById('profile').classList.add('show');
 }

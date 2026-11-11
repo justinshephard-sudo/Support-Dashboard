@@ -22,7 +22,7 @@ var AUDIT_CONVO_CHARS = 4200;   // per conversation, after trimming (keeps how t
 var AUDIT_MAX_CALLS = 30;
 var AUDIT_CS_TEAM = '8108094';
 var AUDIT_SKIP_ADMINS = ['6504887'];   // Fin / "The Lawmatician"
-var AUDIT_COLUMNS = ['Id', 'Status', 'Rep', 'RepEmail', 'AdminId', 'RequestedBy', 'Requested', 'Finished', 'Stats', 'Report', 'Error'];
+var AUDIT_COLUMNS = ['Id', 'Status', 'Rep', 'RepEmail', 'AdminId', 'RequestedBy', 'Requested', 'Finished', 'Stats', 'Report', 'Error', 'Kind'];   // Kind: support | im | firm (im-audit.js)
 var INTERCOM = 'https://api.intercom.io';
 
 var AUDIT_PROMPT = [
@@ -234,6 +234,8 @@ function auditSheet_() {
     sh = ss.insertSheet(AUDIT_TAB);
     sh.getRange(1, 1, 1, AUDIT_COLUMNS.length).setValues([AUDIT_COLUMNS]).setFontWeight('bold');
     sh.setFrozenRows(1);
+  } else if (sh.getLastColumn() < AUDIT_COLUMNS.length) {
+    sh.getRange(1, 1, 1, AUDIT_COLUMNS.length).setValues([AUDIT_COLUMNS]).setFontWeight('bold');
   }
   return sh;
 }
@@ -260,7 +262,7 @@ function auditSet_(id, fields) {
 }
 
 function auditPublic_(r, full) {
-  var o = { id: String(r.Id), status: r.Status, rep: r.Rep, adminId: String(r.AdminId), requestedBy: r.RequestedBy,
+  var o = { id: String(r.Id), kind: String(r.Kind || 'support'), status: r.Status, rep: r.Rep, adminId: String(r.AdminId), requestedBy: r.RequestedBy,
     requested: r.Requested ? new Date(r.Requested).toISOString() : '', finished: r.Finished ? new Date(r.Finished).toISOString() : '', error: r.Error || '' };
   if (full) {
     try { o.stats = JSON.parse(r.Stats || 'null'); } catch (e) { o.stats = null; }
@@ -272,13 +274,16 @@ function auditPublic_(r, full) {
 /* ---------- actions ---------- */
 
 function auditList_() {
-  var reps = auditReps_();
+  var reps = { reps: [], appId: '' };
+  try { reps = auditReps_(); } catch (e) { reps.error = String(e.message || e); }
   var rows = auditRows_().map(function (r) { return auditPublic_(r, false); }).reverse().slice(0, 60);
   // A run stuck for 15+ minutes failed somewhere along the way.
   rows.forEach(function (r) {
     if (r.status === 'running' && Date.now() - new Date(r.requested) > 15 * 60000) { r.status = 'failed'; r.error = r.error || 'Timed out — try again.'; }
   });
-  return { ok: true, reps: reps.reps, appId: reps.appId, audits: rows };
+  var im = { reps: [], firms: [] };
+  try { im = { reps: imReps_(), firms: imOpenFirms_() }; } catch (e) { im.error = String(e.message || e); }
+  return { ok: true, reps: reps.reps, appId: reps.appId, audits: rows, imReps: im.reps, imFirms: im.firms, imError: im.error || '' };
 }
 
 function auditGet_(b) {
@@ -286,7 +291,9 @@ function auditGet_(b) {
   if (!r) throw new Error('That audit wasn’t found.');
   var out = auditPublic_(r, true);
   if (out.status === 'running' && Date.now() - new Date(out.requested) > 15 * 60000) { out.status = 'failed'; out.error = out.error || 'Timed out — try again.'; }
-  return { ok: true, audit: out, appId: auditReps_().appId };
+  var appId = '';
+  try { appId = auditReps_().appId; } catch (e) { /* Intercom down: IM audits still open */ }
+  return { ok: true, audit: out, appId: appId };
 }
 
 function auditRun_(b, who) {
@@ -300,7 +307,7 @@ function auditRun_(b, who) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    auditSheet_().appendRow([id, 'running', rep.name, rep.email, rep.id, who.email, new Date(), '', '', '', '']);
+    auditSheet_().appendRow([id, 'running', rep.name, rep.email, rep.id, who.email, new Date(), '', '', '', '', 'support']);
   } finally { lock.releaseLock(); }
 
   try {
@@ -361,9 +368,9 @@ function auditResult_(b) {
   var row = auditRows_().filter(function (r) { return String(r.Id) === String(req.id); })[0];
   var stats = {};
   try { stats = JSON.parse((row && row.Stats) || '{}') || {}; } catch (e) { stats = {}; }
-  stats.calls = Array.isArray(b.calls) ? b.calls.slice(0, AUDIT_MAX_CALLS).map(function (c) {
+  if (Array.isArray(b.calls) && b.calls.length) stats.calls = b.calls.slice(0, AUDIT_MAX_CALLS).map(function (c) {
     return { id: String(c.id || ''), uuid: String(c.uuid || ''), topic: String(c.topic || '').slice(0, 120), date: String(c.date || ''), minutes: Number(c.minutes) || 0, summary: !!c.summary };
-  }) : [];
+  });
   if (b.report && typeof b.report === 'object') {
     auditSet_(req.id, { Status: 'done', Report: JSON.stringify(b.report), Stats: JSON.stringify(stats), Finished: new Date().toISOString(), Error: '' });
   } else {
@@ -389,5 +396,6 @@ function auditDoPost_(b, who) {
   if (b.action === 'auditList') return auditList_();
   if (b.action === 'auditGet') return auditGet_(b);
   if (b.action === 'auditRun') return auditRun_(b, who);
+  if (b.action === 'auditRunIm') return imRun_(b, who);
   return null;
 }

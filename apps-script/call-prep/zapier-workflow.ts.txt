@@ -8,9 +8,10 @@ import { createHash } from "node:crypto";
 //    Claude (through AI by Zapier) writes the prep sheet as JSON; this posts it back to the script.
 //  - kind "signals": the script sends Gong tracker hits with the transcript around each one; Claude judges
 //    which are real alarms (not talk about the old system / current process); this posts the verdicts back.
-//  - kind "audit": a manager's Rep Audit. The script sends the rep's Intercom digest and the Zoom meeting
-//    numbers of their customer calls; this pulls each call's AI Companion summary (Zoom connection), Claude
-//    writes the coaching report, and this posts it back.
+//  - kind "audit": a manager's Rep Audit. Support: the script sends the rep's Intercom digest and the Zoom meeting
+//    numbers of their customer calls; this pulls each call's AI Companion summary (Zoom connection). Implementation
+//    (IM / firm): the script sends the ChurnZero/email digest and Gong call summaries (transcript). Claude writes
+//    the report and this posts it back.
 const sdk = createZapierSdk();
 
 // Only the call-prep Apps Script can start a run: it sends hookKey (kept in its git-ignored secret.js), and
@@ -100,7 +101,8 @@ export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ct
     });
 
     const callText = calls.filter((c) => c.summary).map((c) => `[zoom:${c.id}] ${c.date} · ${c.topic} · ${c.minutes} min\n${c.summary}`).join("\n\n---\n\n")
-      || "(No Zoom AI Companion summaries found for this rep's customer calls in the window.)";
+      || input.transcript   // IM / firm audits send their Gong call summaries here instead of Zoom meeting numbers
+      || "(No call summaries found for this rep's customer calls in the window.)";
 
     const written = await ctx.step("write-rep-audit", async () =>
       sdk.runAction({
@@ -112,7 +114,7 @@ export default defineDurable<Input, unknown>("cs-dashboard-call-prep", async (ct
           authentication_id: "0",
           model_id: "anthropic/claude-sonnet-5-5",
           instructions: input.instructions,
-          inputFields: { intercom: input.context ?? "", calls: callText },
+          inputFields: { material: input.context ?? "", calls: callText },
           includeWorkflowData: false,
           outputFields: [{ name: "report_json", type: "text", isRequired: true }],
         },
