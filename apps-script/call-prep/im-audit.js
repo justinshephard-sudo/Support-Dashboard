@@ -566,8 +566,16 @@ function imAuditFirm_(firmId) {
   var matcher = imFirmMatcher_([a], contacts);
   var domains = {};
   (contacts[a.Id] || []).forEach(function (em) { var d = em.split('@')[1]; if (d && !FREE_MAIL.test(d + '.')) domains[d] = true; });
-  var found = gongCallsForFirm_(a.Name, domains, (contacts[a.Id] || []).map(function (e) { return { Email: e }; }), null)
-    .filter(function (c) { return c.started >= fromIso; });
+  // Search the AM's own Gong calls (fast, and what matters). Company-wide search pages oldest-first and
+  // stops before reaching recent calls, so it's only a fallback, over the last 60 days.
+  var people = (contacts[a.Id] || []).map(function (e) { return { Email: e }; });
+  var found = rep ? gongCallsForFirm_(a.Name, domains, people, { email: repEmail }) : [];
+  if (!found.length) {
+    var saved = GONG_LOOKBACK_DAYS;
+    GONG_LOOKBACK_DAYS = 60;
+    try { found = gongCallsForFirm_(a.Name, domains, people, null); } finally { GONG_LOOKBACK_DAYS = saved; }
+  }
+  found = found.filter(function (c) { return c.started >= fromIso; });
   var calls = found.length ? imGongCalls_(null, null, found.map(function (c) { return c.id; })).map(function (c) { return imCallInfo_(c, repEmail); }) : [];
   calls.sort(function (x, y) { return x.date < y.date ? -1 : 1; });
   var latest = calls[calls.length - 1];
