@@ -337,6 +337,7 @@ function renderImAudit(a) {
       ${kpi(s.emailThreads, 'Email threads')}
       ${kpi(s.replyMedianHours == null ? null : s.replyMedianHours + 'h', 'IM email reply (median)', s.replyMedianHours > 24)}
       ${kpi(s.signals, 'Real call signals', s.signals > 0)}
+      ${s.supportTickets != null ? kpi(s.supportTickets, 'Support tickets', s.supportLow > 0, [s.supportOpen ? s.supportOpen + ' open' : '', s.supportLow ? s.supportLow + ' low CSAT' : ''].filter(Boolean).join(' · ')) : ''}
       ${kpi((s.csat || []).length ? s.csat.join(', ') : null, 'Onboarding CSAT')}` : `
       ${s.onboarding ? `
       ${kpi(s.onboarding.open, 'In onboarding', false, vs(t.open))}
@@ -348,6 +349,7 @@ function renderImAudit(a) {
       ${kpi(s.live.accounts, 'Live accounts', false, `${s.live.touched} contacted in 30 days`)}
       ${kpi(s.live.lowUsage, 'Live · low usage', s.live.lowUsage > 0, s.live.neverEngaged ? `${s.live.neverEngaged} never engaged` : '')}
       ${kpi(s.live.highChurn, 'Live · high churn score', s.live.highChurn > 0, s.live.cancelling ? `${s.live.cancelling} cancellation requested` : '')}
+      ${s.live.supportHeavy != null ? kpi(s.live.supportHeavy, 'Live · support-heavy', s.live.supportHeavy > 0, `${s.live.supportTickets || 0} tickets in 30 days`) : ''}
       ${kpi(s.talkMedian == null ? null : s.talkMedian + '%', 'IM talking (share of call)', s.talkMedian > 60)}` : `
       ${kpi(s.open, 'Open onboardings', false, vs(t.open))}
       ${kpi(s.over70, 'Open over 70 days', s.over70 > 0, vs(t.over70))}
@@ -401,6 +403,7 @@ function renderImAudit(a) {
       ${raSection('Product adoption', '🧩', r.adoption, pts)}
       ${r.sentiment ? `<section class="ra-sec"><h3>💬 Sentiment</h3><p>${esc(r.sentiment.overview || '')}</p>${(r.sentiment.observations || []).length ? `<ul>${r.sentiment.observations.map(pts).join('')}</ul>` : ''}</section>` : ''}
       ${firm ? raSection('Risks', '⚠️', r.risks, (x) => `<li><b>${esc(x.risk)}</b><p>${esc(x.detail || '')}</p>${raRefs(x.refs, a)}</li>`) : raSection('Strengths', '💪', r.strengths, pts)}
+      ${firm ? raSection('Support tickets', '🎧', r.support, pts) : ''}
       ${firm ? raSection('What went well', '💪', r.went_well, pts) : raSection('Call craft', '🎙', r.call_craft, pts)}
       ${firm ? raSection('Notes on how the IM ran it', '🎯', r.im_notes, pts) : raSection('Communication', '✉️', r.communication, pts)}
     </div>

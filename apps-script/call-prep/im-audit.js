@@ -59,7 +59,8 @@ var IM_REP_PROMPT = [
   'LIVE ACCOUNTS (finished onboarding; the AM keeps them healthy). Judge: SENTIMENT, RESPONSIVENESS, ROADBLOCKS / FRUSTRATIONS',
   '(bugs, missing features, billing, confusion), and a USAGE DEEP DIVE: who is barely using Lawmatics, who never engaged, who is at churn',
   'risk, and whether the AM is doing anything about it. The whole book is summarized by counts; you see the flagged accounts and every',
-  'account the AM touched in the last 30 days.',
+  'account the AM touched in the last 30 days. SUPPORT 30d shows the account\'s Intercom tickets to the support team (count, open,',
+  '  reopened, low CSAT, topics): heavy support use or low support ratings on a live account the AM hasn\'t contacted is a red flag.',
   '',
   'DATA CAVEATS: ChurnZero milestone checkboxes are often stale (finished firms show them unchecked); treat them as a hint only.',
   'Usage numbers are 30-day ChurnZero totals (no trends). Don\'t comment on data quality unless it changes a conclusion.',
@@ -98,12 +99,12 @@ var IM_FIRM_PROMPT = [
   IM_RUBRIC,
   '',
   'You get: the firm\'s profile (stage, days, pauses, milestones, 30-day usage, sales notes); every recorded call with Gong\'s summary',
-  '[gong:ID]; the full transcript of the latest call; the email threads with the firm; and any real call signals (churn risk, blocked by',
+  '[gong:ID]; its support tickets to the Lawmatics support team (Intercom) [ic:ID], the most telling read in full; the full transcript of the latest call; the email threads with the firm; and any real call signals (churn risk, blocked by',
   'a bug, sold vs reality). Be specific and fair: separate the IM\'s actions from the firm\'s own delays and from product limits.',
   'If the firm is still IN ONBOARDING, focus on sentiment, responsiveness, onboarding time, roadblocks and whether the next call is scheduled;',
   'leave product usage out of "adoption" (say "in onboarding" there). If it is LIVE, go deep on usage in "adoption".',
   'List every bug and feature request the firm raised (calls, email, ChurnZero fields).',
-  'Every claim needs refs ("gong:ID") where they exist; never invent refs.',
+  'Every claim needs refs ("gong:ID" or "ic:ID") where they exist; never invent refs.',
   '',
   'Return ONLY a JSON object (no code fence) with exactly these keys:',
   '{"headline": "one or two sentences: where this onboarding stands and why",',
@@ -115,6 +116,7 @@ var IM_FIRM_PROMPT = [
   ' "risks": [{"risk": "...", "detail": "...", "refs": []}],',
   ' "bugs": [{"issue": "a Lawmatics bug this firm hit", "status": "fixed / ticket open / no update", "refs": []}],',
   ' "feature_requests": [{"request": "what the firm asked Lawmatics to add or change", "refs": []}],',
+  ' "support": [{"point": "what the firm brings to the support team: volume, themes, unresolved or low-rated tickets", "refs": []}],',
   ' "went_well": [{"point": "...", "refs": []}],',
   ' "next_steps": [{"action": "...", "owner": "IM | firm | manager | product"}],',
   ' "im_notes": [{"point": "coaching notes on how the IM ran this one", "refs": []}]}',
@@ -393,6 +395,76 @@ function imTeam_(repName) {
 
 /* ---------- rep audit ---------- */
 
+/* ---------- Intercom (support tickets) ---------- */
+
+// AM audit: every customer-started Intercom conversation in the window, matched to the AM's accounts by the
+// author's email. One team-wide search (~10 pages), so it stays light. {} when Intercom isn't connected.
+function imSupportByAccount_(fromIso, matcher) {
+  var out = {};
+  try {
+    var cursor = null, guard = 0, since = Math.floor(new Date(fromIso).getTime() / 1000);
+    do {
+      var body = { query: { field: 'created_at', operator: '>', value: since }, pagination: { per_page: 150 } };
+      if (cursor) body.pagination.starting_after = cursor;
+      var res = ic_('post', '/conversations/search', body);
+      (res.conversations || []).forEach(function (c) {
+        var au = (c.source && c.source.author) || {};
+        if (au.type === 'admin' || au.type === 'bot') return;
+        var acct = matcher.email(au.email);
+        if (!acct) return;
+        var o = out[acct] = out[acct] || { n: 0, open: 0, reopened: 0, low: [], titles: [] };
+        o.n++;
+        if (c.state !== 'closed') o.open++;
+        if ((c.statistics || {}).count_reopens > 0) o.reopened++;
+        var r = auditRating_(c);
+        if (r && r.rating <= 3) o.low.push({ id: String(c.id), rating: r.rating, remark: auditStrip_(r.remark || '').slice(0, 160) });
+        var t = auditStrip_(c.title || (c.source && (c.source.subject || c.source.body)) || '').slice(0, 80);
+        if (t && o.titles.length < 4) o.titles.push(t);
+      });
+      cursor = res.pages && res.pages.next && res.pages.next.starting_after;
+    } while (cursor && ++guard < 25);
+  } catch (e) { console.warn('Intercom skipped: ' + e.message); }
+  return out;
+}
+
+// Firm audit: the firm's own Intercom conversations (its contacts' emails → Intercom contacts → conversations).
+function imFirmSupport_(emails, fromIso) {
+  var out = { convos: [], text: '' };
+  try {
+    emails = emails.filter(Boolean).slice(0, 60);
+    var ids = {};
+    for (var i = 0; i < emails.length; i += 15) {
+      var q = { query: { operator: 'OR', value: emails.slice(i, i + 15).map(function (e) { return { field: 'email', operator: '=', value: e }; }) }, pagination: { per_page: 150 } };
+      (ic_('post', '/contacts/search', q).data || []).forEach(function (c) { ids[c.id] = true; });
+    }
+    var list = Object.keys(ids), since = Math.floor(new Date(fromIso).getTime() / 1000), convos = [];
+    for (var j = 0; j < list.length; j += 15) {
+      var body = { query: { operator: 'AND', value: [{ field: 'contact_ids', operator: 'IN', value: list.slice(j, j + 15) }, { field: 'created_at', operator: '>', value: since }] }, pagination: { per_page: 150 } };
+      convos = convos.concat(ic_('post', '/conversations/search', body).conversations || []);
+    }
+    var seen = {};
+    convos = convos.filter(function (c) { if (seen[c.id]) return false; seen[c.id] = true; return true; })
+      .sort(function (a, b) { return b.created_at - a.created_at; });
+    out.convos = convos.map(function (c) {
+      var r = auditRating_(c);
+      return { id: String(c.id), date: Utilities.formatDate(new Date(c.created_at * 1000), 'America/Los_Angeles', 'yyyy-MM-dd'), state: c.state,
+        rating: r ? r.rating : null, reopened: (c.statistics || {}).count_reopens || 0,
+        title: auditStrip_(c.title || (c.source && (c.source.subject || c.source.body)) || '').slice(0, 120) };
+    });
+    // Read the most telling ones in full: low ratings, reopened, still open, then the newest.
+    var pick = convos.slice().sort(function (a, b) {
+      var sc = function (c) { var r = auditRating_(c); return (r && r.rating <= 3 ? 4 : 0) + ((c.statistics || {}).count_reopens ? 2 : 0) + (c.state !== 'closed' ? 1 : 0); };
+      return sc(b) - sc(a) || b.created_at - a.created_at;
+    }).slice(0, 8);
+    out.text = pick.map(function (c) {
+      var t = '';
+      try { t = auditThread_(c.id, ''); } catch (e) { t = '(couldn’t load)'; }
+      return '[ic:' + c.id + '] ' + Utilities.formatDate(new Date(c.created_at * 1000), 'America/Los_Angeles', 'yyyy-MM-dd') + ' · ' + c.state + '\n' + t.slice(0, 2200);
+    }).join('\n\n---\n\n');
+  } catch (e) { console.warn('Intercom skipped: ' + e.message); out.error = e.message; }
+  return out;
+}
+
 // Next scheduled ChurnZero meeting per open firm, from the Implementation tab ("" = needs scheduling).
 function imNextMeetings_() {
   var sh = SpreadsheetApp.openById(SIGNAL_SHEET_ID).getSheetByName('Impl - Open Firms');
@@ -452,6 +524,7 @@ function imAuditRep_(rep, id) {
   var signals = imSignals_(rep.name, fromDay);
   var csat = imCsat_(rep.name, new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10));
   var team = imTeam_(rep.name);
+  var support = imSupportByAccount_(fromIso, matcher);
   var med = function (v) { v = v.slice().sort(function (a, b) { return a - b; }); return v.length ? v[Math.floor(v.length / 2)] : null; };
 
   var facts = accounts.map(function (a) {
@@ -476,7 +549,10 @@ function imAuditRep_(rep, id) {
     risk += 3 * mySignals.length;
     if (myCsat.some(function (s) { return s.score && s.score <= 3; })) risk += 3;
     if (waits.some(function (w) { return w > 24; })) risk += 1;
-    return { a: a, onboarding: onboarding, days: days, calls: myCalls, threads: myThreads, lastTouch: lastTouch, signals: mySignals, csat: myCsat,
+    var sup = support[a.Id] || null;
+    if (sup && (sup.n >= 4 || sup.low.length)) risk += 2;
+    if (!onboarding && sup && (sup.n >= 4 || sup.low.length)) flags.push('support-heavy');
+    return { a: a, support: sup, onboarding: onboarding, days: days, calls: myCalls, threads: myThreads, lastTouch: lastTouch, signals: mySignals, csat: myCsat,
       waits: waits, nextCall: nextCall, flags: flags, risk: risk, touched: myCalls.length + myThreads.length > 0 };
   });
   var onb = facts.filter(function (f) { return f.onboarding; }).sort(function (x, y) { return y.risk - x.risk; });
@@ -500,7 +576,8 @@ function imAuditRep_(rep, id) {
       noNextCall: onb.filter(function (f) { return !f.nextCall; }).length, quiet14: onb.filter(function (f) { return !f.lastTouch || imDaysSince_(f.lastTouch) > 14; }).length,
       replyMedianHours: med(waitsAll(onb)) },
     live: { accounts: live.length, touched: live.filter(function (f) { return f.touched; }).length, lowUsage: lf('low usage'), neverEngaged: lf('never engaged'),
-      highChurn: lf('churn'), cancelling: lf('cancellation'), replyMedianHours: med(waitsAll(live)),
+      highChurn: lf('churn'), cancelling: lf('cancellation'), supportHeavy: lf('support-heavy'), replyMedianHours: med(waitsAll(live)),
+      supportTickets: live.reduce(function (t, f) { return t + (f.support ? f.support.n : 0); }, 0),
       mrrAtRisk: Math.round(live.filter(function (f) { return f.flags.length; }).reduce(function (t, f) { return t + (Number(f.a.TotalContractAmount) || 0); }, 0)) },
     sampled: sample.map(function (f) { return { firmId: String(f.a.Cf.FirmId), name: f.a.Name, onboarding: f.onboarding }; }),
     firmNames: {}, callList: calls.map(function (c) { return { id: c.id, title: c.title, date: c.date, url: c.url, firmId: c.accountId && byId[c.accountId] ? String(byId[c.accountId].Cf.FirmId) : '' }; }),
@@ -512,9 +589,12 @@ function imAuditRep_(rep, id) {
     return ' · last touch ' + (f.lastTouch || 'none in 30 days') + ' · calls ' + f.calls.length + ' · email threads ' + f.threads.length +
       (f.waits.length ? ' · slowest reply ' + Math.max.apply(null, f.waits) + 'h' : '') +
       (f.signals.length ? ' · SIGNALS: ' + f.signals.map(function (s) { return s.signal; }).join(', ') : '') +
-      (f.csat.length ? ' · CSAT ' + f.csat.map(function (s) { return s.score; }).join('/') : '');
+      (f.csat.length ? ' · CSAT ' + f.csat.map(function (s) { return s.score; }).join('/') : '') +
+      (f.support ? ' · SUPPORT 30d: ' + f.support.n + ' tickets' + (f.support.open ? ', ' + f.support.open + ' open' : '') + (f.support.reopened ? ', ' + f.support.reopened + ' reopened' : '') +
+        (f.support.low.length ? ', low CSAT ' + f.support.low.map(function (l) { return '[ic:' + l.id + '] ' + l.rating + '/5' + (l.remark ? ' “' + l.remark + '”' : ''); }).join('; ') : '') +
+        (f.support.titles.length ? ' (topics: ' + f.support.titles.join(' | ') + ')' : '') : '');
   };
-  var liveShown = live.filter(function (f) { return f.flags.length || f.touched; }).slice(0, 70);
+  var liveShown = live.filter(function (f) { return f.flags.length || f.touched || f.support; }).slice(0, 80);
   var context = 'AM: ' + rep.name + '\nWINDOW: last ' + IM_DAYS + ' days for calls and email\n\nIMPLEMENTATION TAB NUMBERS (this AM vs the median AM): ' + JSON.stringify(team) +
     '\nCALLS: ' + calls.length + ' led, AM talked ' + (stats.talkMedian == null ? '?' : stats.talkMedian + '%') + ' of the call (median)' +
     '\nEMAIL: ' + threads.length + ' customer threads, AM reply median ' + stats.replyMedianHours + ' business hours, ' + stats.slowReplies + ' replies over 24 business hours' +
@@ -528,7 +608,7 @@ function imAuditRep_(rep, id) {
         ' · next call ' + (f.nextCall || 'NONE SCHEDULED') + touch(f) + imProductNotes_(cf);
     }).join('\n') +
     '\n\n=== LIVE ACCOUNTS (' + live.length + ' in the whole book) — numbers: ' + JSON.stringify(stats.live) +
-    '\nShown: every flagged account and every account the AM talked to in the window (' + liveShown.length + '). Unflagged, untouched accounts are left out.\n' +
+    '\nShown: every flagged account, every account the AM talked to, and every account that opened support tickets in the window (' + liveShown.length + '). Others are left out.\n' +
     liveShown.map(function (f) {
       var cf = f.a.Cf || {};
       return '[firm:' + cf.FirmId + '] ' + f.a.Name + ' — live' + (cf.OnboardingCompletedDate ? ' since ' + imDay_(cf.OnboardingCompletedDate) : '') +
@@ -585,13 +665,15 @@ function imAuditFirm_(firmId) {
   var fromDay = fromIso.slice(0, 10);
   var signals = imSignals_(repName, fromDay, cf.FirmId);
   var csat = imCsat_(repName, fromDay, cf.FirmId);
+  var support = imFirmSupport_(contacts[a.Id] || [], fromIso);
   var waits = threads.reduce(function (acc, t) { return acc.concat(t.waits); }, []).sort(function (x, y) { return x - y; });
   var days = cf.OnboardingCompletedDate ? Number(cf.NewTimeInOnboarding) || 0 : imDaysSince_(start) || 0;
   var stats = {
     kind: 'firm', firmId: String(cf.FirmId), firm: a.Name, rep: repName, status: cf.OnboardingStatus || '', stage: cf.NewOnboardingCall || '', days: days,
     started: imDay_(start), completed: imDay_(cf.OnboardingCompletedDate), milestones: IM_MILESTONES.map(function (m) { return { name: m[1], done: cf[m[0]] === true }; }),
     usage: { messages: cf.OfMessagesSentl30 || 0, meetings: cf.OfMeetingsl30 || 0, matters: Math.round(cf.AvgMattersCreatedmonth || 0), sms: cf.TotalSmsSent || 0 },
-    callsFound: calls.length, emailThreads: threads.length, replyMedianHours: waits.length ? waits[Math.floor(waits.length / 2)] : null, signals: signals.length,
+    callsFound: calls.length, emailThreads: threads.length, supportTickets: support.convos.length,
+    supportLow: support.convos.filter(function (c) { return c.rating && c.rating <= 3; }).length, supportOpen: support.convos.filter(function (c) { return c.state !== 'closed'; }).length, replyMedianHours: waits.length ? waits[Math.floor(waits.length / 2)] : null, signals: signals.length,
     csat: csat.map(function (s) { return s.score; }),
     callList: calls.map(function (c) { return { id: c.id, title: c.title, date: c.date, url: c.url, firmId: String(cf.FirmId) }; }),
     firmNames: {},
@@ -605,9 +687,12 @@ function imAuditFirm_(firmId) {
     '\n\nONBOARDING CSAT: ' + (csat.map(function (s) { return s.score + '/5' + (s.comment ? ' — ' + s.comment : ''); }).join('; ') || '(none)') +
     '\n\nEMAIL THREADS (' + threads.length + ', IM reply median ' + stats.replyMedianHours + ' business hours):\n' +
     threads.map(function (t) { return imThreadText_(t, repEmail, 2500); }).join('\n\n') +
+    '\n\nSUPPORT TICKETS (Intercom, ' + support.convos.length + ' since ' + fromIso.slice(0, 10) + '):\n' +
+    (support.convos.map(function (c) { return '[ic:' + c.id + '] ' + c.date + ' ' + c.state + (c.rating ? ' ' + c.rating + '/5' : '') + (c.reopened ? ' reopened' : '') + ' — ' + c.title; }).join('\n') || '(none)') +
+    (support.text ? '\n\nSUPPORT TICKETS READ IN FULL:\n' + support.text : '') +
     (transcript ? '\n\nLATEST CALL TRANSCRIPT [gong:' + latest.id + '] ' + latest.date + ':\n' + transcript : '');
   var callsText = calls.map(function (c) { return imCallText_(c, a.Name); }).join('\n\n---\n\n') || '(No Gong calls found for this firm.)';
-  if (context.length > 90000) context = context.slice(0, 90000) + '\n…(trimmed)';
+  if (context.length > 100000) context = context.slice(0, 100000) + '\n…(trimmed)';
   if (callsText.length > 40000) callsText = callsText.slice(0, 40000) + '\n…(trimmed)';
   return { stats: stats, context: context, callsText: callsText, prompt: IM_FIRM_PROMPT, repName: repName, repEmail: repEmail, name: a.Name };
 }
