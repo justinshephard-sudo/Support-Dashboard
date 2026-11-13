@@ -10,7 +10,8 @@
    ========================================================================== */
 let SC_TAB = 'support';
 try { SC_TAB = localStorage.getItem('cs-sc-tab') === 'am' ? 'am' : 'support'; } catch (e) { /* private mode */ }
-const AMS = { hist: null, exclusions: [], loading: null, current: null, chart: null };
+const AMS = { hist: null, exclusions: [], comps: [], loading: null, current: null, chart: null, noteOpen: null };
+const AM_REVIEW_DOC = 'https://docs.google.com/document/d/1zOdusQopNk5Hy18_fkuLJBdnJ-oFNPScTL4EnWAD13E/edit';
 const AM_FIRST_CALC = '2026-11';   // months before this come from the saved history
 
 // Rubric bands (AM_Scorecard_Rubric.xlsx). Ratios are rounded to 3 places so 0.9999 reads as 100%.
@@ -45,6 +46,7 @@ async function amLoad(force) {
     ]);
     AMS.hist = h.rows || [];
     AMS.exclusions = h.exclusions || [];
+    AMS.comps = h.comps || [];
   })();
   try { await AMS.loading; } catch (e) { AMS.loading = null; throw e; }
   return AMS.loading;
@@ -144,10 +146,22 @@ function renderAmCard(am) {
       <td><b class="am-total">${m.total == null ? '–' : m.total.toFixed(2)}</b>${lvl ? `<span class="am-lvl l${lvl[0]}">${lvl[0]}</span>` : ''}</td>
       <td>${m.upsell == null ? '–' : fmtMoney(m.upsell)}</td></tr>`;
   }).join('');
+  const year = String(new Date().getFullYear());
+  const kpiMonths = ms.filter((m) => m.ym.startsWith(year) && m.source !== 'partial' && m.total != null);
+  const kpiAvg = kpiMonths.length ? kpiMonths.reduce((t, m) => t + m.total, 0) / kpiMonths.length : null;
+  const compAvg = amCompAvg(am, year);
+  const total = kpiAvg != null && compAvg != null ? (kpiAvg + compAvg) / 2 : (kpiAvg != null ? kpiAvg : compAvg);
+  const tl = scLevel(total);
   document.getElementById('scBody').innerHTML = `
+    <div class="sc-summary">
+      <div class="sc-total"><span class="lbl">${year} total score</span><span class="val">${scFmt2(total)}</span>${tl ? `<span class="sc-level l${tl[0]}">${esc(tl[1])}</span>` : ''}</div>
+      <div class="sc-split"><span><b>${scFmt2(kpiAvg)}</b> KPI average (${kpiMonths.length} mo)</span><span><b>${scFmt2(compAvg)}</b> Competency average</span></div>
+    </div>
     <div class="am-chart-wrap"><canvas id="amChart" height="90"></canvas></div>
     <div class="table-wrap am-table-wrap"><table class="am-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
     <p class="mrr-note">Each metric is scored 1–5 with the rubric below; the total is the average of the scores that have data. Months through October 2026 are the saved history (with its exclusions); later months are calculated from the dashboard’s CSM and Implementation data, leaving out firms excluded on the dashboard. The current month is “to date”.</p>
+    <section class="res-section"><div class="section-head"><h2>Competencies</h2><span class="rule"></span><span class="note">Rated each quarter · <a href="${AM_REVIEW_DOC}" target="_blank" rel="noopener">what each level means ↗</a></span></div>
+      <div class="panel" id="amComps">${amCompsHtml(am, year)}</div></section>
     ${amRubricHtml(true)}`;
   const pts = ms.slice().reverse().filter((m) => m.total != null);
   if (window.Chart && pts.length) {
@@ -193,6 +207,49 @@ function amRubricHtml(open) {
     <p class="mrr-note">Total = average of the sub-scores that have data; blank metrics are skipped. Levels: 4.5+ Excellent, 3.5+ Exceeds, 2.5+ Meets, 1.5+ Needs Improvement.</p></details>`;
 }
 
+/* ---- competencies (quarterly) ---- */
+function amQuarters(year) {
+  const now = new Date(), curQ = Math.floor(now.getMonth() / 3) + 1;
+  const last = String(now.getFullYear()) === year ? curQ : 4;
+  return [1, 2, 3, 4].filter((q) => q <= last).map((q) => `${year}-Q${q}`);
+}
+function amComp(am, q, comp) { return (AMS.comps || []).find((r) => r[0] === am && r[1] === q && r[2] === comp) || null; }
+function amCompAvg(am, year) {
+  const v = (AMS.comps || []).filter((r) => r[0] === am && r[1].startsWith(year) && r[3] != null).map((r) => r[3]);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+function amCompsHtml(am, year) {
+  const qs = amQuarters(year);
+  const opts = (v) => ['', 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].map((o) => `<option value="${o}"${String(o) === String(v == null ? '' : v) ? ' selected' : ''}>${o === '' ? '—' : o}</option>`).join('');
+  const rows = SC_COMPETENCIES.map((c) => {
+    const cells = qs.map((q) => {
+      const r = amComp(am, q, c);
+      const key = `${q}|${c}`;
+      return `<td><span class="am-qcell"><select class="am-qsel" data-q="${q}" data-comp="${esc(c)}" aria-label="${esc(c)} ${q}">${opts(r ? r[3] : null)}</select>
+        <button type="button" class="am-qnote${r && r[4] ? ' has' : ''}" data-q="${q}" data-comp="${esc(c)}" title="${esc(r && r[4] ? r[4] : 'Add a note')}">✎</button></span>
+        ${AMS.noteOpen === key ? `<textarea class="am-qnote-edit" data-q="${q}" data-comp="${esc(c)}" rows="3" placeholder="Why this score…">${esc(r ? r[4] : '')}</textarea>` : ''}</td>`;
+    }).join('');
+    const sc = qs.map((q) => amComp(am, q, c)).filter((r) => r && r[3] != null).map((r) => r[3]);
+    return `<tr><td class="txt am-cname">${esc(c)}</td>${cells}<td><b>${sc.length ? (sc.reduce((a, b) => a + b, 0) / sc.length).toFixed(2) : '–'}</b></td></tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="am-table am-comps"><thead><tr><th class="txt">Competency</th>${qs.map((q) => `<th>${q.slice(5)}</th>`).join('')}<th>Avg</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="mrr-note">Pick a 1–5 score for each competency each quarter (½ steps allowed); ✎ adds a note. The ${year} total is the average of the KPI average and the competency average. <span class="am-saved" aria-live="polite"></span></p>`;
+}
+async function amCompSave(q, comp, field, value) {
+  const flag = document.querySelector('#amComps .am-saved');
+  if (flag) flag.textContent = 'Saving…';
+  try {
+    const res = await scCall({ action: 'amCompSet', am: AMS.current, quarter: q, competency: comp, [field]: value });
+    AMS.comps = res.comps || AMS.comps;
+    renderAmCard(AMS.current);
+    const f2 = document.querySelector('#amComps .am-saved');
+    if (f2) f2.textContent = 'Saved ✓';
+  } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
+    if (flag) flag.textContent = 'Couldn’t save: ' + e.message;
+  }
+}
+
 function setScTab(tab) {
   SC_TAB = tab;
   try { localStorage.setItem('cs-sc-tab', tab); } catch (e) { /* private mode */ }
@@ -210,6 +267,28 @@ function setupAmScorecards() {
   });
   document.querySelectorAll('[data-sc-tab]').forEach((b) => b.addEventListener('click', () => setScTab(b.dataset.scTab)));
   document.querySelectorAll('[data-sc-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.scTab === SC_TAB)));
+  const body = document.getElementById('scBody');
+  body.addEventListener('change', (e) => {
+    const sel = e.target.closest('.am-qsel');
+    if (sel) amCompSave(sel.dataset.q, sel.dataset.comp, 'score', sel.value);
+  });
+  body.addEventListener('focusout', (e) => {
+    const t = e.target.closest('.am-qnote-edit');
+    if (!t) return;
+    const r = amComp(AMS.current, t.dataset.q, t.dataset.comp);
+    AMS.noteOpen = null;
+    if ((r ? r[4] : '') === t.value) { renderAmCard(AMS.current); return; }
+    amCompSave(t.dataset.q, t.dataset.comp, 'note', t.value);
+  });
+  body.addEventListener('click', (e) => {
+    const nb = e.target.closest('.am-qnote');
+    if (nb) {
+      const key = `${nb.dataset.q}|${nb.dataset.comp}`;
+      AMS.noteOpen = AMS.noteOpen === key ? null : key;
+      renderAmCard(AMS.current);
+      document.querySelector('.am-qnote-edit')?.focus();
+    }
+  });
   document.getElementById('scBody').addEventListener('click', (e) => {
     const card = e.target.closest('.am-rep');
     if (card) { e.stopPropagation(); renderAmCard(card.dataset.am); window.scrollTo({ top: document.getElementById('view-scorecards').offsetTop - 70 }); }

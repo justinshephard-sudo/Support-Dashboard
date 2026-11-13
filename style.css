@@ -1403,3 +1403,11 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .am-diff{background:rgba(255,144,17,.14)}
 .am-check{margin-top:18px}
 .am-rubric table{font-size:13px;margin-top:8px}
+.am-comps .am-cname{white-space:normal;min-width:220px;font-weight:600;color:var(--text-1)}
+.am-qcell{display:inline-flex;align-items:center;gap:4px}
+.am-qsel{font:600 13px var(--font);color:var(--text-1);background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:4px 6px}
+.am-qnote{background:none;border:none;cursor:pointer;color:var(--text-3);font-size:13px;padding:2px 4px;border-radius:6px}
+.am-qnote.has{color:var(--lm-blue)}
+.am-qnote:hover{background:var(--surface-2)}
+.am-qnote-edit{display:block;width:100%;min-width:180px;box-sizing:border-box;margin-top:6px;font:500 13px var(--font);color:var(--text-1);background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:6px 8px;white-space:normal}
+.am-saved{font-weight:700;color:var(--text-2)}

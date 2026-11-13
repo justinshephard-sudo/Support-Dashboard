@@ -53,7 +53,8 @@ function doPost(e) {
     if (b.action === 'addRep') return json_(addRep_(b, who.email));
     // Account Manager scorecards: the saved history (am-history.js, git-ignored). New months are calculated on the page.
     if (b.action === 'amHistory') return json_({ ok: true, rows: typeof AM_HISTORY === 'undefined' ? [] : AM_HISTORY,
-      exclusions: typeof AM_HISTORY_EXCLUSIONS === 'undefined' ? [] : AM_HISTORY_EXCLUSIONS });
+      exclusions: typeof AM_HISTORY_EXCLUSIONS === 'undefined' ? [] : AM_HISTORY_EXCLUSIONS, comps: amComps_() });
+    if (b.action === 'amCompSet') return json_(amCompSet_(b, who.email));
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String((err && err.message) || err) });
@@ -269,3 +270,51 @@ function verifyManager_(token) {
 }
 
 function json_(obj) { return dashJson_(obj); }
+
+/* ---------- Account Manager competencies (rated each quarter) ---------- */
+// Tab "AM Competencies": one row per AM × quarter × competency. Same six competencies as Support;
+// the AM wording of each level is in the AM annual review doc.
+var AM_COMP_TAB = 'AM Competencies';
+var AM_COMP_HEAD = ['AM', 'Quarter', 'Competency', 'Score', 'Note', 'Updated By', 'Updated At'];
+
+function amCompSheet_() {
+  var ss = SpreadsheetApp.openById(SCORECARD_SHEET_ID);
+  var sh = ss.getSheetByName(AM_COMP_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(AM_COMP_TAB);
+    sh.getRange(1, 1, 1, AM_COMP_HEAD.length).setValues([AM_COMP_HEAD]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function amComps_() {
+  var sh = amCompSheet_();
+  if (sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().map(function (r) {
+    return [String(r[0]), String(r[1]), String(r[2]), r[3] === '' ? null : Number(r[3]), String(r[4] || '')];
+  });
+}
+
+function amCompSet_(b, email) {
+  var am = String(b.am || '').trim(), q = String(b.quarter || ''), comp = String(b.competency || '');
+  if (!am || !/^\d{4}-Q[1-4]$/.test(q) || COMPETENCIES.indexOf(comp) === -1) return { ok: false, error: 'bad request' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var sh = amCompSheet_();
+    var vals = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : [];
+    var row = -1;
+    vals.forEach(function (r, i) { if (row < 0 && r[0] === am && String(r[1]) === q && r[2] === comp) row = i + 2; });
+    if (row < 0) { row = sh.getLastRow() + 1; sh.getRange(row, 1, 1, 3).setNumberFormat('@').setValues([[am, q, comp]]); }
+    if (b.score !== undefined) {
+      if (b.score === '' || b.score == null) sh.getRange(row, 4).clearContent();
+      else { var n = Number(b.score); if (!(n >= 1 && n <= 5)) return { ok: false, error: 'scores are 1–5' }; sh.getRange(row, 4).setValue(n); }
+    }
+    if (b.note !== undefined) sh.getRange(row, 5).setValue(dashSafe_(String(b.note || '').slice(0, 5000)));
+    sh.getRange(row, 6, 1, 2).setValues([[email, new Date()]]);
+  } finally {
+    lock.releaseLock();
+  }
+  return { ok: true, comps: amComps_() };
+}
