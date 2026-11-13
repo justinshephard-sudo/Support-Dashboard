@@ -118,13 +118,11 @@ function renderAmList() {
   const cards = amNames().map((am) => {
     const ms = amMonths(am);
     const latest = ms.find((m) => m.source !== 'partial' && m.total != null) || ms[0];
-    const lvl = latest ? scLevel(latest.total) : null;
-    const spark = ms.slice(0, 6).reverse().map((m) => `<i style="height:${m.total == null ? 4 : Math.max(8, (m.total / 5) * 100)}%" class="${m.source === 'partial' ? 'p' : ''}" title="${esc(amYmLabel(m.ym))}: ${m.total == null ? '–' : m.total.toFixed(2)}"></i>`).join('');
+    const al = amAnnualLevel(am, String(new Date().getFullYear()));
     return `<button type="button" class="sc-rep am-rep" data-am="${esc(am)}">
-        <span class="sc-rep-head"><span class="sc-rep-name">${esc(am)}</span><span class="sc-rep-role">${latest ? esc(amYmLabel(latest.ym)) : ''}</span></span>
-        <span class="sc-rep-total">${latest && latest.total != null ? latest.total.toFixed(2) : '–'}</span>
-        ${lvl ? `<span class="sc-level l${lvl[0]}">${esc(lvl[1])}</span>` : '<span class="sc-level l3">No score yet</span>'}
-        <span class="am-spark">${spark}</span>
+        <span class="sc-rep-head"><span class="sc-rep-name">${esc(am)}</span><span class="sc-rep-role"></span></span>
+        <span class="sc-rep-total">${latest && latest.total != null ? latest.total.toFixed(2) : '–'} <small class="am-sub">${latest ? esc(amYmLabel(latest.ym)) + ' KPI score' : ''}</small></span>
+        ${al.rated ? `<span class="sc-level l${al.level}">${new Date().getFullYear()} level ${al.level} – ${AM_LEVEL_NAMES[al.level]}</span>` : `<span class="sc-level l${al.kpiLevel}">KPIs: level ${al.kpiLevel} – ${AM_LEVEL_NAMES[al.kpiLevel]}</span><span class="am-sub">competencies not rated yet</span>`}
       </button>`;
   }).join('');
   body.innerHTML = `<div class="sc-grid">${cards}</div>${amCheckHtml()}${amRubricHtml()}`;
@@ -147,16 +145,9 @@ function renderAmCard(am) {
       <td>${m.upsell == null ? '–' : fmtMoney(m.upsell)}</td></tr>`;
   }).join('');
   const year = String(new Date().getFullYear());
-  const kpiMonths = ms.filter((m) => m.ym.startsWith(year) && m.source !== 'partial' && m.total != null);
-  const kpiAvg = kpiMonths.length ? kpiMonths.reduce((t, m) => t + m.total, 0) / kpiMonths.length : null;
-  const compAvg = amCompAvg(am, year);
-  const total = kpiAvg != null && compAvg != null ? (kpiAvg + compAvg) / 2 : (kpiAvg != null ? kpiAvg : compAvg);
-  const tl = scLevel(total);
+  const lv = amAnnualLevel(am, year);
   document.getElementById('scBody').innerHTML = `
-    <div class="sc-summary">
-      <div class="sc-total"><span class="lbl">${year} total score</span><span class="val">${scFmt2(total)}</span>${tl ? `<span class="sc-level l${tl[0]}">${esc(tl[1])}</span>` : ''}</div>
-      <div class="sc-split"><span><b>${scFmt2(kpiAvg)}</b> KPI average (${kpiMonths.length} mo)</span><span><b>${scFmt2(compAvg)}</b> Competency average</span></div>
-    </div>
+    ${amLevelHtml(lv, year)}
     <div class="am-chart-wrap"><canvas id="amChart" height="90"></canvas></div>
     <div class="table-wrap am-table-wrap"><table class="am-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
     <p class="mrr-note">Each metric is scored 1–5 with the rubric below; the total is the average of the scores that have data. Months through October 2026 are the saved history (with its exclusions); later months are calculated from the dashboard’s CSM and Implementation data, leaving out firms excluded on the dashboard. The current month is “to date”.</p>
@@ -207,6 +198,70 @@ function amRubricHtml(open) {
     <p class="mrr-note">Total = average of the sub-scores that have data; blank metrics are skipped. Levels: 4.5+ Excellent, 3.5+ Exceeds, 2.5+ Meets, 1.5+ Needs Improvement.</p></details>`;
 }
 
+/* ---- annual level: exactly the AM Annual Performance Scoring System doc ---- */
+// The doc's 4 metrics are its rubric headings: CSAT, Onboarding Time, GRR, NRR. GRR and NRR each have a
+// 3&6-month and a 13-month column, so a month's GRR (NRR) score is the average of its 3/6/13-month scores.
+// "Reached target" (levels 1–2) = score 3+; "Target or Grace" (levels 3–5) also counts the band just below
+// target (score 2+); "Exceeds benchmark" = score 4+. Metrics with no data that month aren't counted against
+// the AM (3/4 = at least three-quarters of the metrics that have data; "all 4" = every metric with data).
+// Year-end competencies = Q4 ratings (until Q4 is rated, each competency's latest quarter).
+// Each level needs ALL its conditions; the AM gets the highest level fully met. Competencies rated Poor in
+// 3+ quarters cap the level at 1; Needs Improvement or Poor in 3+ quarters caps it at 2.
+function amFamilies(m) {
+  const avg = (keys) => { const v = keys.map((k) => m.scores[k]).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  return [m.scores.csat, m.scores.onb, avg(['grr3', 'grr6', 'grr13']), avg(['nrr3', 'nrr6', 'nrr13'])].filter((x) => x != null);
+}
+function amAnnualLevel(am, year) {
+  const months = amMonths(am).filter((m) => m.ym.startsWith(year) && m.source !== 'partial');
+  const qOf = (ym) => `${ym.slice(0, 4)}-Q${Math.floor((+ym.slice(5) - 1) / 3) + 1}`;
+  const compsIn = (q) => SC_COMPETENCIES.map((c) => { const r = amComp(am, q, c); return r ? r[3] : null; });
+  let target = 0, targetGrace = 0, allGrace = 0, exceeds = 0;
+  months.forEach((m) => {
+    const f = amFamilies(m);
+    if (f.length < 2) return;
+    const need = Math.ceil(f.length * 0.75);
+    if (f.filter((x) => x >= 3).length >= need) target++;
+    if (f.filter((x) => x >= 2).length >= need) targetGrace++;
+    if (f.every((x) => x >= 2)) allGrace++;
+    const compEx = compsIn(qOf(m.ym)).filter((x) => x != null && x >= 4).length >= 4;
+    if (f.every((x) => x >= 4) || compEx) exceeds++;
+  });
+  // Year-end competency ratings.
+  const qs = [1, 2, 3, 4].map((q) => `${year}-Q${q}`);
+  const yearEnd = SC_COMPETENCIES.map((c) => { for (let i = 3; i >= 0; i--) { const r = amComp(am, qs[i], c); if (r && r[3] != null) return r[3]; } return null; });
+  const rated = yearEnd.filter((x) => x != null).length;
+  const atLeast = (n) => yearEnd.filter((x) => x != null && x >= n).length;
+  const quartersAt = (pred) => SC_COMPETENCIES.some((c) => qs.filter((q) => { const r = amComp(am, q, c); return r && r[3] != null && pred(r[3]); }).length >= 3);
+  const poor3 = quartersAt((x) => x < 1.5), ni3 = quartersAt((x) => x < 2.5);
+  const checks = {
+    5: [[allGrace >= 10, `All 4 metrics at Target or Grace in 10+ months (${allGrace})`], [exceeds >= 7, `Exceeds benchmarks in 7+ months (${exceeds})`], [atLeast(5) >= 5, `Year-end: 5 of 6 competencies Excellent (${atLeast(5)})`]],
+    4: [[targetGrace >= 10, `3/4 metrics at Target or Grace in 10+ months (${targetGrace})`], [exceeds >= 4, `Exceeds benchmarks in 4+ months (${exceeds})`], [atLeast(4) >= 5, `Year-end: 5 of 6 competencies Exceeds or better (${atLeast(4)})`]],
+    3: [[targetGrace >= 7, `3/4 metrics at Target or Grace in 7+ months (${targetGrace})`], [atLeast(3) >= 4, `Year-end: 4 of 6 competencies Meets or better (${atLeast(3)})`]],
+    2: [[target >= 4, `3/4 target metrics reached in 4+ months (${target})`]],
+  };
+  let level = 1, kpiLevel = 1;
+  for (const L of [5, 4, 3, 2]) { if (checks[L].every((c) => c[0])) { level = L; break; } }
+  // What the KPI conditions alone support (for before any competencies are rated).
+  for (const L of [5, 4, 3, 2]) { if (checks[L].filter((c) => !/competenc/i.test(c[1])).every((c) => c[0])) { kpiLevel = L; break; } }
+  if (poor3) level = 1; else if (ni3) level = Math.min(level, 2);
+  return { level, kpiLevel, checks, months: months.length, target, targetGrace, allGrace, exceeds, rated, yearEnd, poor3, ni3 };
+}
+const AM_LEVEL_NAMES = { 1: 'Poor', 2: 'Needs Improvement', 3: 'Meets Expectations', 4: 'Exceeds Expectations', 5: 'Excellent' };
+function amLevelHtml(lv, year) {
+  const row = (L) => `<div class="am-lv-row${lv.level === L ? ' on' : ''}"><b>${L} – ${AM_LEVEL_NAMES[L]}</b>${(lv.checks[L] || []).map((c) => `<span class="${c[0] ? 'ok' : 'no'}">${c[0] ? '✓' : '○'} ${esc(c[1])}</span>`).join('')}</div>`;
+  return `<div class="sc-summary am-annual">
+      ${lv.rated ? `<div class="sc-total"><span class="lbl">${year} level so far</span><span class="val">${lv.level}</span><span class="sc-level l${lv.level}">${lv.level} – ${AM_LEVEL_NAMES[lv.level]}</span></div>`
+        : `<div class="sc-total"><span class="lbl">${year} KPIs support</span><span class="val">${lv.kpiLevel}</span><span class="sc-level l${lv.kpiLevel}">${lv.kpiLevel} – ${AM_LEVEL_NAMES[lv.kpiLevel]}</span><span class="am-sub">Rate competencies below to set the level</span></div>`}
+      <div class="sc-split"><span><b>${lv.months}</b> of 12 months scored</span><span><b>${lv.rated}</b> of 6 competencies rated</span></div>
+    </div>
+    <details class="am-lv"><summary>How this level is decided (AM annual review rules)</summary>
+      ${[5, 4, 3, 2].map(row).join('')}
+      <div class="am-lv-row${lv.level === 1 ? ' on' : ''}"><b>1 – Poor</b><span>Anything below level 2</span></div>
+      ${lv.poor3 ? '<p class="loop-note">A competency was rated Poor in 3+ quarters, so the level is capped at 1.</p>' : lv.ni3 ? '<p class="loop-note">A competency was rated Needs Improvement or Poor in 3+ quarters, so the level is capped at 2.</p>' : ''}
+      <p class="mrr-note">Annual rules: counts are months of ${year} so far, and the final level is set at year-end. Year-end competencies are the Q4 ratings (until then, each competency's latest quarter). The 4 metrics are CSAT, Onboarding Time, GRR (avg of 3/6/13-mo) and NRR (avg of 3/6/13-mo); “reached target” = score 3+, “Target or Grace” = 2+, “Exceeds” = 4+ (or 4 of 6 competencies at 4+ that quarter).</p>
+    </details>`;
+}
+
 /* ---- competencies (quarterly) ---- */
 function amQuarters(year) {
   const now = new Date(), curQ = Math.floor(now.getMonth() / 3) + 1;
@@ -233,7 +288,7 @@ function amCompsHtml(am, year) {
     return `<tr><td class="txt am-cname">${esc(c)}</td>${cells}<td><b>${sc.length ? (sc.reduce((a, b) => a + b, 0) / sc.length).toFixed(2) : '–'}</b></td></tr>`;
   }).join('');
   return `<div class="table-wrap"><table class="am-table am-comps"><thead><tr><th class="txt">Competency</th>${qs.map((q) => `<th>${q.slice(5)}</th>`).join('')}<th>Avg</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="mrr-note">Pick a 1–5 score for each competency each quarter (½ steps allowed); ✎ adds a note. The ${year} total is the average of the KPI average and the competency average. <span class="am-saved" aria-live="polite"></span></p>`;
+    <p class="mrr-note">Pick a 1–5 score for each competency each quarter (½ steps allowed); ✎ adds a note. <span class="am-saved" aria-live="polite"></span></p>`;
 }
 async function amCompSave(q, comp, field, value) {
   const flag = document.querySelector('#amComps .am-saved');
