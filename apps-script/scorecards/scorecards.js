@@ -51,6 +51,9 @@ function doPost(e) {
     if (b.action === 'load') return json_(loadCached_(!!b.force));
     if (b.action === 'set') return json_(set_(b, who.email));
     if (b.action === 'addRep') return json_(addRep_(b, who.email));
+    // Account Manager scorecards: the saved history (am-history.js, git-ignored). New months are calculated on the page.
+    if (b.action === 'amHistory') return json_({ ok: true, rows: typeof AM_HISTORY === 'undefined' ? [] : AM_HISTORY,
+      exclusions: typeof AM_HISTORY_EXCLUSIONS === 'undefined' ? [] : AM_HISTORY_EXCLUSIONS });
     return json_({ ok: false, error: 'unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String((err && err.message) || err) });

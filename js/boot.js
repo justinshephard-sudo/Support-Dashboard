@@ -72,6 +72,7 @@ function bootstrap() {
   setupFR();
   setupBugs();
   setupAudits();
+  setupAmScorecards();
   setupMrr();
   setupCsm();
   setupExclusions();

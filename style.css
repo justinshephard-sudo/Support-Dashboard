@@ -1379,3 +1379,27 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .ra-firm-hit b{font-size:14px}
 .ra-firm-hit span{grid-column:1;font-size:12px;color:var(--text-3)}
 .ra-firm-hit i{grid-column:2;grid-row:1 / span 2;align-self:center;font-style:normal;font-size:12.5px;font-weight:700;color:var(--lm-blue)}
+
+/* CS Scorecards ▸ Account Managers */
+.sc-tabs{margin:4px auto 18px}
+.am-rep{position:relative}
+.am-spark{display:flex;align-items:flex-end;gap:3px;height:28px;margin-top:8px;width:100%;flex:1 0 100%}
+.am-spark i{flex:1;background:linear-gradient(180deg,#4fb4ff,#2f7de1);border-radius:3px 3px 0 0;opacity:.85}
+.am-spark i.p{opacity:.35}
+.am-chart-wrap{background:var(--surface-1);border-radius:16px;padding:14px 16px;margin-bottom:14px;max-height:220px}
+.am-table-wrap{border-radius:16px}
+.am-table{font-size:13px}
+.am-table th,.am-table td{white-space:nowrap;text-align:center}
+.am-table td.txt,.am-table th.txt{text-align:left}
+.am-table td small{font-size:11px;color:var(--text-3);font-weight:600}
+.am-table tr.partial td{opacity:.75}
+.am-v{display:block;font-variant-numeric:tabular-nums;color:var(--text-1)}
+.am-sc{display:inline-block;min-width:20px;margin-top:3px;font-size:11px;font-weight:800;border-radius:6px;padding:1px 5px}
+.am-sc.s1{background:#d64545;color:#fff}.am-sc.s2{background:rgba(255,144,17,.85);color:#fff}.am-sc.s3{background:rgba(255,192,97,.35);color:#94580a}
+.am-sc.s4{background:rgba(12,163,90,.18);color:#0b8a4d}.am-sc.s5{background:#12b76a;color:#fff}.am-sc.none{color:var(--text-3)}
+.am-total{display:block;font-size:15px;font-variant-numeric:tabular-nums}
+.am-lvl{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:1px 6px;margin-top:3px;background:var(--surface-2);color:var(--text-2)}
+.am-lvl.l5,.am-lvl.l4{background:rgba(12,163,90,.16);color:#0b8a4d}.am-lvl.l2,.am-lvl.l1{background:rgba(214,69,69,.12);color:#c03636}
+.am-diff{background:rgba(255,144,17,.14)}
+.am-check{margin-top:18px}
+.am-rubric table{font-size:13px;margin-top:8px}

@@ -112,6 +112,7 @@ function scApply(data) {
 function scRender() {
   // Don't redraw under someone mid-edit; their save redraws the tab anyway.
   if (document.getElementById('scBody').contains(document.activeElement) && document.activeElement.matches('input, textarea')) return;
+  if (typeof SC_TAB !== 'undefined' && SC_TAB === 'am') { if (AMS.current) renderAmCard(AMS.current); else renderAmList(); return; }
   if (SC.current && SC.tabs[SC.current]) renderScorecard(SC.current); else renderScorecardList();
 }
 
@@ -165,6 +166,7 @@ function showScorecards() {
   document.querySelectorAll('.view').forEach((x) => x.classList.remove('active'));
   document.getElementById('view-scorecards').classList.add('active');
   document.getElementById('view-scorecards').scrollIntoView({ block: 'start' });
+  if (SC_TAB === 'am') { scRender(); return; }
   if (!SC.loaded) loadScorecards(); else if (SC.current) renderScorecard(SC.current); else renderScorecardList();
 }
 function leaveScorecards() {
@@ -186,7 +188,10 @@ function scRepCard(rep) {
 }
 
 function renderScorecardList() {
+  if (typeof SC_TAB !== 'undefined' && SC_TAB === 'am') { renderAmList(); return; }
   SC.current = null;
+  const sheetLink = document.getElementById('scSheetLink');
+  if (sheetLink) sheetLink.hidden = false;
   document.getElementById('scBack').hidden = true;
   document.getElementById('scTitle').textContent = 'CS Scorecards';
   document.getElementById('scSub').textContent = 'Pick a rep to open their 2026 scorecard.';
