@@ -1115,3 +1115,11 @@ tr.sp-disc-row td{padding-top:0}
 .pf-more summary{cursor:pointer;font-size:12px;color:var(--text-2);text-align:right}
 .pf-more .pf-link{display:block;margin-left:auto}
 .pf-link.alt{background:var(--surface-2);color:var(--text-1);border:1px solid var(--border)}
+
+/* handoff queue */
+.csm-ho-actions{white-space:normal;min-width:120px}
+.csm-ho-actions .mgr-btn{margin:2px 4px 2px 0}
+.csm-ho-accept{background:var(--good-bg,#e7f6ec);color:var(--good,#1a7f43);border-color:transparent;font-weight:700}
+.csm-ho-accepted{color:var(--good,#1a7f43);font-weight:600}
+.csm-ho-done{margin-top:12px}
+.csm-ho-done>summary{cursor:pointer;font-weight:600;color:var(--text-2);padding:6px 2px}

@@ -6,8 +6,9 @@
    snapshots, ChurnZero health, per-rep monthly totals) and `load` — shared with the MRR
    Report tab — for the firm-level events behind the pop-ups. Reps are the ones on the
    Implementation tab.
-   Completed onboardings this week: firms whose onboarding closed in the last 7 days, with the
-   IM's handoff answers (apps-script/firm-assignment/handoff.js → `handoffs`, through faCall).
+   Handoff queue: firms whose onboarding closed with a CSM wait here until that CSM (or a manager)
+   clicks Accept; accepted ones stay for 7 days. With the IM's handoff answers
+   (apps-script/firm-assignment/handoff.js → `handoffs` / `acceptHandoff`, through faCall).
    ========================================================================== */
 const CSM_AI_TARGET = 500;
 // rep: whose book is shown. Reps see only their own; managers see the whole team or pick a rep.
@@ -241,7 +242,7 @@ function renderCsm() {
     <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms.${CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
 }
 
-/* ---------- completed onboardings this week (handoff answers) ---------- */
+/* ---------- handoff queue (handoff answers + Accept) ---------- */
 async function loadCsmHandoffs(force) {
   if (CSM.hoLoading || (CSM.handoffs && !force)) return CSM.hoLoading;
   CSM.hoLoading = (async () => {
@@ -260,14 +261,13 @@ async function loadCsmHandoffs(force) {
   return CSM.hoLoading;
 }
 
-// A rep sees the firms coming to them: their CSM field, or (firms from before the split, no CSM)
-// the account manager. Managers on the whole team see every firm.
+// A rep sees the firms handed to them (their CSM field); managers on the whole team see every firm.
 function csmHandoffFirms() {
   const all = (CSM.handoffs && CSM.handoffs.firms) || [];
   const rep = CSM.rep;
   if (!rep) return all;
   if (rep === CSM_NONE) return [];
-  return all.filter((f) => (f.csm ? f.csm === rep : f.am === rep));
+  return all.filter((f) => f.csm === rep);
 }
 
 const csmHoDay = (d) => new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
@@ -279,29 +279,55 @@ function csmMood(v) {
 const csmHoFull = (f) => f.outcome === 'Complete';
 
 function csmHandoffsHtml() {
-  const head = (n) => `<div class="mrr-panel-head csm-head"><h3>Completed onboardings this week${n == null ? '' : ` <span class="muted">· ${n}</span>`}</h3>
+  const d = CSM.handoffs;
+  const firms = d ? csmHandoffFirms() : [];
+  const waiting = firms.filter((f) => f.waiting), done = firms.filter((f) => !f.waiting);
+  const head = `<div class="mrr-panel-head csm-head"><h3>Handoff queue${d ? ` <span class="muted">· ${waiting.length} waiting</span>` : ''}</h3>
     <button type="button" class="loop-btn" id="csmHoRefresh">↻ Refresh</button></div>`;
-  if (!CSM.handoffs) {
-    return head() + (CSM.hoError ? `<div class="error-banner">Couldn’t load the handoffs: ${esc(CSM.hoError)}</div>` : '<div class="res-loading">Pulling this week’s handoffs…</div>');
+  if (!d) {
+    return head + (CSM.hoError ? `<div class="error-banner">Couldn’t load the handoffs: ${esc(CSM.hoError)}</div>` : '<div class="res-loading">Pulling the handoff queue…</div>');
   }
-  const firms = csmHandoffFirms();
   const mine = CSM.rep && CSM.rep !== CSM_NONE;
-  if (!firms.length) {
-    return head(0) + `<div class="empty-note">${mine ? `No firms handed off to ${esc(CSM.rep)}` : 'No onboardings completed'} in the last ${CSM.handoffs.days} days.</div>`;
-  }
-  return head(firms.length) + `<div class="table-wrap"><table class="drill-table mrr-table csm-ho-table"><thead><tr>
-      <th>Firm</th><th>Completed</th><th>IM</th>${mine ? '' : '<th>Goes to</th>'}<th>Sentiment</th><th>Tech savvy</th><th>Decision maker</th><th></th></tr></thead><tbody>
-    ${firms.map((f) => `<tr>
+  const age = (f) => {
+    const n = f.waitDays || 0;
+    const cls = n >= d.escalate ? 'bad' : n >= d.remind ? 'okay' : 'good';
+    return `<span class="csm-pill h-${cls}">${n === 0 ? 'New today' : `${n} business day${n === 1 ? '' : 's'}`}</span>`;
+  };
+  const row = (f) => `<tr>
       <td><b>${esc(f.name)}</b><br><small class="muted">${fmtMoney(f.mrr)}/mo · Firm ${esc(f.firmId)}</small></td>
       <td>${esc(csmHoDay(f.completed))}${csmHoFull(f) ? '' : `<br><span class="mrr-badge">${esc(f.outcome.replace(/^Complete - /, '') || '—')}</span>`}</td>
       <td>${esc(f.im || '—')}</td>
-      ${mine ? '' : `<td>${f.csm ? esc(f.csm) : f.im && f.owner ? esc(f.owner) : '<span class="muted">—</span>'}</td>`}
+      ${mine ? '' : `<td>${esc(f.csm || '—')}</td>`}
       <td>${csmMood(f.answers.sentiment)}</td>
       <td>${f.answers.techSavvy ? `<b>${esc(f.answers.techSavvy)}</b><small class="muted"> / 5</small>` : '<span class="muted">—</span>'}</td>
-      <td>${f.decisionMakers.length ? esc(f.decisionMakers.map((c) => c.name).join(', ')) : '<span class="muted">—</span>'}</td>
-      <td><button type="button" class="mgr-btn" data-csm-ho="${esc(f.firmId)}">${csmHoFull(f) ? 'View handoff' : 'Details'}</button></td>
-    </tr>`).join('')}
-  </tbody></table></div>`;
+      <td>${f.waiting ? age(f) : `<span class="csm-ho-accepted">✓ ${esc(csmHoWhen(f.acceptedAt))}</span><br><small class="muted">${esc(f.acceptedBy)}</small>`}</td>
+      <td class="csm-ho-actions"><button type="button" class="mgr-btn" data-csm-ho="${esc(f.firmId)}">${csmHoFull(f) ? 'View handoff' : 'Details'}</button>
+        ${f.canAccept ? `<button type="button" class="mgr-btn csm-ho-accept" data-csm-accept="${esc(f.firmId)}">✓ Accept</button>` : ''}</td>
+    </tr>`;
+  const table = (list, last) => `<div class="table-wrap"><table class="drill-table mrr-table csm-ho-table"><thead><tr>
+      <th>Firm</th><th>Completed</th><th>IM</th>${mine ? '' : '<th>CSM</th>'}<th>Sentiment</th><th>Tech savvy</th><th>${last}</th><th></th></tr></thead><tbody>
+    ${list.map(row).join('')}</tbody></table></div>`;
+  return head
+    + (waiting.length ? table(waiting, 'Waiting')
+      : `<div class="empty-note">${mine ? `Nothing waiting for ${esc(CSM.rep)}.` : 'No handoffs waiting.'} New firms appear here when their IM closes onboarding.</div>`)
+    + (done.length ? `<details class="csm-ho-done"><summary>Accepted in the last ${d.days} days · ${done.length}</summary>${table(done, 'Accepted')}</details>` : '')
+    + `<p class="mrr-note">Firms with a CSM land here when their IM closes onboarding (the Owner moves to the CSM then). The CSM reads the handoff and clicks Accept. Ops Comms DMs the CSM when a firm arrives, again after ${d.remind} business days, and flags it to the managers after ${d.escalate}. Firms with no CSM go to Support and skip the queue.</p>`;
+}
+const csmHoWhen = (v) => { const t = Date.parse(String(v).replace(' ', 'T')); return Number.isNaN(t) ? v : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }); };
+
+async function csmAcceptHandoff(firmId, btn) {
+  const f = (CSM.handoffs && CSM.handoffs.firms || []).find((x) => x.firmId === String(firmId));
+  if (!f || !confirm(`Accept the handoff for ${f.name}? This tells everyone you’ve read it and own the firm now.`)) return;
+  btn.disabled = true; btn.textContent = 'Accepting…';
+  try {
+    const r = await faCall({ action: 'acceptHandoff', firmId: f.firmId });
+    Object.assign(f, { waiting: false, canAccept: false, acceptedBy: r.acceptedBy, acceptedAt: r.acceptedAt });
+    document.getElementById('csmHandoffs').innerHTML = csmHandoffsHtml();
+  } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
+    btn.disabled = false; btn.textContent = '✓ Accept';
+    alert('Couldn’t accept the handoff: ' + e.message);
+  }
 }
 
 function csmHandoffDrill(firmId) {
@@ -510,6 +536,8 @@ function setupCsm() {
     if (t.closest('#csmHoRefresh')) { CSM.handoffs = null; document.getElementById('csmHandoffs').innerHTML = csmHandoffsHtml(); loadCsmHandoffs(true); return; }
     const ho = t.closest('[data-csm-ho]');
     if (ho) { csmHandoffDrill(ho.dataset.csmHo); return; }
+    const acc = t.closest('[data-csm-accept]');
+    if (acc) { csmAcceptHandoff(acc.dataset.csmAccept, acc); return; }
     const co = t.closest('[data-csm-cohort]');
     if (co) { csmCohortOpen(co.dataset.csmCohort); return; }
     const ym = t.closest('[data-csm-ym]');

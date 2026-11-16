@@ -157,6 +157,14 @@ function closeOnboarding_(b, who) {
   }
   handoffLog_({ by: who.email, acct: acct, outcome: outcome.status, im: repLabel_(users, im || cf.AccountManager), mrr: mrr,
     owner: support ? support.name : '', answers: clean, confirmed: confirmed });
+  // Firms with a CSM join the handoff queue; the CSM gets a Slack DM now (the daily job retries if it fails).
+  if (csmName) {
+    try {
+      var qr = queueAdd_({ firmId: String(cf.FirmId || acct.ExternalId), name: acct.Name, czId: acct.Id, csm: repLabel_(users, csmName),
+        csmEmail: support ? support.email : '', im: repLabel_(users, im || cf.AccountManager), outcome: outcome.status, completed: today });
+      if (qr && qr['CSM Email'] && handoffSlack_([{ email: qr['CSM Email'], text: queueMsg_('arrival', qr) }])) queueSet_(qr.row, 'Arrival DM', queueNow_());
+    } catch (e) { console.error('handoff queue: ' + e.message); }
+  }
   return { ok: true, confirmed: confirmed, outcome: outcome.status, ownerMovedTo: support ? support.name : '',
     unsaved: HANDOFF_FIELDS.filter(function (f) { return !f.cz && clean[f.key] != null; }).length };
 }
@@ -194,86 +202,215 @@ function handoffLog_(x) {
   ].map(dashSafe_)]);
 }
 
-/* ---------- recent handoffs (CSM page: "Completed onboardings this week") ----------
-   Firms whose Onboarding Completed Date is in the last HANDOFF_DAYS days, with the handoff answers.
-   ChurnZero's fields are the record (they cover firms closed in ChurnZero itself, and later edits);
-   the Onboarding Handoffs log fills in who closed it, and any answer whose field is blank there. */
+/* ---------- handoff queue (CSM page) ----------
+   A firm joins the queue when its onboarding closes and it has a CSM (firms with no CSM go to Support
+   and skip it). It stays "waiting" until its CSM, or a manager, clicks Accept; accepted firms stay on
+   the page for HANDOFF_DAYS more days. The Owner already moved at completion (Justin, 2026-11-16):
+   Accept is the CSM confirming they've read the handoff.
+   The "Handoff Queue" tab (Support Team Report sheet) is the record. Firms closed in ChurnZero itself,
+   not through the dashboard, are added the next time the queue is read.
+   Slack (Ops Comms, through the "CS handoff queue → Slack" Zapier workflow): a DM to the CSM when a
+   firm arrives, a reminder after HANDOFF_REMIND business days, then a DM to the escalation list after
+   HANDOFF_ESCALATE business days. handoffReminders() runs on a weekday-morning trigger. */
 var HANDOFF_DAYS = 7;
-function recentHandoffs_(b) {
-  var days = Math.min(31, Math.max(1, Number(b.days) || HANDOFF_DAYS));
-  var since = Utilities.formatDate(new Date(Date.now() - (days - 1) * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');   // today and the 6 days before
+var QUEUE_TAB = 'Handoff Queue';
+var QUEUE_HEADERS = ['Firm ID', 'Firm', 'CZ Account', 'CSM', 'CSM Email', 'IM', 'Outcome', 'Completed', 'Added',
+  'Accepted By', 'Accepted At', 'Arrival DM', 'Reminder DM', 'Escalated'];
+var HANDOFF_REMIND = 2, HANDOFF_ESCALATE = 4;
+var QUEUE_BACKFILL_DAYS = 21;   // how far back a ChurnZero-closed firm is picked up
+var DASH_LINK = 'https://justinshephard-sudo.github.io/Support-Dashboard/';
+// Zapier workflow 01a1e5c7 "CS handoff queue → Slack DMs" (rejects anything without HANDOFF_SLACK_KEY).
+var HANDOFF_HOOK_DEFAULT = 'https://hooks.zapier.com/hooks/catch/14095940/CbQZ57FjBJ5vKBpFs/';
+
+function queueSheet_() {
+  var ss = SpreadsheetApp.openById(LOG_SHEET_ID), sh = ss.getSheetByName(QUEUE_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(QUEUE_TAB);
+    sh.getRange(1, 1, 1, QUEUE_HEADERS.length).setValues([QUEUE_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+// Every queue row as an object; row = its sheet row number.
+function queueRows_() {
+  var sh = queueSheet_(), n = sh.getLastRow() - 1;
+  if (n < 1) return [];
+  return sh.getRange(2, 1, n, QUEUE_HEADERS.length).getDisplayValues().map(function (r, i) {
+    var o = { row: i + 2 };
+    QUEUE_HEADERS.forEach(function (h, j) { o[h] = String(r[j] || '').replace(/^'/, ''); });
+    return o;
+  });
+}
+function queueSet_(row, header, value) {
+  queueSheet_().getRange(row, QUEUE_HEADERS.indexOf(header) + 1).setValue(dashSafe_(value));
+}
+var queueNow_ = function () { return Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd HH:mm'); };
+
+// Adds a firm (once). x: { firmId, name, czId, csm, csmEmail, im, outcome, completed }. Returns the new row or null.
+function queueAdd_(x, rows) {
+  rows = rows || queueRows_();
+  if (rows.some(function (r) { return r['Firm ID'] === String(x.firmId); })) return null;
+  var vals = {
+    'Firm ID': String(x.firmId), 'Firm': x.name, 'CZ Account': String(x.czId || ''), 'CSM': x.csm, 'CSM Email': x.csmEmail || '',
+    'IM': x.im || '', 'Outcome': x.outcome || '', 'Completed': x.completed, 'Added': queueNow_(),
+  };
+  var sh = queueSheet_();
+  sh.appendRow(QUEUE_HEADERS.map(function (h) { return dashSafe_(vals[h] == null ? '' : vals[h]); }));
+  var o = { row: sh.getLastRow() };
+  QUEUE_HEADERS.forEach(function (h) { o[h] = vals[h] == null ? '' : String(vals[h]); });
+  rows.push(o);
+  return o;
+}
+
+// Firms closed in ChurnZero (not through the dashboard) with a CSM: add them to the queue.
+function queueBackfill_(rows, users) {
+  var since = Utilities.formatDate(new Date(Date.now() - QUEUE_BACKFILL_DAYS * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');
+  var sel = 'Id,Name,ExternalId,Cf/FirmId,Cf/OnboardingStatus,Cf/OnboardingCompletedDate,Cf/AccountManager,Cf/' + IM_FIELD + ',Cf/' + CSM_FIELD;
+  var accts;
+  try { accts = czGet_('/Account', { $filter: 'Cf/OnboardingCompletedDate ge ' + since + 'T00:00:00Z', $select: sel }); }
+  catch (e) { accts = czGet_('/Account', { $filter: 'Cf/OnboardingCompletedDate ne null', $select: sel }); }
+  var added = [];
+  accts.forEach(function (a) {
+    var cf = a.Cf || {}, done = String(cf.OnboardingCompletedDate || '').slice(0, 10), csmName = cfGet_(cf, CSM_FIELD);
+    if (done < since || !csmName) return;
+    var csm = userFor_(users, csmName);
+    var r = queueAdd_({ firmId: String(cf.FirmId || a.ExternalId), name: a.Name, czId: a.Id, csm: repLabel_(users, csmName),
+      csmEmail: csm ? csm.email : '', im: repLabel_(users, cfGet_(cf, IM_FIELD) || cf.AccountManager),
+      outcome: String(cf.OnboardingStatus || ''), completed: done }, rows);
+    if (r) added.push(r);
+  });
+  return added;
+}
+
+// Weekdays between two yyyy-MM-dd[ HH:mm] dates (PT), not counting the first day.
+function queueBizDays_(from, to) {
+  var d = new Date(String(from).slice(0, 10) + 'T12:00:00'), end = new Date(String(to).slice(0, 10) + 'T12:00:00'), n = 0;
+  while (d < end) { d.setDate(d.getDate() + 1); if (d.getDay() % 6) n++; }
+  return n;
+}
+
+function handoffCanAccept_(who, row) {
+  return !!who.manager || (row['CSM Email'] && row['CSM Email'].toLowerCase() === String(who.email || '').toLowerCase());
+}
+
+// Queue for the CSM page: waiting firms (any age) + firms accepted in the last HANDOFF_DAYS days, with the answers.
+function recentHandoffs_(b, who) {
+  var users = users_(), rows = queueRows_();
+  try { queueBackfill_(rows, users); } catch (e) { console.error('queue backfill: ' + e.message); }
+  var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
+  var since = Utilities.formatDate(new Date(Date.now() - (HANDOFF_DAYS - 1) * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');
+  var show = rows.filter(function (r) { return !r['Accepted At'] || r['Accepted At'].slice(0, 10) >= since; });
+  var base = { ok: true, days: HANDOFF_DAYS, since: since, remind: HANDOFF_REMIND, escalate: HANDOFF_ESCALATE, sections: HANDOFF_SECTIONS,
+    fields: HANDOFF_FIELDS.map(function (f) { return { key: f.key, section: f.section, label: f.label, type: f.type }; }) };
+  if (!show.length) return Object.assign(base, { firms: [] });
+
   var cfSel = ['FirmId', 'OnboardingStatus', 'OnboardingCompletedDate', 'AccountManager', IM_FIELD, CSM_FIELD]
     .concat(HANDOFF_FIELDS.filter(function (f) { return f.cz && f.type !== 'contact'; }).map(function (f) { return f.cz; }));
   var sel = 'Id,Name,ExternalId,TotalContractAmount,UserAccountId,' + cfSel.map(function (f) { return 'Cf/' + f; }).join(',');
-  var accts;
-  try {
-    accts = czGet_('/Account', { $filter: 'Cf/OnboardingCompletedDate ge ' + since + 'T00:00:00Z', $select: sel });
-  } catch (e) {   // if the custom date field can't be filtered on, filter here instead
-    accts = czGet_('/Account', { $filter: 'Cf/OnboardingCompletedDate ne null', $select: sel });
-  }
-  accts = accts.filter(function (a) { return String((a.Cf || {}).OnboardingCompletedDate || '').slice(0, 10) >= since; });
-  if (!accts.length) return { ok: true, days: days, since: since, firms: [] };
-
-  // Decision makers: contacts with Role = Primary Decision Maker on these firms.
-  var dms = {};
-  for (var i = 0; i < accts.length; i += 15) {
-    var ids = accts.slice(i, i + 15).map(function (a) { return 'AccountId eq ' + a.Id; }).join(' or ');
-    czGet_('/Contact', { $filter: "(" + ids + ") and Cf/Role eq '" + DM_ROLE + "'", $select: 'Id,AccountId,FirstName,LastName,Email,Cf/Title' }).forEach(function (c) {
+  var byId = {}, dms = {};
+  var ids = show.map(function (r) { return r['CZ Account']; }).filter(function (x) { return /^\d+$/.test(x); });
+  for (var i = 0; i < ids.length; i += 15) {
+    var part = ids.slice(i, i + 15);
+    czGet_('/Account', { $filter: part.map(function (x) { return 'Id eq ' + x; }).join(' or '), $select: sel }).forEach(function (a) { byId[a.Id] = a; });
+    czGet_('/Contact', { $filter: '(' + part.map(function (x) { return 'AccountId eq ' + x; }).join(' or ') + ") and Cf/Role eq '" + DM_ROLE + "'",
+      $select: 'Id,AccountId,FirstName,LastName,Email,Cf/Title' }).forEach(function (c) {
       (dms[c.AccountId] = dms[c.AccountId] || []).push({ name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim() || String(c.Email || ''),
         email: String(c.Email || ''), title: String((c.Cf || {}).Title || '') });
     });
   }
-  var logged = handoffLogByFirm_(since);
-  var users = users_();
-  var firms = accts.map(function (a) {
-    var cf = a.Cf || {}, firmId = String(cf.FirmId || a.ExternalId), log = logged[firmId] || {}, la = log.answers || {};
-    var answers = {};
+  var logged = handoffLogByFirm_('2000-01-01');
+  var firms = show.map(function (r) {
+    var a = byId[r['CZ Account']] || {}, cf = a.Cf || {}, log = logged[r['Firm ID']] || {}, la = log.answers || {}, answers = {};
     HANDOFF_FIELDS.forEach(function (f) {
       if (f.type === 'contact') return;
       var v = f.cz ? cfGet_(cf, f.cz) : '';
-      if ((v === '' || v === 'None') && la[f.key]) v = String(la[f.key]);
-      if (v !== '' && v !== 'None') answers[f.key] = f.type === 'scale' ? String(Math.round(Number(v)) || v) : v;
+      if ((v === '' || v === 'None' || v == null) && la[f.key]) v = String(la[f.key]);
+      if (v != null && v !== '' && v !== 'None') answers[f.key] = f.type === 'scale' ? String(Math.round(Number(v)) || v) : String(v);
     });
-    return { firmId: firmId, name: a.Name, mrr: Number(a.TotalContractAmount) || 0,
-      completed: String(cf.OnboardingCompletedDate).slice(0, 10), outcome: String(cf.OnboardingStatus || ''),
-      im: repLabel_(users, cfGet_(cf, IM_FIELD) || cf.AccountManager), csm: repLabel_(users, cfGet_(cf, CSM_FIELD)),
-      am: repLabel_(users, cf.AccountManager), owner: (users[a.UserAccountId] || {}).name || '',
-      closedBy: log.by || '', decisionMakers: dms[a.Id] || [], answers: answers };
-  }).sort(function (x, y) { return y.completed.localeCompare(x.completed) || x.name.localeCompare(y.name); });
-  return { ok: true, days: days, since: since, sections: HANDOFF_SECTIONS,
-    fields: HANDOFF_FIELDS.map(function (f) { return { key: f.key, section: f.section, label: f.label, type: f.type }; }), firms: firms };
+    var waiting = !r['Accepted At'];
+    return { firmId: r['Firm ID'], name: a.Name || r['Firm'], mrr: Number(a.TotalContractAmount) || 0,
+      completed: r['Completed'] || String(cf.OnboardingCompletedDate || '').slice(0, 10), outcome: r['Outcome'] || String(cf.OnboardingStatus || ''),
+      im: r['IM'], csm: r['CSM'], am: repLabel_(users, cf.AccountManager), owner: (users[a.UserAccountId] || {}).name || '',
+      closedBy: log.by || '', decisionMakers: dms[a.Id] || [], answers: answers,
+      waiting: waiting, waitDays: waiting ? queueBizDays_(r['Added'] || r['Completed'], today) : 0,
+      acceptedBy: r['Accepted By'], acceptedAt: r['Accepted At'], canAccept: waiting && !!who && handoffCanAccept_(who, r) };
+  }).sort(function (x, y) { return (y.waiting - x.waiting) || (x.waiting ? x.completed.localeCompare(y.completed) : y.acceptedAt.localeCompare(x.acceptedAt)) || x.name.localeCompare(y.name); });
+  return Object.assign(base, { firms: firms });
 }
 
-// Latest Onboarding Handoffs log row per Firm ID since a date (newest rows are on top).
-function handoffLogByFirm_(since) {
-  var sh = SpreadsheetApp.openById(LOG_SHEET_ID).getSheetByName(HANDOFF_TAB), out = {};
-  if (!sh || sh.getLastRow() < 2) return out;
-  sh.getRange(2, 1, Math.min(sh.getLastRow() - 1, 500), 11).getDisplayValues().forEach(function (r) {
-    if (String(r[0]).slice(0, 10) < since || out[r[3]]) return;
-    var ans = {};
-    try { ans = JSON.parse(String(r[9]).replace(/^'/, '')); } catch (e) { /* not JSON */ }
-    out[r[3]] = { by: r[1], answers: ans };
+function acceptHandoff_(b, who) {
+  var row = queueRows_().filter(function (r) { return r['Firm ID'] === String(b.firmId); })[0];
+  if (!row) throw new Error('That firm isn’t in the handoff queue. Refresh the page.');
+  if (row['Accepted At']) return { ok: true, already: true, acceptedBy: row['Accepted By'], acceptedAt: row['Accepted At'] };
+  if (!handoffCanAccept_(who, row)) throw new Error('Only ' + (row['CSM'] || 'the firm’s CSM') + ' or a manager can accept this handoff.');
+  var at = queueNow_();
+  queueSet_(row.row, 'Accepted By', who.email);
+  queueSet_(row.row, 'Accepted At', at);
+  return { ok: true, acceptedBy: who.email, acceptedAt: at };
+}
+
+/* ---------- Slack (Ops Comms via Zapier) ---------- */
+// Script Properties: HANDOFF_SLACK_HOOK (optional; defaults to HANDOFF_HOOK_DEFAULT), HANDOFF_SLACK_KEY (made by setupHandoffSlack),
+// HANDOFF_SLACK_LIVE = 'yes' to DM the real people (anything else = everything goes to Justin's DM, marked TEST),
+// HANDOFF_ESCALATE_TO = comma-separated emails for the escalation (default: the dashboard managers).
+function handoffSlack_(messages) {
+  var p = PropertiesService.getScriptProperties(), hook = p.getProperty('HANDOFF_SLACK_HOOK') || HANDOFF_HOOK_DEFAULT, key = p.getProperty('HANDOFF_SLACK_KEY');
+  if (!messages.length) return true;
+  if (!hook || !key) { console.warn('Handoff Slack not set up (HANDOFF_SLACK_HOOK / HANDOFF_SLACK_KEY) — skipped ' + messages.length + ' DM(s).'); return false; }
+  var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ id: Utilities.getUuid(), hookKey: key, test: p.getProperty('HANDOFF_SLACK_LIVE') !== 'yes', messages: messages }) });
+  if (res.getResponseCode() >= 300) { console.error('Handoff Slack hook ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 300)); return false; }
+  return true;
+}
+function handoffEscalateTo_() {
+  var v = PropertiesService.getScriptProperties().getProperty('HANDOFF_ESCALATE_TO');
+  return v ? v.split(',').map(function (e) { return e.trim().toLowerCase(); }).filter(String) : dashManagers_();
+}
+function queueMsg_(kind, r, days) {
+  var firm = '*' + r['Firm'] + '*', link = '<' + DASH_LINK + '|CSM page>';
+  if (kind === 'arrival') return ':handshake: ' + firm + ' finished onboarding with ' + (r['IM'] || 'their IM') + ' and is handed off to you. '
+    + 'Read the handoff and click *Accept* on the ' + link + '.';
+  if (kind === 'reminder') return ':hourglass_flowing_sand: Reminder: ' + firm + ' has been waiting ' + days + ' business days for you to accept the handoff. '
+    + 'Open the ' + link + ' to read it and accept.';
+  return ':rotating_light: ' + firm + ' (handed off by ' + (r['IM'] || 'the IM') + ') has waited ' + days + ' business days and ' + (r['CSM'] || 'the CSM')
+    + ' hasn’t accepted it yet. ' + link;
+}
+
+// Weekday-morning trigger: picks up ChurnZero-closed firms, then sends the arrival / reminder / escalation DMs that are due.
+function handoffReminders() {
+  var dow = Number(Utilities.formatDate(new Date(), 'America/Los_Angeles', 'u'));
+  if (dow > 5) return;   // weekdays only
+  var users = users_(), rows = queueRows_();
+  try { queueBackfill_(rows, users); } catch (e) { console.error('queue backfill: ' + e.message); }
+  var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd'), now = queueNow_();
+  var esc = handoffEscalateTo_(), msgs = [], marks = [];
+  rows.filter(function (r) { return !r['Accepted At'] && r['CSM Email']; }).forEach(function (r) {
+    var days = queueBizDays_(r['Added'] || r['Completed'], today);
+    if (!r['Arrival DM']) { msgs.push({ email: r['CSM Email'], text: queueMsg_('arrival', r) }); marks.push([r.row, 'Arrival DM']); }
+    else if (days >= HANDOFF_ESCALATE && !r['Escalated']) {
+      esc.forEach(function (e) { msgs.push({ email: e, text: queueMsg_('escalate', r, days) }); });
+      marks.push([r.row, 'Escalated']);
+    } else if (days >= HANDOFF_REMIND && !r['Reminder DM']) { msgs.push({ email: r['CSM Email'], text: queueMsg_('reminder', r, days) }); marks.push([r.row, 'Reminder DM']); }
   });
-  return out;
+  if (msgs.length && handoffSlack_(msgs)) marks.forEach(function (m) { queueSet_(m[0], m[1], now); });
+  console.log('Handoff queue: ' + rows.length + ' firms, ' + msgs.length + ' DM(s) sent');
 }
 
-/* One-off check (run from the editor): on VIP Law (OLD), sets Onboarding Status and Completed
-   Date the way closeOnboarding does, reads them back, then puts both back the way they were.
-   Both fields already exist, so this can't create stray fields. */
-function testCloseWrite() {
-  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
-  var read = function () { return czGet_('/Account', { $filter: 'Id eq ' + TEST_ACCOUNT_ID, $select: 'Id,Name,ExternalId,Cf/OnboardingStatus,Cf/OnboardingCompletedDate' })[0]; };
-  var before = read(), bcf = before.Cf || {};
-  Logger.log('Before: status "%s", completed "%s"', bcf.OnboardingStatus || '', bcf.OnboardingCompletedDate || '');
-  var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
-  czSet_(appKey, before.ExternalId, 'OnboardingStatus', 'Complete');
-  czSet_(appKey, before.ExternalId, 'OnboardingCompletedDate', today);
-  var ok = false, a;
-  for (var i = 0; i < 6 && !ok; i++) { Utilities.sleep(4000); a = read(); ok = (a.Cf || {}).OnboardingStatus === 'Complete' && String((a.Cf || {}).OnboardingCompletedDate || '').slice(0, 10) === today; }
-  Logger.log('Write: %s (status "%s", completed "%s")', ok ? 'WORKS' : 'no change', (a.Cf || {}).OnboardingStatus, (a.Cf || {}).OnboardingCompletedDate);
-  czSet_(appKey, before.ExternalId, 'OnboardingStatus', bcf.OnboardingStatus || '');
-  czSet_(appKey, before.ExternalId, 'OnboardingCompletedDate', bcf.OnboardingCompletedDate || '');
-  Utilities.sleep(8000);
-  a = read();
-  Logger.log('After restore: status "%s", completed "%s"', (a.Cf || {}).OnboardingStatus || '', (a.Cf || {}).OnboardingCompletedDate || '');
+// Run once from the editor: makes the Slack key (only its SHA-256 is logged; give that to Claude for the Zapier
+// workflow). Safe to run again. Doesn't schedule anything: that's installHandoffTrigger(), at go-live.
+function setupHandoffSlack() {
+  var p = PropertiesService.getScriptProperties(), key = p.getProperty('HANDOFF_SLACK_KEY');
+  if (!key) { key = Utilities.getUuid() + Utilities.getUuid(); p.setProperty('HANDOFF_SLACK_KEY', key); }
+  var hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, key, Utilities.Charset.UTF_8)
+    .map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
+  Logger.log('HANDOFF_SLACK_KEY sha256: ' + hash);
+  Logger.log('Hook: ' + (p.getProperty('HANDOFF_SLACK_HOOK') || HANDOFF_HOOK_DEFAULT) + ' · live: ' + (p.getProperty('HANDOFF_SLACK_LIVE') === 'yes') + ' · escalate to: ' + handoffEscalateTo_().join(', '));
+}
+
+// GO-LIVE (2027-01-01), not before: triggers run the project's latest code, not the pinned deployment.
+// Weekdays ~9am PT: arrival retries, 2-day reminders, 4-day escalations.
+function installHandoffTrigger() {
+  if (ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'handoffReminders'; })) return Logger.log('Already installed.');
+  ScriptApp.newTrigger('handoffReminders').timeBased().everyDays(1).atHour(9).inTimezone('America/Los_Angeles').create();
+  Logger.log('Installed: handoffReminders, daily ~9am PT (it skips weekends itself).');
 }

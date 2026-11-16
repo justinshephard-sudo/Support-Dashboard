@@ -6,7 +6,7 @@
                             way as the backend (suggest_ / suggestCsm_ in firm-assignment.js)
      Assign               → the firm moves to the Implementation tab's open onboardings
      Close onboarding     → handoff form (fake contacts) → the CSM page's completed list
-     CSM page             → "Completed onboardings this week" starts with a few sample handoffs
+     CSM page             → "Handoff queue" starts with a few sample handoffs (Accept works on test data)
    State is kept in this browser (localStorage) until "Reset test data".
    ========================================================================== */
 const MOCK_KEY = 'cs-mock', MOCK_STATE = 'cs-mock-state';
@@ -64,11 +64,12 @@ function mockSeed() {
         bugs: 'Text replies sometimes land on the wrong matter (ticket open with Support).',
         features: 'Two-way calendar sync with Outlook shared calendars.',
         notes: 'Jordan is the champion and very responsive. Office manager (Tess) runs day to day — loop her in on everything.' }),
-      mockDone('Test – Greenfield Estate Law', '99102', 640, 3, 'Complete', 'Andy Galindo', 'Julio Ortiz', 'Helen Park', 'Owner', {
+      Object.assign(mockDone('Test – Greenfield Estate Law', '99102', 640, 3, 'Complete', 'Andy Galindo', 'Julio Ortiz', 'Helen Park', 'Owner', {
         intakeBuilt: 'Phone intake only for now; staff fill in the internal intake form during the call.',
         painPoints: 'Felt the build-out took too long.', goal: 'Get every estate client through a consistent onboarding flow.',
         techSavvy: '2', sentiment: 'Neutral', openItems: 'Engagement letter template still needs her edits.',
         bugs: '', features: 'Built-in e-notary.', notes: 'Prefers phone over email. Not technical — go slow and send recordings.' }),
+        { acceptedBy: 'julio@lawmatics.com', acceptedAt: MOCK_DAY(2) + ' 10:14' }),
       mockDone('Test – Vega Immigration', '99103', 520, 5, 'Complete', 'Swetha Devakumar', 'Jessie Hobbs', 'Luis Vega', 'Attorney', {
         intakeBuilt: 'Spanish and English intake forms, automations by case type (family petition, asylum, DACA).',
         painPoints: 'Spanish text templates need manual edits.', goal: 'Handle twice the consults without hiring.',
@@ -265,9 +266,29 @@ function mockClose(b) {
   return { ok: true, confirmed: true, testData: true, outcome: outcome.status, ownerMovedTo: f.csm || 'Support', unsaved: 0 };
 }
 
+// The handoff queue: firms with a CSM wait until accepted; accepted ones stay 7 days. Seed firms 2 and 3
+// start accepted so both halves show.
+function mockBizDays(from) {
+  let n = 0; const d = new Date(from + 'T12:00:00'), end = new Date(MOCK_DAY(0) + 'T12:00:00');
+  while (d < end) { d.setDate(d.getDate() + 1); if (d.getDay() % 6) n++; }
+  return n;
+}
 function mockHandoffs() {
-  return { ok: true, days: 7, since: MOCK_DAY(6), sections: MOCK_SECTIONS, fields: MOCK_FIELDS.map(({ key, section, label, type }) => ({ key, section, label, type })),
-    firms: MOCK.completed.filter((f) => f.completed >= MOCK_DAY(6)).sort((x, y) => y.completed.localeCompare(x.completed) || x.name.localeCompare(y.name)) };
+  const me = ((typeof AUTH !== 'undefined' && AUTH.email) || '').toLowerCase();
+  const firms = MOCK.completed.filter((f) => f.csm && (!f.acceptedAt || f.acceptedAt.slice(0, 10) >= MOCK_DAY(6))).map((f) => {
+    const waiting = !f.acceptedAt;
+    return Object.assign({}, f, { waiting, waitDays: waiting ? mockBizDays(f.completed) : 0, acceptedBy: f.acceptedBy || '', acceptedAt: f.acceptedAt || '',
+      canAccept: waiting && (isManager() || me.startsWith(f.csm.split(' ')[0].toLowerCase())) });
+  }).sort((x, y) => (y.waiting - x.waiting) || (x.waiting ? x.completed.localeCompare(y.completed) : y.acceptedAt.localeCompare(x.acceptedAt)) || x.name.localeCompare(y.name));
+  return { ok: true, days: 7, since: MOCK_DAY(6), remind: 2, escalate: 4, sections: MOCK_SECTIONS,
+    fields: MOCK_FIELDS.map(({ key, section, label, type }) => ({ key, section, label, type })), firms };
+}
+function mockAccept(b) {
+  const f = MOCK.completed.find((x) => x.firmId === String(b.firmId));
+  if (!f) throw new Error('That firm isn’t in the handoff queue.');
+  if (!f.acceptedAt) { f.acceptedBy = (typeof AUTH !== 'undefined' && AUTH.email) || 'you'; f.acceptedAt = new Date().toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).slice(0, 16); }
+  mockSave();
+  return { ok: true, testData: true, acceptedBy: f.acceptedBy, acceptedAt: f.acceptedAt };
 }
 
 function mockSet(b) {
@@ -293,7 +314,7 @@ function mockSyncImpl() {
 }
 
 const MOCK_ACTIONS = {
-  load: mockLoad, assign: mockAssign, handoffStart: mockHandoffStart, closeOnboarding: mockClose, handoffs: mockHandoffs,
+  load: mockLoad, assign: mockAssign, handoffStart: mockHandoffStart, closeOnboarding: mockClose, handoffs: mockHandoffs, acceptHandoff: mockAccept,
   setRotation: mockSet, setTier: mockSet, setCsmBands: mockSet,
 };
 
