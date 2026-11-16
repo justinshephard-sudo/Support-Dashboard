@@ -416,3 +416,14 @@ function installHandoffTrigger() {
   ScriptApp.newTrigger('handoffReminders').timeBased().everyDays(1).atHour(9).inTimezone('America/Los_Angeles').create();
   Logger.log('Installed: handoffReminders, daily ~9am PT (it skips weekends itself).');
 }
+
+// Editor check: sends one sample arrival DM through the real path (script → Zapier → Ops Comms).
+// Always test mode, so it lands in Justin's DM marked TEST, whatever HANDOFF_SLACK_LIVE says.
+function testHandoffSlack() {
+  var p = PropertiesService.getScriptProperties(), live = p.getProperty('HANDOFF_SLACK_LIVE');
+  p.deleteProperty('HANDOFF_SLACK_LIVE');
+  try {
+    var ok = handoffSlack_([{ email: HANDOFF_ESCALATE_DEFAULT[0], text: queueMsg_('arrival', { 'Firm': 'Test – Sample Firm LLP', 'IM': 'Callie Burns' }) }]);
+    Logger.log(ok ? 'Sent — check your Slack DMs from Ops Comms (marked TEST).' : 'Not sent — see the error above.');
+  } finally { if (live) p.setProperty('HANDOFF_SLACK_LIVE', live); }
+}
