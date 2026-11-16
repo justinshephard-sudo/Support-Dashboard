@@ -311,7 +311,7 @@ function csmHandoffsHtml() {
     + (waiting.length ? table(waiting, 'Waiting')
       : `<div class="empty-note">${mine ? `Nothing waiting for ${esc(CSM.rep)}.` : 'No handoffs waiting.'} New firms appear here when their IM closes onboarding.</div>`)
     + (done.length ? `<details class="csm-ho-done"><summary>Accepted in the last ${d.days} days · ${done.length}</summary>${table(done, 'Accepted')}</details>` : '')
-    + `<p class="mrr-note">Firms with a CSM land here when their IM closes onboarding (the Owner moves to the CSM then). The CSM reads the handoff and clicks Accept. Ops Comms DMs the CSM when a firm arrives, again after ${d.remind} business days, and flags it to the managers after ${d.escalate}. Firms with no CSM go to Support and skip the queue.</p>`;
+    + `<p class="mrr-note">Firms with a CSM land here when their IM closes onboarding (the Owner moves to the CSM then). The CSM reads the handoff and clicks Accept. Ops Comms DMs the CSM when a firm arrives, again after ${d.remind} business days, and flags it to Clare and Johnny after ${d.escalate}. Firms with no CSM go to Support and skip the queue.</p>`;
 }
 const csmHoWhen = (v) => { const t = Date.parse(String(v).replace(' ', 'T')); return Number.isNaN(t) ? v : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }); };
 

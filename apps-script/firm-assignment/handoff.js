@@ -217,6 +217,8 @@ var QUEUE_TAB = 'Handoff Queue';
 var QUEUE_HEADERS = ['Firm ID', 'Firm', 'CZ Account', 'CSM', 'CSM Email', 'IM', 'Outcome', 'Completed', 'Added',
   'Accepted By', 'Accepted At', 'Arrival DM', 'Reminder DM', 'Escalated'];
 var HANDOFF_REMIND = 2, HANDOFF_ESCALATE = 4;
+// Who hears about a handoff still waiting after HANDOFF_ESCALATE business days (Justin, 2026-11-16): Clare Struzzi + Johnny Bissell.
+var HANDOFF_ESCALATE_DEFAULT = ['clare@lawmatics.com', 'johnny@lawmatics.com'];
 var QUEUE_BACKFILL_DAYS = 21;   // how far back a ChurnZero-closed firm is picked up
 var DASH_LINK = 'https://justinshephard-sudo.github.io/Support-Dashboard/';
 // Zapier workflow 01a1e5c7 "CS handoff queue → Slack DMs" (rejects anything without HANDOFF_SLACK_KEY).
@@ -352,7 +354,7 @@ function acceptHandoff_(b, who) {
 /* ---------- Slack (Ops Comms via Zapier) ---------- */
 // Script Properties: HANDOFF_SLACK_HOOK (optional; defaults to HANDOFF_HOOK_DEFAULT), HANDOFF_SLACK_KEY (made by setupHandoffSlack),
 // HANDOFF_SLACK_LIVE = 'yes' to DM the real people (anything else = everything goes to Justin's DM, marked TEST),
-// HANDOFF_ESCALATE_TO = comma-separated emails for the escalation (default: the dashboard managers).
+// HANDOFF_ESCALATE_TO = comma-separated emails for the escalation (default: HANDOFF_ESCALATE_DEFAULT).
 function handoffSlack_(messages) {
   var p = PropertiesService.getScriptProperties(), hook = p.getProperty('HANDOFF_SLACK_HOOK') || HANDOFF_HOOK_DEFAULT, key = p.getProperty('HANDOFF_SLACK_KEY');
   if (!messages.length) return true;
@@ -364,7 +366,7 @@ function handoffSlack_(messages) {
 }
 function handoffEscalateTo_() {
   var v = PropertiesService.getScriptProperties().getProperty('HANDOFF_ESCALATE_TO');
-  return v ? v.split(',').map(function (e) { return e.trim().toLowerCase(); }).filter(String) : dashManagers_();
+  return v ? v.split(',').map(function (e) { return e.trim().toLowerCase(); }).filter(String) : HANDOFF_ESCALATE_DEFAULT;
 }
 function queueMsg_(kind, r, days) {
   var firm = '*' + r['Firm'] + '*', link = '<' + DASH_LINK + '|CSM page>';
