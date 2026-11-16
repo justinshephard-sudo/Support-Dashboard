@@ -1419,3 +1419,4 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .am-lv-row.on{background:rgba(79,180,255,.12)}
 .am-lv-row .ok{color:#0b8a4d;font-weight:600}
 .am-lv-row .no{color:var(--text-3)}
+.training-tag{display:inline-block;margin-left:8px;font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;border-radius:999px;padding:2px 8px;background:rgba(79,180,255,.16);color:#1f6fb2;vertical-align:1px}

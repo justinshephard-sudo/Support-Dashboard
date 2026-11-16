@@ -67,6 +67,7 @@ async function loadReportTables() {
       const key = TEAM_COL_TO_KEY[colName];
       if (key) member[key] = (r[i] == null ? '' : String(r[i]).trim());
     });
+    member.training = isTraining(member, MONTH_NAMES.findIndex((n) => n.toLowerCase() === mk));
     if (!REPORT.teammates.has(mk)) REPORT.teammates.set(mk, []);
     REPORT.teammates.get(mk).push(member);
   });
@@ -167,11 +168,11 @@ function buildMonthParsed(monthName) {
 
 function overallCsatPct(mk) {
   let c = 0, d = 0;
-  (REPORT.teammates.get(mk) || []).forEach((m) => { c += toNumber(m.csat) || 0; d += toNumber(m.dsat) || 0; });
+  (REPORT.teammates.get(mk) || []).filter((m) => !m.training).forEach((m) => { c += toNumber(m.csat) || 0; d += toNumber(m.dsat) || 0; });
   return (c + d) ? String(Math.round((c / (c + d)) * 1000) / 10) : '';
 }
 function avgAssignedPerMember(mk) {
-  const members = (REPORT.teammates.get(mk) || []).filter(memberHasData);
+  const members = (REPORT.teammates.get(mk) || []).filter((m) => memberHasData(m) && !m.training);
   if (!members.length) return '';
   const total = members.reduce((s, m) => s + (toNumber(m.convAssigned) || 0), 0);
   return String(Math.round(total / members.length));
@@ -863,7 +864,7 @@ function setManagerMode(on) {
   try { sessionStorage.setItem('cs-manager-mode', on ? 'on' : 'off'); } catch (e) {}
   updateManagerToggleUI();
   try { renderIncentives(currentIncentiveMembers, currentIncentiveMonthKey); } catch (e) {}
-  try { renderMonthlyLeaderboard(currentIncentiveMembers); } catch (e) {}
+  try { renderMonthlyLeaderboard(currentLeaderboardMembers || currentIncentiveMembers); } catch (e) {}
   try { if (currentMonthName) renderManualSection(currentMonthName); } catch (e) {}
   try { renderResources(); } catch (e) {}
   try { updateScorecardsButton(); } catch (e) {}
@@ -1052,7 +1053,7 @@ function createLeaderboardRenderer(tableId, editable) {
 
     let fastestName = null;
     let fastestTime = Infinity;
-    members.forEach((m) => {
+    members.filter((m) => !m.training).forEach((m) => {
       const secs = parseTimeToSeconds(m.avgRespTime);
       if (secs != null && secs < fastestTime) { fastestTime = secs; fastestName = m.name; }
     });
@@ -1064,7 +1065,14 @@ function createLeaderboardRenderer(tableId, editable) {
         const td = document.createElement('td');
         if (col.key === 'name') {
           td.textContent = m.name;
-          if (m.name === fastestName) {
+          if (m.training) {
+            const tag = document.createElement('span');
+            tag.className = 'training-tag';
+            tag.textContent = 'In training';
+            tag.title = 'Not counted in team numbers or incentives yet';
+            td.appendChild(tag);
+          }
+          if (m.name === fastestName && !m.training) {
             const crown = document.createElement('span');
             crown.className = 'crown';
             crown.textContent = '👑';
@@ -1378,6 +1386,7 @@ function openManualEditor(def, anchor) {
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
+let currentLeaderboardMembers = null;
 function renderMonth(entry) {
   currentMonthName = entry.name;
   const idx = MONTH_NAMES.indexOf(entry.name);
@@ -1385,10 +1394,12 @@ function renderMonth(entry) {
   const prevParsed = prevRaw && prevRaw.hasData ? prevRaw : null;
   renderMonthSections(entry.name);
   const people = individualsOnly(entry.parsed.members, idx);
+  currentLeaderboardMembers = people;
   renderMonthlyLeaderboard(people);
   renderPhoneReps(people);
-  renderIncentives(people, entry.gid);
-  updateMascot(people, entry.name);
+  const counted = people.filter((m) => !m.training);   // reps in training don't win incentives or the mascot
+  renderIncentives(counted, entry.gid);
+  updateMascot(counted, entry.name);
 }
 
 function populateSelect(selectId, entries, selectedValue, valueKey, labelKey) {

@@ -115,6 +115,15 @@ const isTeamOnly = (m, monthIdx) => {
   return from != null && monthIdx >= from;
 };
 const individualsOnly = (members, monthIdx) => (members || []).filter((m) => !isTeamOnly(m, monthIdx));
+// New reps in training (started 2026-11-16): shown on the leaderboard with an "In training" tag, but left
+// out of team numbers built from reps (overall CSAT %, average assigned per rep), incentives and the mascot.
+// Value = the month index (0 = Jan) they start counting; null = still in training. Matched on first name.
+const IN_TRAINING = { claire: null, daniel: null, chelsea: null };
+const isTraining = (m, monthIdx) => {
+  const k = String(m.name || '').trim().split(/\s+/)[0].toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(IN_TRAINING, k)) return false;
+  return IN_TRAINING[k] == null || monthIdx < IN_TRAINING[k];
+};
 
 const LEADERBOARD_COLUMNS = [
   { key: 'convAssigned', label: 'Conv Assigned' },
