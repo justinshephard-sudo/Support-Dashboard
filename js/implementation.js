@@ -388,6 +388,38 @@ function implDrillCell(key, row, median) {
   return esc(v || '–');
 }
 
+// Board view of open onboardings: a column per stage (in call order), cards keep the
+// list's order — soonest next meeting first, unscheduled firms last.
+function implBoardHtml(rows) {
+  const groups = new Map();
+  rows.forEach((r) => {
+    const st = r.Stage || 'No stage set';
+    if (!groups.has(st)) groups.set(st, []);
+    groups.get(st).push(r);
+  });
+  const stages = [...groups.keys()].sort((a, b) => implStageRank(a) - implStageRank(b) || a.localeCompare(b));
+  const color = (st) => { const c = IMPL_STAGE_COLORS[st] || '--slot-8'; return c.startsWith('--') ? `var(${c})` : c; };
+  const card = (r) => {
+    const d = toNumber(r.DaysInOnboarding);
+    const meta = [
+      r.NextMeeting ? `<span class="ob-card-next">📅 ${esc(r.NextMeeting)}</span>` : '<span class="ob-card-next none">No meeting scheduled</span>',
+      d != null && !Number.isNaN(d) ? `<span class="ob-card-days${d >= 70 ? ' late' : ''}">${fmtNum(d)} days</span>` : '',
+      !IMPL.rep && r.AccountManager ? `<span class="ob-card-am">${esc(r.AccountManager)}</span>` : '',
+      r.Status && r.Status !== 'Open' ? `<span class="ob-card-status">${esc(r.Status)}</span>` : '',
+    ].filter(Boolean).join('');
+    const btns = [
+      canCallPrep(r) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : '',
+      canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Complete</button>` : '',
+      overridesUnlocked ? exclButton(r.FirmId, r.Name, 'IM') : '',
+    ].filter(Boolean).join('');
+    return `<div class="ob-card${r._excl ? ' excl' : ''}"><div class="ob-card-name">${esc(r.Name || '–')}${r._excl ? exclTag() : ''}${implSignalMark(r)}</div>`
+      + `<div class="ob-card-meta">${meta}</div>${btns ? `<div class="ob-card-btns">${btns}</div>` : ''}</div>`;
+  };
+  return `<div class="ob-board">${stages.map((st) => `<section class="ob-col" style="--ob-col:${color(st)}">`
+    + `<header class="ob-col-head"><span class="ob-col-dot"></span><span class="ob-col-name">${esc(st)}</span><span class="ob-col-count">${groups.get(st).length}</span></header>`
+    + `<div class="ob-col-cards">${groups.get(st).map(card).join('')}</div></section>`).join('')}</div>`;
+}
+
 function openImplDrill(col, label) {
   const spec = implDrillSpec(col, label);
   if (!spec) return;
@@ -398,20 +430,37 @@ function openImplDrill(col, label) {
   const count = spec.rows ? implCounted(spec.rows).length : 0;   // excluded firms are listed, not counted
   // Open onboardings: "Onboarding complete" on the far right, for the firm's IM or a manager.
   const doneCol = spec.prep && spec.rows && spec.rows.some(canCallPrep);
-  const body = spec.rows && spec.rows.length
+  const listBody = spec.rows && spec.rows.length
     ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}${doneCol ? '<th></th>' : ''}</tr></thead>`
       + `<tbody>${spec.rows.map((r) => `<tr${exclRow(r._excl)}>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && r._excl ? exclTag() : ''}${k === 'Name' ? implSignalMark(r) : ''}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${doneCol ? `<td class="ob-done-cell">${canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Onboarding complete</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
     : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
-  back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
+  // Open onboardings can also show as a board: one column per stage, soonest next meeting first.
+  const boardable = col === 'OpenOnboardings' && spec.rows && spec.rows.length;
+  let view = boardable ? ((() => { try { return localStorage.getItem('cs-ob-view'); } catch (e) { return null; } })() === 'board' ? 'board' : 'list') : 'list';
+  const bodyFor = (v) => (v === 'board' ? implBoardHtml(spec.rows) : listBody);
+  const body = bodyFor(view);
+  back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}${view === 'board' ? ' drill-board' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
         <div><h3 id="impl-drill-title">${esc(spec.title)}${spec.rows ? ` <span class="drill-count">${fmtNum(count)}</span>` : ''}</h3>
           ${spec.note ? `<div class="drill-note">${esc(spec.note)}${doneCol && LOCAL_ENV ? ' <button type="button" class="ob-preview" data-ob-preview>🎉 Preview the celebration</button>' : ''}</div>` : ''}</div>
-        <button type="button" class="drill-close" aria-label="Close">×</button>
+        <div class="drill-head-actions">${boardable ? `<div class="ob-view-switch" role="tablist" aria-label="View">
+            <button type="button" role="tab" class="ob-view-btn" data-ob-view="list" aria-selected="${view === 'list'}">☰ List</button>
+            <button type="button" role="tab" class="ob-view-btn" data-ob-view="board" aria-selected="${view === 'board'}">▦ Board</button></div>` : ''}
+          <button type="button" class="drill-close" aria-label="Close">×</button></div>
       </div>
       <div class="drill-body">${body}</div>
     </div>`;
   back.addEventListener('click', (e) => {
     if (e.target === back) { closeImplDrill(); return; }
+    const vb = e.target.closest('[data-ob-view]');
+    if (vb) {
+      view = vb.dataset.obView;
+      try { localStorage.setItem('cs-ob-view', view); } catch (err) { /* private mode */ }
+      back.querySelector('.drill').classList.toggle('drill-board', view === 'board');
+      back.querySelectorAll('[data-ob-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.obView === view)));
+      back.querySelector('.drill-body').innerHTML = bodyFor(view);
+      return;
+    }
     const p = e.target.closest('[data-prep-firm]');
     if (p) { openCallPrep(IMPL.open.find((r) => String(r.FirmId) === p.dataset.prepFirm)); return; }
     if (e.target.closest('[data-ob-preview]')) { obDanceParty('Test Firm LLP', { preview: true }); return; }
