@@ -339,8 +339,8 @@ function openFirm(firmId, name) {
 }
 
 /* ---- Open bugs (Shortcut) + feature requests (Notion) for the firm ----
-   Bugs: the loop-tracker's `bugFirm` searches Shortcut for open bugs mentioning the Firm ID (strong match)
-   or the firm's name (weaker, labeled). Feature requests: the Notion list (`frLoad`, shared with
+   Bugs: the loop-tracker's `bugFirm` searches Shortcut for open bugs whose text gives this Firm ID
+   ("Firm ID 4323", "firm #4323" or a Lawmatics app link) — not a bare number, not the firm's name. Feature requests: the Notion list (`frLoad`, shared with
    Resources), matched on its Firm ID field. */
 async function loadFirmProduct(f) {
   const key = f.firmId || f.name;
@@ -358,8 +358,8 @@ async function loadFirmProduct(f) {
   const err = (r, what) => (r.status === 'rejected' ? `<div class="muted pf-prod-err">Couldn’t load ${what}: ${esc(r.reason && r.reason.message || 'error')}</div>` : '');
   const bugHtml = bugItems.length ? `<ul class="pf-prod-list">${bugItems.slice(0, 8).map((b) => `<li>
       <a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.t)}</a>
-      <div class="pf-prod-meta">${b.state ? `<span>${esc(b.state)}</span>` : ''}${b.sev ? `<span class="pf-sev s${b.sev}">Sev ${b.sev}</span>` : ''}<span>updated ${esc(b.u)}</span>${b.how === 'name' ? '<span class="muted" title="Mentions the firm’s name, not its Firm ID">name match</span>' : ''}</div></li>`).join('')}</ul>${bugItems.length > 8 ? `<div class="muted">+ ${bugItems.length - 8} more in Shortcut</div>` : ''}`
-    : bugs.status === 'fulfilled' ? '<div class="muted">No open bugs mention this firm.</div>' : '';
+      <div class="pf-prod-meta">${b.state ? `<span>${esc(b.state)}</span>` : ''}${b.sev ? `<span class="pf-sev s${b.sev}">Sev ${b.sev}</span>` : ''}<span>updated ${esc(b.u)}</span></div></li>`).join('')}</ul>${bugItems.length > 8 ? `<div class="muted">+ ${bugItems.length - 8} more in Shortcut</div>` : ''}`
+    : bugs.status === 'fulfilled' ? `<div class="muted">${id ? 'No open bugs list this Firm ID.' : 'No Firm ID, so bugs can’t be matched.'}</div>` : '';
   const frHtml = frItems.length ? `<ul class="pf-prod-list">${frItems.slice(0, 8).map((x) => `<li>
       <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.t)}</a>
       <div class="pf-prod-meta"><span><b>${x.req.length}</b> request${x.req.length === 1 ? '' : 's'}</span>${x.s ? `<span>${esc(x.s)}</span>` : ''}${x.r && x.r !== 'No' ? `<span>Roadmap: ${esc(x.r)}</span>` : ''}${x.a ? `<span>${esc(x.a)}</span>` : ''}</div></li>`).join('')}</ul>${frItems.length > 8 ? `<div class="muted">+ ${frItems.length - 8} more in Resources ▸ Feature Requests</div>` : ''}`

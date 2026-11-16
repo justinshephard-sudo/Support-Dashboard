@@ -140,40 +140,38 @@ function checkShortcut() {
 }
 
 /* ---------- bugs for one firm (Firm Lookup) ----------
-   Shortcut full-text search for open bugs that mention the firm: by Firm ID (strong match) and by its
-   name without the legal suffix (weaker; long enough names only). Any workflow, not done, not archived.
-   Cached 10 minutes per firm. */
-var BUG_SUFFIX = /[,.]?\s*(pllc|llc|llp|lllp|pc|p\.c\.|pa|p\.a\.|plc|ltd|inc|apc|aplc|esq|law (firm|office|offices|group)|attorneys? at law)\.?$/i;
-function bugFirmName_(name) {
-  var full = String(name || '').replace(/["“”]/g, '').trim(), n = full, prev;
-  do { prev = n; n = n.replace(BUG_SUFFIX, '').trim(); } while (n !== prev);
-  return n.length >= 6 ? n : full.length >= 8 ? full : '';   // "Vega Law Group" stays whole rather than "Vega"
+   Shortcut full-text search for the Firm ID, then a strict check of each hit's own text (title,
+   description, external links): the ID must appear as a Firm ID — next to the word "firm" (Firm ID 4323,
+   firm #4323, firm: 4323) or in a Lawmatics app URL — not just anywhere as a number. Name matching was
+   dropped (2026-11-16): firm names are too generic and pulled in other firms' bugs.
+   Any workflow, not done, not archived. Cached 10 minutes per firm. */
+function bugMentionsFirm_(text, id) {
+  var t = String(text || '');
+  var near = new RegExp('firm[\\s_-]*(?:id|#|no\\.?|number)?[\\s:#=-]*' + id + '(?!\\d)', 'i');
+  var url = new RegExp('lawmatics\\.com/[^\\s)"]*?(?:firms?|accounts?)[/=]' + id + '(?!\\d)', 'i');
+  return near.test(t) || url.test(t);
 }
 function bugFirm_(b) {
-  var firmId = String(b.firmId || '').replace(/\D/g, ''), name = bugFirmName_(b.name);
-  if (!firmId && !name) return { ok: true, items: [] };
-  var cache = CacheService.getScriptCache(), key = 'bugfirm_' + firmId + '_' + Utilities.base64EncodeWebSafe(name).slice(0, 60);
+  var firmId = String(b.firmId || '').replace(/\D/g, '');
+  if (!firmId) return { ok: true, items: [] };
+  var cache = CacheService.getScriptCache(), key = 'bugfirm2_' + firmId;
   var hit = cache.get(key);
   if (hit) return JSON.parse(hit);
-  var meta = bugMeta_(false), found = {};
-  var search = function (term, how) {
-    var q = '"' + term + '" type:bug !is:archived';
-    var res = sc_('get', '/search/stories?page_size=25&query=' + encodeURIComponent(q)) || {};
-    (res.data || []).forEach(function (s) {
-      var st = meta.states[s.workflow_state_id] || {};
-      if (st.type === 'done' || s.archived || s.completed) return;
-      if (!found[s.id]) {
-        var it = bugItem_(s);
-        it.state = st.name || ''; it.how = how;
-        found[s.id] = it;
-      } else if (how === 'id') found[s.id].how = 'id';
-    });
-  };
-  if (firmId) search(firmId, 'id');
-  if (name) search(name, 'name');
-  var items = Object.keys(found).map(function (k) { return found[k]; })
-    .sort(function (x, y) { return (x.how === 'id' ? 0 : 1) - (y.how === 'id' ? 0 : 1) || (x.sev || 9) - (y.sev || 9) || y.u.localeCompare(x.u); });
-  var out = { ok: true, items: items, name: name };
+  var meta = bugMeta_(false), items = [];
+  var res = sc_('get', '/search/stories?page_size=25&query=' + encodeURIComponent('"' + firmId + '" type:bug !is:archived')) || {};
+  (res.data || []).forEach(function (s) {
+    var st = meta.states[s.workflow_state_id] || {};
+    if (st.type === 'done' || s.archived || s.completed) return;
+    var full = s;
+    if (s.description == null) { try { full = sc_('get', '/stories/' + s.id) || s; } catch (e) { full = s; } }
+    var text = [full.name, full.description].concat((full.external_links || [])).join('\n');
+    if (!bugMentionsFirm_(text, firmId)) return;
+    var it = bugItem_(full);
+    it.state = st.name || '';
+    items.push(it);
+  });
+  items.sort(function (x, y) { return (x.sev || 9) - (y.sev || 9) || y.u.localeCompare(x.u); });
+  var out = { ok: true, items: items };
   cache.put(key, JSON.stringify(out), 600);
   return out;
 }
@@ -190,9 +188,13 @@ function bugDoPost_(b, who) {
   return null;
 }
 
-// Editor check for Firm Lookup's bug search: logs what one firm finds (change the Firm ID / name to try others).
+// Editor check for Firm Lookup's bug search: logs what one firm finds, and which search hits were rejected.
 function checkBugFirm() {
-  var r = bugFirm_({ firmId: '4323', name: 'VIP Law' });
-  Logger.log('Search name used: "' + r.name + '" · ' + r.items.length + ' open bug(s)');
-  r.items.slice(0, 10).forEach(function (b) { Logger.log((b.how === 'id' ? '[ID]   ' : '[name] ') + (b.sev ? 'Sev ' + b.sev + ' · ' : '') + b.state + ' · ' + b.t); });
+  var id = '4323';
+  var res = sc_('get', '/search/stories?page_size=25&query=' + encodeURIComponent('"' + id + '" type:bug !is:archived')) || {};
+  Logger.log('Shortcut search hits: ' + (res.data || []).length);
+  (res.data || []).forEach(function (s) {
+    var text = [s.name, s.description].concat(s.external_links || []).join('\n');
+    Logger.log((bugMentionsFirm_(text, id) ? 'KEEP   ' : 'reject ') + s.name);
+  });
 }
