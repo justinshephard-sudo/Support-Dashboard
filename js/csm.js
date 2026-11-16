@@ -222,6 +222,12 @@ function renderCsm() {
   const allReps = csmReps();
   const view = csmViewRep(allReps);
   CSM.rep = view;
+  // Managers pick a rep (or the whole team) from the bar at the top of the page, same as Implementation.
+  const meta = document.getElementById('csm-meta');
+  if (meta) {
+    meta.hidden = !isManager();
+    if (isManager()) populateSelect('csmRep', [{ k: '', l: 'Whole team' }].concat(allReps.map((r) => ({ k: r, l: r }))), view, 'k', 'l');
+  }
   if (view === CSM_NONE) {
     document.getElementById('csmHero').innerHTML = `<div class="fa-hero-text"><div class="loop-eyebrow">Customer Success Managers</div><h2>CSM <span>Scorecard</span></h2>
       <p>This tab shows your own book. We couldn’t match your sign-in to an account manager in ChurnZero yet. Ask a manager to add you.</p></div>`;
@@ -297,7 +303,6 @@ function renderCsm() {
 
   document.getElementById('csmBody').innerHTML = `
     <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry('CSM')}</span></h3>
-      ${isManager() ? `<label class="csm-rep-pick">Rep <select class="fb-select" id="csmRep"><option value="">Whole team</option>${allReps.map((r) => `<option value="${esc(r)}"${r === view ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>` : ''}
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid${solo ? ' csm-grid-solo' : ''}">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
     <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms. First 90 days counts active accounts whose ChurnZero onboarding completed date was in the last 90 days. Renewals are annual contracts (a Chargebee contract term) ending in the next 90 days; at risk means bad health, a cancellation flag, set not to renew, or an overdue invoice.${CSM_AI_HEALTH_ON && CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
@@ -514,7 +519,8 @@ function csmCohortOpen(rep) {
 function setupCsm() {
   const root = document.getElementById('csm');
   if (!root) return;
-  root.addEventListener('change', (e) => { if (e.target.id === 'csmRep') { CSM.rep = e.target.value; renderCsm(); } });
+  const repSel = document.getElementById('csmRep');
+  if (repSel) repSel.addEventListener('change', () => { CSM.rep = repSel.value; renderCsm(); });
   root.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('#csmRefresh')) { loadCsm(true); return; }
