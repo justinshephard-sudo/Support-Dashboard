@@ -277,7 +277,10 @@ function myRepName(names) {
   return names.filter((r) => r && r !== 'Unassigned').find((rep) => {
     const parts = rep.toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
     const first = parts[0], last = parts[parts.length - 1];
-    return [first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local);
+    if ([first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local)) return true;
+    // First-name-only rows (e.g. "Claire", "Daniel"): claire.ortiz@ → claire, dan@ → daniel.
+    const head = local.split(/[._]/)[0];
+    return parts.length === 1 && (head === first || (head.length >= 3 && first.startsWith(head)));
   }) || null;
 }
 
