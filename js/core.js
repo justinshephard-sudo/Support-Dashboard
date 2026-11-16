@@ -118,7 +118,7 @@ const individualsOnly = (members, monthIdx) => (members || []).filter((m) => !is
 // New reps in training (started 2026-11-16): shown on the leaderboard with an "In training" tag, but left
 // out of team numbers built from reps (overall CSAT %, average assigned per rep), incentives and the mascot.
 // Value = the month index (0 = Jan) they start counting; null = still in training. Matched on first name.
-const IN_TRAINING = { claire: null, daniel: null, chelsea: null };
+const IN_TRAINING = { claire: null, dan: null, chelsea: null };
 const isTraining = (m, monthIdx) => {
   const k = String(m.name || '').trim().split(/\s+/)[0].toLowerCase();
   if (!Object.prototype.hasOwnProperty.call(IN_TRAINING, k)) return false;
@@ -278,7 +278,7 @@ function myRepName(names) {
     const parts = rep.toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
     const first = parts[0], last = parts[parts.length - 1];
     if ([first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local)) return true;
-    // First-name-only rows (e.g. "Claire", "Daniel"): claire.ortiz@ → claire, dan@ → daniel.
+    // First-name-only rows (e.g. "Claire", "Dan"): claire.ortiz@ → claire.
     const head = local.split(/[._]/)[0];
     return parts.length === 1 && (head === first || (head.length >= 3 && first.startsWith(head)));
   }) || null;
