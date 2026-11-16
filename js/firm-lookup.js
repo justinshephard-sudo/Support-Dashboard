@@ -327,11 +327,45 @@ function openFirm(firmId, name) {
         ${pfRow('Total SMS', orDash(f.sms))}
         ${pfRow('SMS plan', orDash(f.smsPlan))}
       </div>
-    </div>`;
+    </div>
+    <div class="pf-card pf-product" id="pfProduct" data-firm="${esc(f.firmId || f.name)}"><div class="res-loading">Looking for this firm’s bugs and feature requests…</div></div>`;
   document.getElementById('profile').querySelectorAll('[data-contract]').forEach((b) => {
     b.addEventListener('click', () => openContract(b.dataset.contract, b));
   });
   document.getElementById('profile').querySelector('[data-sp-open]')?.addEventListener('click', () => openServicePortal(f));
   document.getElementById('pfAudit')?.addEventListener('click', (e) => raAuditFirm(e.currentTarget.dataset.firm, e.currentTarget.dataset.name));
   document.getElementById('profile').classList.add('show');
+  loadFirmProduct(f);
+}
+
+/* ---- Open bugs (Shortcut) + feature requests (Notion) for the firm ----
+   Bugs: the loop-tracker's `bugFirm` searches Shortcut for open bugs mentioning the Firm ID (strong match)
+   or the firm's name (weaker, labeled). Feature requests: the Notion list (`frLoad`, shared with
+   Resources), matched on its Firm ID field. */
+async function loadFirmProduct(f) {
+  const key = f.firmId || f.name;
+  const el = () => { const x = document.getElementById('pfProduct'); return x && x.dataset.firm === key ? x : null; };
+  const [bugs, frs] = await Promise.allSettled([
+    loopCall({ action: 'bugFirm', firmId: f.firmId || '', name: f.name }),
+    (typeof FR !== 'undefined' && FR.data) ? Promise.resolve(FR.data) : loopCall({ action: 'frLoad' }).then((d) => { if (typeof FR !== 'undefined' && !FR.data) FR.data = d; return d; }),
+  ]);
+  const box = el();
+  if (!box) return;   // another firm was opened meanwhile
+  const id = String(f.firmId || '').replace(/\D/g, '');
+  const frItems = frs.status === 'fulfilled' && id
+    ? (frs.value.items || []).filter((x) => String(x.f || '').split(/\D+/).includes(id)).sort((a, b) => b.req.length - a.req.length) : [];
+  const bugItems = bugs.status === 'fulfilled' ? bugs.value.items || [] : [];
+  const err = (r, what) => (r.status === 'rejected' ? `<div class="muted pf-prod-err">Couldn’t load ${what}: ${esc(r.reason && r.reason.message || 'error')}</div>` : '');
+  const bugHtml = bugItems.length ? `<ul class="pf-prod-list">${bugItems.slice(0, 8).map((b) => `<li>
+      <a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.t)}</a>
+      <div class="pf-prod-meta">${b.state ? `<span>${esc(b.state)}</span>` : ''}${b.sev ? `<span class="pf-sev s${b.sev}">Sev ${b.sev}</span>` : ''}<span>updated ${esc(b.u)}</span>${b.how === 'name' ? '<span class="muted" title="Mentions the firm’s name, not its Firm ID">name match</span>' : ''}</div></li>`).join('')}</ul>${bugItems.length > 8 ? `<div class="muted">+ ${bugItems.length - 8} more in Shortcut</div>` : ''}`
+    : bugs.status === 'fulfilled' ? '<div class="muted">No open bugs mention this firm.</div>' : '';
+  const frHtml = frItems.length ? `<ul class="pf-prod-list">${frItems.slice(0, 8).map((x) => `<li>
+      <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.t)}</a>
+      <div class="pf-prod-meta"><span><b>${x.req.length}</b> request${x.req.length === 1 ? '' : 's'}</span>${x.s ? `<span>${esc(x.s)}</span>` : ''}${x.r && x.r !== 'No' ? `<span>Roadmap: ${esc(x.r)}</span>` : ''}${x.a ? `<span>${esc(x.a)}</span>` : ''}</div></li>`).join('')}</ul>${frItems.length > 8 ? `<div class="muted">+ ${frItems.length - 8} more in Resources ▸ Feature Requests</div>` : ''}`
+    : frs.status === 'fulfilled' ? `<div class="muted">${id ? 'No feature requests list this Firm ID.' : 'No Firm ID, so feature requests can’t be matched.'}</div>` : '';
+  box.innerHTML = `<div class="pf-prod-grid">
+      <div><h4>🐞 Open bugs <span class="muted">${bugItems.length}</span></h4>${bugHtml}${err(bugs, 'bugs')}</div>
+      <div><h4>💡 Feature requests <span class="muted">${frItems.length}</span></h4>${frHtml}${err(frs, 'feature requests')}</div>
+    </div>`;
 }

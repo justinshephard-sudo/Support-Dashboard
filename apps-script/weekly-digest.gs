@@ -10,6 +10,8 @@
      New overdue        active firms whose oldest unpaid invoice crossed 7 days late this week ($25+).
      Call signals       Gong AI tracker hits from the last 7 days not yet marked Reviewed.
      70+ days           open onboardings that crossed 70 days this week (excluded firms left out).
+     Stalled            open onboardings 14+ days in with no meeting scheduled and no email with the firm
+                        in 14+ days (Impl - Open Firms LastEmail; same rule as the dashboard's board).
      New partner firms  agency / affiliate firms that started in the last 7 days.
 
    Everything comes from tabs this sheet already has (Accounts, Impl - Open Firms, Call Signals,
@@ -134,6 +136,24 @@ function buildDigest_() {
     replies.push('*⏳ Crossed 70 days in onboarding* — ' + crossed.length + '\n' +
       Object.keys(byRep).sort().map(function (rep) { return '• ' + rep + ': ' + byRep[rep].join(', '); }).join('\n'));
     summary.push(crossed.length + ' crossed 70 days');
+  }
+
+  // ---- Stalled onboardings: no meeting scheduled, no email either way in 14+ days ----
+  var quiet = function (r) { return r.LastEmail ? Math.round((t0 - Date.parse(r.LastEmail + 'T12:00:00Z')) / dayMs) : null; };
+  var stalled = digestRows_(ss.getSheetByName('Impl - Open Firms')).filter(function (r) {
+    if (!('LastEmail' in r) || r.NextMeeting || r.Excluded === '1' || imExcl[excludedFirmKey_(r.FirmId)] || Number(r.DaysInOnboarding) < 14) return false;
+    var q = quiet(r);
+    return q == null || q >= 14;
+  }).sort(function (a, b) { return (quiet(b) == null ? 999 : quiet(b)) - (quiet(a) == null ? 999 : quiet(a)); });
+  if (stalled.length) {
+    var byRepS = {};
+    stalled.forEach(function (r) {
+      var q = quiet(r);
+      (byRepS[first(r.AccountManager)] = byRepS[first(r.AccountManager)] || []).push(esc(r.Name) + ' (' + (q == null ? '21+' : q) + 'd quiet)');
+    });
+    replies.push('*🧊 Stalled onboardings* — ' + stalled.length + ' with no meeting scheduled and no email in 14+ days\n' +
+      Object.keys(byRepS).sort().map(function (rep) { return '• ' + rep + ': ' + byRepS[rep].join(', '); }).join('\n'));
+    summary.push(stalled.length + ' stalled');
   }
 
   // ---- New partner firms (agency / affiliate), last 7 days ----

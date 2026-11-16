@@ -139,6 +139,45 @@ function checkShortcut() {
     Object.keys(d.states).map(function (k) { return d.states[k].name; }).join(', '));
 }
 
+/* ---------- bugs for one firm (Firm Lookup) ----------
+   Shortcut full-text search for open bugs that mention the firm: by Firm ID (strong match) and by its
+   name without the legal suffix (weaker; long enough names only). Any workflow, not done, not archived.
+   Cached 10 minutes per firm. */
+var BUG_SUFFIX = /[,.]?\s*(pllc|llc|llp|lllp|pc|p\.c\.|pa|p\.a\.|plc|ltd|inc|apc|aplc|esq|law (firm|office|offices|group)|attorneys? at law)\.?$/i;
+function bugFirmName_(name) {
+  var full = String(name || '').replace(/["“”]/g, '').trim(), n = full, prev;
+  do { prev = n; n = n.replace(BUG_SUFFIX, '').trim(); } while (n !== prev);
+  return n.length >= 6 ? n : full.length >= 8 ? full : '';   // "Vega Law Group" stays whole rather than "Vega"
+}
+function bugFirm_(b) {
+  var firmId = String(b.firmId || '').replace(/\D/g, ''), name = bugFirmName_(b.name);
+  if (!firmId && !name) return { ok: true, items: [] };
+  var cache = CacheService.getScriptCache(), key = 'bugfirm_' + firmId + '_' + Utilities.base64EncodeWebSafe(name).slice(0, 60);
+  var hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  var meta = bugMeta_(false), found = {};
+  var search = function (term, how) {
+    var q = '"' + term + '" type:bug !is:archived';
+    var res = sc_('get', '/search/stories?page_size=25&query=' + encodeURIComponent(q)) || {};
+    (res.data || []).forEach(function (s) {
+      var st = meta.states[s.workflow_state_id] || {};
+      if (st.type === 'done' || s.archived || s.completed) return;
+      if (!found[s.id]) {
+        var it = bugItem_(s);
+        it.state = st.name || ''; it.how = how;
+        found[s.id] = it;
+      } else if (how === 'id') found[s.id].how = 'id';
+    });
+  };
+  if (firmId) search(firmId, 'id');
+  if (name) search(name, 'name');
+  var items = Object.keys(found).map(function (k) { return found[k]; })
+    .sort(function (x, y) { return (x.how === 'id' ? 0 : 1) - (y.how === 'id' ? 0 : 1) || (x.sev || 9) - (y.sev || 9) || y.u.localeCompare(x.u); });
+  var out = { ok: true, items: items, name: name };
+  cache.put(key, JSON.stringify(out), 600);
+  return out;
+}
+
 function bugDoPost_(b, who) {
   if (b.action === 'bugLoad') {
     var d = bugLoad_(!!b.force);
@@ -147,5 +186,13 @@ function bugDoPost_(b, who) {
     return { ok: true, items: d.items, states: d.states, people: d.people, groups: d.groups, at: d.at, stale: !!d.stale, me: me };
   }
   if (b.action === 'bugStory') return bugStory_(b.id);
+  if (b.action === 'bugFirm') return bugFirm_(b);
   return null;
+}
+
+// Editor check for Firm Lookup's bug search: logs what one firm finds (change the Firm ID / name to try others).
+function checkBugFirm() {
+  var r = bugFirm_({ firmId: '4323', name: 'VIP Law' });
+  Logger.log('Search name used: "' + r.name + '" · ' + r.items.length + ' open bug(s)');
+  r.items.slice(0, 10).forEach(function (b) { Logger.log((b.how === 'id' ? '[ID]   ' : '[name] ') + (b.sev ? 'Sev ' + b.sev + ' · ' : '') + b.state + ' · ' + b.t); });
 }

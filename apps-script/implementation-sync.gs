@@ -54,7 +54,9 @@ var IMPL_MONTHLY_COLUMNS = ['Month', 'OpenOnboardings', 'PreKickoff', 'OpenStatu
 var IMPL_EVENTS_TAB = 'Impl - Firm Events';
 var IMPL_EVENT_COLUMNS = ['Type', 'Month', 'Date', 'Name', 'FirmId', 'AccountManager', 'Specialist', 'Days', 'Score', 'Comment', 'Excluded'];
 var IMPL_OPEN_COLUMNS = ['Name', 'FirmId', 'Status', 'Stage', 'Specialist', 'AccountManager',
-  'DaysInOnboarding', 'NextMeeting', 'ImplementationType', 'Excluded'];
+  'DaysInOnboarding', 'NextMeeting', 'ImplementationType', 'Excluded', 'LastEmail', 'LastCustomerEmail'];
+var IMPL_EMAIL_DAYS = 21;   // how far back "last email" looks (the board flags 14+ quiet days)
+var IMPL_FREE_MAIL = /@(gmail|yahoo|outlook|hotmail|icloud|aol|live|msn|me|comcast|protonmail|ymail)\.com$/i;
 
 function syncImplementation() {
   var props = PropertiesService.getScriptProperties();
@@ -123,7 +125,18 @@ function syncImplementation() {
       cf.ImplementationSpecialist || '', cf.AccountManager || '', Math.floor((now - implStart_(a)) / 86400000),
       next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || '', '1']);
   });
-  openRows.forEach(function (r) { if (r.length < IMPL_OPEN_COLUMNS.length) r.push(''); });
+  // Last email with each open firm (synced Gmail, either direction) and the last one the firm sent.
+  var lastMail = {};
+  try { lastMail = implLastEmails_(base, headers, open.concat(exAccounts.filter(function (a) { return IMPL_OPEN_STATUSES.indexOf((a.Cf || {}).OnboardingStatus) !== -1; })), now); }
+  catch (e) { console.error('last emails: ' + e.message); }
+  var idByFirm = {};
+  accounts.concat(exAccounts).forEach(function (a) { idByFirm[String(a.ExternalId || (a.Cf || {}).FirmId || '')] = String(a.Id); });
+  openRows.forEach(function (r) {
+    while (r.length < 10) r.push('');
+    var lm = lastMail[idByFirm[String(r[1])]] || {};
+    r[10] = lm.any ? Utilities.formatDate(new Date(lm.any), tz, 'yyyy-MM-dd') : '';
+    r[11] = lm.customer ? Utilities.formatDate(new Date(lm.customer), tz, 'yyyy-MM-dd') : '';
+  });
   openRows.sort(function (x, y) { return (Number(y[6]) || 0) - (Number(x[6]) || 0); });
 
   // --- completions per month (active firms) ---
@@ -247,6 +260,46 @@ function syncImplementation() {
 }
 
 // When the firm started: the account StartDate, or its current term start if that's blank.
+// accountId → { any, customer }: latest synced Gmail message in the last IMPL_EMAIL_DAYS days that went to or
+// came from one of the firm's contacts (by email, or by the firm's own email domain for non-free-mail domains).
+function implLastEmails_(base, headers, accts, now) {
+  var byEmail = {}, byDomain = {}, ids = accts.map(function (a) { return String(a.Id); });
+  for (var i = 0; i < ids.length; i += 15) {
+    var f = '(' + ids.slice(i, i + 15).map(function (x) { return 'AccountId eq ' + x; }).join(' or ') + ')';
+    fetchAllCZ_(base + '/Contact?$top=' + CZ_PAGE_SIZE + '&$select=AccountId,Email&$filter=' + encodeURIComponent(f), headers).forEach(function (c) {
+      var e = String(c.Email || '').trim().toLowerCase();
+      if (!e || /@lawmatics\.com$/.test(e)) return;
+      byEmail[e] = String(c.AccountId);
+      if (!IMPL_FREE_MAIL.test(e)) {
+        var d = e.split('@')[1];
+        byDomain[d] = byDomain[d] && byDomain[d] !== String(c.AccountId) ? 'x' : String(c.AccountId);   // shared domain → ambiguous
+      }
+    });
+  }
+  var acctOf = function (e) {
+    e = String(e || '').trim().toLowerCase();
+    if (!e || /@lawmatics\.com$/.test(e)) return null;
+    if (byEmail[e]) return byEmail[e];
+    var d = byDomain[e.split('@')[1]];
+    return d && d !== 'x' ? d : null;
+  };
+  var since = new Date(now.getTime() - IMPL_EMAIL_DAYS * 864e5).toISOString().replace(/\.\d+Z$/, 'Z');
+  var msgs = fetchAllCZ_(base + '/Message?$top=' + CZ_PAGE_SIZE + '&$select=DeliveryDate,EmailFromAddress,ToRecipients&$filter=' +
+    encodeURIComponent("Type eq 'Gmail' and DeliveryDate gt " + since), headers);
+  var out = {};
+  msgs.forEach(function (m) {
+    var when = m.DeliveryDate, from = acctOf(m.EmailFromAddress), seen = {};
+    if (from) seen[from] = true;
+    (m.ToRecipients || []).forEach(function (r) { var a = acctOf(r.Email); if (a) seen[a] = true; });
+    Object.keys(seen).forEach(function (a) {
+      var o = out[a] = out[a] || {};
+      if (!o.any || when > o.any) o.any = when;
+      if (a === from && (!o.customer || when > o.customer)) o.customer = when;
+    });
+  });
+  return out;
+}
+
 function implStart_(a) {
   var v = a.StartDate || (a.Cf || {}).CurrentTermStart;
   if (!v) return null;

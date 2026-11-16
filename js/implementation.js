@@ -317,6 +317,7 @@ function implDrillSpec(col, label) {
     case 'OpenOnboardings':
       // Soonest next meeting first; firms with nothing scheduled go last, longest in onboarding first.
       return Object.assign(snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today · soonest next meeting first' + who, [...open]), { prep: true,
+        cols: open.length && 'LastEmail' in open[0] ? IMPL_FIRM_COLS.concat([['LastEmail', 'Last email']]) : IMPL_FIRM_COLS,
         rows: label === latest ? [...open].sort(implByNextMeeting) : undefined });
     case 'NeedsScheduling':
       return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today' + who, open.filter((f) => !f.NextMeeting));
@@ -358,6 +359,31 @@ function implDrillSpec(col, label) {
   }
 }
 
+// Stalled: 14+ days into onboarding, no meeting scheduled, and no email with the firm (either way) in
+// 14+ days. LastEmail comes from the daily sync (synced Gmail, 21-day look-back; blank = none in that time).
+// Same rule as the Monday digest's "Stalled onboardings".
+const IMPL_STALL_DAYS = 14;
+function implQuietDays(r) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(r.LastEmail || '');
+  if (!m) return null;
+  return Math.floor((Date.now() - new Date(+m[1], m[2] - 1, +m[3]).getTime()) / 864e5);
+}
+function implStalled(r) {
+  if (!('LastEmail' in r) || r.NextMeeting || (toNumber(r.DaysInOnboarding) || 0) < IMPL_STALL_DAYS) return false;
+  const q = implQuietDays(r);
+  return q == null || q >= IMPL_STALL_DAYS;
+}
+function implStalledTag(r) {
+  if (!implStalled(r)) return '';
+  const q = implQuietDays(r);
+  return ` <span class="ob-stalled-tag" title="No meeting scheduled and no email with the firm in ${q == null ? '21+' : q} days">🧊 Stalled</span>`;
+}
+function implLastEmailText(r) {
+  const q = implQuietDays(r);
+  if (q == null) return 'No email in 21+ days';
+  return q === 0 ? 'Emailed today' : `Last email ${q}d ago`;
+}
+
 function implMeetingTime(f) {
   const t = f.NextMeeting ? Date.parse(f.NextMeeting) : NaN;
   return Number.isNaN(t) ? Infinity : t;
@@ -385,6 +411,7 @@ function implDrillCell(key, row, median) {
   }
   if (key === 'Days' && median != null && toNumber(v) === median) return `${esc(v)} <span class="muted">· median</span>`;
   if (key === 'Comment') return v ? `<span class="drill-comment">${esc(v)}</span>` : '<span class="muted">–</span>';
+  if (key === 'LastEmail') { const q = implQuietDays(row); return q == null ? '<span class="muted">21+ days</span>' : `${esc(implFmtDate(v))}<br><small class="${q >= IMPL_STALL_DAYS ? 'neg' : 'muted'}">${q}d ago</small>`; }
   return esc(v || '–');
 }
 
@@ -403,6 +430,7 @@ function implBoardHtml(rows) {
     const d = toNumber(r.DaysInOnboarding);
     const meta = [
       r.NextMeeting ? `<span class="ob-card-next">📅 ${esc(r.NextMeeting)}</span>` : '<span class="ob-card-next none">No meeting scheduled</span>',
+      'LastEmail' in r ? `<span class="ob-card-mail${implStalled(r) ? ' late' : ''}">✉️ ${esc(implLastEmailText(r))}</span>` : '',
       d != null && !Number.isNaN(d) ? `<span class="ob-card-days${d >= 70 ? ' late' : ''}">${fmtNum(d)} days</span>` : '',
       !IMPL.rep && r.AccountManager ? `<span class="ob-card-am">${esc(r.AccountManager)}</span>` : '',
       r.Status && r.Status !== 'Open' ? `<span class="ob-card-status">${esc(r.Status)}</span>` : '',
@@ -412,7 +440,7 @@ function implBoardHtml(rows) {
       canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Complete</button>` : '',
       overridesUnlocked ? exclButton(r.FirmId, r.Name, 'IM') : '',
     ].filter(Boolean).join('');
-    return `<div class="ob-card${r._excl ? ' excl' : ''}"><div class="ob-card-name">${esc(r.Name || '–')}${r._excl ? exclTag() : ''}${implSignalMark(r)}</div>`
+    return `<div class="ob-card${r._excl ? ' excl' : ''}${implStalled(r) ? ' stalled' : ''}"><div class="ob-card-name">${esc(r.Name || '–')}${r._excl ? exclTag() : ''}${implSignalMark(r)}${implStalledTag(r)}</div>`
       + `<div class="ob-card-meta">${meta}</div>${btns ? `<div class="ob-card-btns">${btns}</div>` : ''}</div>`;
   };
   return `<div class="ob-board">${stages.map((st) => `<section class="ob-col" style="--ob-col:${color(st)}">`
@@ -430,20 +458,25 @@ function openImplDrill(col, label) {
   const count = spec.rows ? implCounted(spec.rows).length : 0;   // excluded firms are listed, not counted
   // Open onboardings: "Onboarding complete" on the far right, for the firm's IM or a manager.
   const doneCol = spec.prep && spec.rows && spec.rows.some(canCallPrep);
-  const listBody = spec.rows && spec.rows.length
+  const listFor = (rows) => (rows && rows.length
     ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}${doneCol ? '<th></th>' : ''}</tr></thead>`
-      + `<tbody>${spec.rows.map((r) => `<tr${exclRow(r._excl)}>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && r._excl ? exclTag() : ''}${k === 'Name' ? implSignalMark(r) : ''}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${doneCol ? `<td class="ob-done-cell">${canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Onboarding complete</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
-    : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
+      + `<tbody>${rows.map((r) => `<tr${exclRow(r._excl)}>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && r._excl ? exclTag() : ''}${k === 'Name' ? implSignalMark(r) + implStalledTag(r) : ''}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${doneCol ? `<td class="ob-done-cell">${canCallPrep(r) ? `<button type="button" class="ob-done-btn" data-done-firm="${esc(r.FirmId)}">✓ Onboarding complete</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>`
+    : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`);
   // Open onboardings can also show as a board: one column per stage, soonest next meeting first.
   const boardable = col === 'OpenOnboardings' && spec.rows && spec.rows.length;
   let view = boardable ? ((() => { try { return localStorage.getItem('cs-ob-view'); } catch (e) { return null; } })() === 'board' ? 'board' : 'list') : 'list';
-  const bodyFor = (v) => (v === 'board' ? implBoardHtml(spec.rows) : listBody);
+  // Stalled filter (open onboardings): no meeting scheduled and no email with the firm in 14+ days.
+  const stalledN = boardable ? spec.rows.filter(implStalled).length : 0;
+  let onlyStalled = false;
+  const shown = () => (onlyStalled ? spec.rows.filter(implStalled) : spec.rows);
+  const bodyFor = (v) => (onlyStalled && !shown().length ? '<div class="empty-note">No stalled onboardings. 🎉</div>'
+    : v === 'board' ? implBoardHtml(shown()) : listFor(shown()));
   const body = bodyFor(view);
   back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}${view === 'board' ? ' drill-board' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
         <div><h3 id="impl-drill-title">${esc(spec.title)}${spec.rows ? ` <span class="drill-count">${fmtNum(count)}</span>` : ''}</h3>
           ${spec.note ? `<div class="drill-note">${esc(spec.note)}${doneCol && LOCAL_ENV ? ' <button type="button" class="ob-preview" data-ob-preview>🎉 Preview the celebration</button>' : ''}</div>` : ''}</div>
-        <div class="drill-head-actions">${boardable ? `<div class="ob-view-switch" role="tablist" aria-label="View">
+        <div class="drill-head-actions">${boardable && stalledN ? `<button type="button" class="ob-stalled-btn" data-ob-stalled aria-pressed="false" title="No meeting scheduled and no email with the firm in 14+ days">🧊 Stalled <b>${stalledN}</b></button>` : ''}${boardable ? `<div class="ob-view-switch" role="tablist" aria-label="View">
             <button type="button" role="tab" class="ob-view-btn" data-ob-view="list" aria-selected="${view === 'list'}">☰ List</button>
             <button type="button" role="tab" class="ob-view-btn" data-ob-view="board" aria-selected="${view === 'board'}">▦ Board</button></div>` : ''}
           <button type="button" class="drill-close" aria-label="Close">×</button></div>
@@ -458,6 +491,13 @@ function openImplDrill(col, label) {
       try { localStorage.setItem('cs-ob-view', view); } catch (err) { /* private mode */ }
       back.querySelector('.drill').classList.toggle('drill-board', view === 'board');
       back.querySelectorAll('[data-ob-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.obView === view)));
+      back.querySelector('.drill-body').innerHTML = bodyFor(view);
+      return;
+    }
+    const sb = e.target.closest('[data-ob-stalled]');
+    if (sb) {
+      onlyStalled = !onlyStalled;
+      sb.setAttribute('aria-pressed', String(onlyStalled));
       back.querySelector('.drill-body').innerHTML = bodyFor(view);
       return;
     }
