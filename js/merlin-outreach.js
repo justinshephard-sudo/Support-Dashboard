@@ -44,6 +44,33 @@ async function moSend(to, subject, text) {
   return res.json();
 }
 
+// When each firm last got this email from the dashboard ("Merlin Outreach" tab, written on Send).
+const MO_LOG = { map: null, loading: null, rep: null };
+function moLoadLog() {
+  if (MO_LOG.loading) return MO_LOG.loading;
+  MO_LOG.loading = fetchSheetByTitle('Merlin Outreach').then((rows) => {
+    const m = {};
+    rows.slice(1).forEach((r) => { const id = String(r[1] || '').trim(); if (id && (!m[id] || String(r[0]) > m[id].at)) m[id] = { at: String(r[0]), by: String(r[3] || '') }; });
+    MO_LOG.map = m;
+  }).catch(() => { MO_LOG.map = {}; }).finally(() => { MO_LOG.loading = null; });
+  return MO_LOG.loading;
+}
+function moLastCell(firmId) {
+  if (!MO_LOG.map) return '<span class="muted">…</span>';
+  const x = MO_LOG.map[String(firmId)];
+  if (!x) return '<span class="muted">Never</span>';
+  const d = new Date(x.at.length === 19 ? x.at : x.at.replace(' ', 'T'));
+  const days = Math.floor((Date.now() - d) / 864e5);
+  const who = x.by.split('@')[0].split(/[._]/)[0];
+  return `<span title="${esc(x.by)}">${esc(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}</span><small class="muted"> · ${days <= 0 ? 'today' : days + 'd ago'}${who ? ' · ' + esc(who.charAt(0).toUpperCase() + who.slice(1)) : ''}</small>`;
+}
+// The AI health pop-up calls this: loads the log the first time, then redraws itself.
+function moEnsureLog(rep, redraw) {
+  MO_LOG.rep = rep;
+  if (MO_LOG.map || MO_LOG.loading) return;
+  moLoadLog().then(() => { if (document.getElementById('mrrDrill') && MO_LOG.rep === rep) redraw(); });
+}
+
 function moClose() { document.getElementById('merlinmail')?.remove(); document.removeEventListener('keydown', moKey); }
 function moKey(e) { if (e.key === 'Escape') moClose(); }
 
@@ -145,6 +172,12 @@ async function openMerlinEmail(f) {
     try {
       await moSend(to.join(', '), subject, text);
       sendBtn.textContent = '✓ Sent';
+      // Record it for the "Last Merlin email" column (best effort; the email already went).
+      MO_LOG.map = MO_LOG.map || {};
+      MO_LOG.map[String(f[8])] = { at: new Date().toLocaleString('sv-SE', { timeZone: 'America/Los_Angeles' }).replace(' ', 'T'), by: AUTH.email || '' };
+      fetch(CALL_PREP_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ token: AUTH.token, action: 'logMerlinOutreach', firmId: f[8], firm: f[0], to: to.join(', ') }) }).catch(() => {});
+      if (document.getElementById('mrrDrill') && MO_LOG.rep !== null) csmAiHealthDrill(MO_LOG.rep);
       msg.textContent = `Sent from ${AUTH.email} to ${to.join(', ')}.`;
       body.querySelectorAll('input, textarea, #moGmail').forEach((x) => { x.disabled = true; });
     } catch (e) {

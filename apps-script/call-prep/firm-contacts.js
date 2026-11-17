@@ -27,3 +27,18 @@ function firmContacts_(b, who) {
     .slice(0, 25);
   return { ok: true, firm: a.Name, rep: repName, contacts: contacts };
 }
+
+/* logMerlinOutreach → { firmId, firm, to } — records a Merlin check-in email sent from the dashboard
+   (CSM tab → Merlin AI health → Email → Send) on the "Merlin Outreach" tab of the CS Dashboard Data
+   sheet, which the page reads for the "Last Merlin email" column. Anyone signed in (it only logs). */
+var MERLIN_OUTREACH_TAB = 'Merlin Outreach';
+function logMerlinOutreach_(b, who) {
+  var firmId = String(b.firmId || '').replace(/[^\d]/g, '');
+  if (!firmId) throw new Error('missing Firm ID');
+  var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+  var sh = ss.getSheetByName(MERLIN_OUTREACH_TAB);
+  if (!sh) { sh = ss.insertSheet(MERLIN_OUTREACH_TAB); sh.appendRow(['Sent At', 'Firm ID', 'Firm', 'Sent By', 'To']); sh.setFrozenRows(1); }
+  var at = Utilities.formatDate(new Date(), 'America/Los_Angeles', "yyyy-MM-dd'T'HH:mm:ss");
+  sh.appendRow([at, firmId, String(b.firm || '').slice(0, 200), who.email, String(b.to || '').slice(0, 500)]);
+  return { ok: true, at: at, by: who.email };
+}

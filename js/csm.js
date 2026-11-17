@@ -378,6 +378,7 @@ function csmRenewDrill(rep) {
 }
 
 function csmAiHealthDrill(rep) {
+  moEnsureLog(rep, () => csmAiHealthDrill(rep));
   const d = CSM.data.ai || {};
   const h = csmAiHealth(rep);
   const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', 'No allowance']];
@@ -391,8 +392,8 @@ function csmAiHealthDrill(rep) {
   mrrModal(`${rep} — Merlin AI health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} with no allowance found` : ''}${asOf ? ` · ${asOf}` : ''}`,
     `<div class="mrr-method"><p><b>Usage</b> = AI credits used in the last 30 days ÷ the credits the firm pays for each month (the AI credits add-on’s quantity in Chargebee; a yearly add-on’s quantity is divided by 12). Over 100% means they’re into overage.
       Good is ${d.good}%+, okay ${d.bad}–${d.good}%, bad under ${d.bad}%. “No allowance” means Chargebee shows no live AI credits add-on for the firm (it may have just been removed). Firms still onboarding (ChurnZero Onboarding Status Pre-Kickoff or Open) aren’t included.</p></div>
-    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Health</th><th>Usage</th><th>Credits used (30 days)</th><th>Monthly credits</th><th>New leads</th><th>Leads scored</th><th>Add-on MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map(({ f, k, l, x }) => `<tr${exclRow(x)}><td>${esc(f[0])}${x ? exclTag() : ''}${!x && canMerlinEmail(f) ? ` <button type="button" class="cp-btn" data-merlin-email="${esc(f[8])}">✉️ Email</button>` : ''}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${n(f[6])}</td><td>${f[9] ? n(f[9]) : '—'}</td><td>${n(f[3])}</td><td>${n(f[4])}</td><td>${mrrMoney(f[7])}</td>${overridesUnlocked ? `<td>${exclButton(f[8], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
+    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Health</th><th>Usage</th><th>Credits used (30 days)</th><th>Monthly credits</th><th>New leads</th><th>Leads scored</th><th>Add-on MRR</th><th>Last Merlin email</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${rows.map(({ f, k, l, x }) => `<tr${exclRow(x)}><td>${esc(f[0])}${x ? exclTag() : ''}${!x && canMerlinEmail(f) ? ` <button type="button" class="cp-btn" data-merlin-email="${esc(f[8])}">✉️ Email</button>` : ''}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${n(f[6])}</td><td>${f[9] ? n(f[9]) : '—'}</td><td>${n(f[3])}</td><td>${n(f[4])}</td><td>${mrrMoney(f[7])}</td><td class="nowrap">${moLastCell(f[8])}</td>${overridesUnlocked ? `<td>${exclButton(f[8], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>`);
 }
 
