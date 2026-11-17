@@ -347,7 +347,28 @@ function csmHealthDrill(rep) {
     </tbody></table></div>`);
 }
 
+// Next scheduled call (ChurnZero meetings) for the First 90 days firms, loaded the first time the list opens.
+const CSM_NEXT = { map: null, loading: null, rep: null };
+function csmNextCalls(redraw, rep) {
+  CSM_NEXT.rep = rep;
+  if (CSM_NEXT.map || CSM_NEXT.loading) return;
+  const ids = csmFresh(null).firms.map((f) => f.a[4]).filter(Boolean);
+  CSM_NEXT.loading = fetch(CALL_PREP_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ token: AUTH.token, action: 'nextMeetings', firmIds: ids }) })
+    .then((r) => r.json()).then((d) => { CSM_NEXT.map = d.ok ? d.meetings || {} : {}; CSM_NEXT.error = d.ok ? '' : d.error || 'failed'; })
+    .catch((e) => { CSM_NEXT.map = {}; CSM_NEXT.error = e.message; })
+    .finally(() => { CSM_NEXT.loading = null; if (document.getElementById('mrrDrill') && CSM_NEXT.rep === rep) redraw(); });
+}
+function csmNextCell(firmId) {
+  if (!CSM_NEXT.map) return '<span class="muted">…</span>';
+  const m = CSM_NEXT.map[String(firmId)];
+  if (!m) return `<span class="${CSM_NEXT.error ? 'muted' : 'neg'}" title="${esc(CSM_NEXT.error || 'No upcoming meeting in ChurnZero')}">${CSM_NEXT.error ? '—' : 'None scheduled'}</span>`;
+  const d = new Date(m.date), days = Math.ceil((d - Date.now()) / 864e5);
+  return `<span title="${esc(m.subject)}">${esc(d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }))}</span><small class="muted"> · ${days <= 0 ? 'today' : days === 1 ? 'tomorrow' : 'in ' + days + 'd'}</small>`;
+}
+
 function csmFreshDrill(rep) {
+  csmNextCalls(() => csmFreshDrill(rep), rep);
   const r = csmFresh(rep || null);
   const xf = csmExcluded(() => csmFresh(rep || null));
   const listed = r.firms.concat(xf ? xf.firms.map((e) => Object.assign({ x: true }, e)) : []);
@@ -357,8 +378,8 @@ function csmFreshDrill(rep) {
   const grade = (a) => (a[2] == null ? ['none', 'Unscored'] : a[2] < CSM_HEALTH.good ? ['good', 'Good'] : a[2] < CSM_HEALTH.bad ? ['okay', 'Okay'] : ['bad', 'Bad']);
   MRR.drill = null;
   mrrModal(`${rep} — first 90 days`, `${mrrPlural(r.firms.length, 'account')} finished onboarding in the last ${CSM_FRESH_DAYS} days · ${r.bands[0]} in days 1–30 · ${r.bands[1]} in 31–60 · ${r.bands[2]} in 61–90 · newest first`,
-    listed.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th>${team ? '<th>Rep</th>' : ''}<th>Onboarding completed</th><th>Day</th><th>Days left</th><th>Health</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${listed.map(({ a, age, x }) => { const [k, l] = grade(a); return `<tr${exclRow(x)}><td>${esc(a[0])}${x ? exclTag() : ''}</td>${team ? `<td>${esc(a[1])}</td>` : ''}<td>${esc(fmt(a[5]))}</td><td>${age + 1} of ${CSM_FRESH_DAYS}</td><td>${CSM_FRESH_DAYS - age - 1}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
+    listed.length ? `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Account</th>${team ? '<th>Rep</th>' : ''}<th>Onboarding completed</th><th>Day</th><th>Days left</th><th>Next call</th><th>Health</th><th>MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${listed.map(({ a, age, x }) => { const [k, l] = grade(a); return `<tr${exclRow(x)}><td>${esc(a[0])}${x ? exclTag() : ''}</td>${team ? `<td>${esc(a[1])}</td>` : ''}<td>${esc(fmt(a[5]))}</td><td>${age + 1} of ${CSM_FRESH_DAYS}</td><td>${CSM_FRESH_DAYS - age - 1}</td><td class="nowrap">${csmNextCell(a[4])}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${mrrMoney(a[3])}</td>${overridesUnlocked ? `<td>${exclButton(a[4], a[0], 'CSM')}</td>` : ''}</tr>`; }).join('')}
     </tbody></table></div>` : '<div class="empty-note">No active accounts finished onboarding in the last 90 days.</div>');
 }
 

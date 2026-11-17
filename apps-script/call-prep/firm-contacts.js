@@ -42,3 +42,31 @@ function logMerlinOutreach_(b, who) {
   sh.appendRow([at, firmId, String(b.firm || '').slice(0, 200), who.email, String(b.to || '').slice(0, 500)]);
   return { ok: true, at: at, by: who.email };
 }
+
+/* nextMeetings → { firmIds } — each firm's next scheduled meeting in ChurnZero (Meeting entity,
+   synced from the reps' calendars), for the CSM tab's "First 90 days" list. Anyone signed in.
+   Returns { meetings: { firmId: { date, subject } } }. Cached for 30 minutes per set of firms. */
+function nextMeetings_(b) {
+  var ids = (b.firmIds || []).map(function (x) { return String(x).replace(/[^\d]/g, ''); }).filter(Boolean)
+    .filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 300).sort();
+  if (!ids.length) return { ok: true, meetings: {} };
+  var cache = CacheService.getScriptCache();
+  var key = 'nm_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, ids.join(','))).slice(0, 22);
+  var hit = !b.force && cache.get(key);
+  if (hit) return JSON.parse(hit);
+  var firmOf = {};   // ChurnZero account Id → Firm ID
+  for (var i = 0; i < ids.length; i += 15) {
+    var f = ids.slice(i, i + 15).map(function (id) { return "Cf/FirmId eq '" + id + "'"; }).join(' or ');
+    czGet_('/Account', { $filter: f, $select: 'Id,Cf/FirmId' }).forEach(function (a) { firmOf[String(a.Id)] = String((a.Cf || {}).FirmId || ''); });
+  }
+  var nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  var out = {};
+  czGet_('/Meeting', { $filter: 'StartDate ge ' + nowIso, $select: 'AccountId,StartDate,Subject' }).forEach(function (m) {
+    var fid = firmOf[String(m.AccountId)];
+    if (!fid) return;
+    if (!out[fid] || m.StartDate < out[fid].date) out[fid] = { date: m.StartDate, subject: String(m.Subject || '').slice(0, 120) };
+  });
+  var res = { ok: true, meetings: out, at: new Date().toISOString() };
+  try { cache.put(key, JSON.stringify(res), 1800); } catch (e) { /* too big */ }
+  return res;
+}

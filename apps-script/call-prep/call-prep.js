@@ -73,6 +73,7 @@ function doPost(e) {
     if (b.action === 'renewalPrep') return dashJson_(renewalPrep_(b, who));   // renewal-prep.js
     if (b.action === 'firmContacts') return dashJson_(firmContacts_(b, who));   // firm-contacts.js
     if (b.action === 'logMerlinOutreach') return dashJson_(logMerlinOutreach_(b, who));   // firm-contacts.js
+    if (b.action === 'nextMeetings') return dashJson_(nextMeetings_(b));   // firm-contacts.js
     if (b.action === 'complete') return dashJson_(complete_(b, who));
     if (b.action === 'calendarMatch') return dashJson_(calendarMatch_(b));
     if (b.action === 'partners') return dashJson_(partners_(b, who));
