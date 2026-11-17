@@ -677,14 +677,15 @@ function readAiHealth_(skip) {
   rows_(use).forEach(function (r) {
     var u = { leads: num_(r['leads_30d#']), scored: num_(r['leads_scored_30d#']), engaged: num_(r['leads_engaged_30d#']), credits: num_(r['ai_credits_30d#']) };
     var cid = String(r['billing_customer_id#'] || '').trim();
-    if (cid) byCustomer[cid] = u;
+    // One Chargebee customer can own several firms (e.g. an old and a new firm): add them up.
+    if (cid) { var c = byCustomer[cid] || (byCustomer[cid] = { leads: 0, scored: 0, engaged: 0, credits: 0 }); c.leads += u.leads; c.scored += u.scored; c.engaged += u.engaged; c.credits += u.credits; }
     byFirm[firmId_(r['firm_id#'])] = u;
     if (r['pulled_at#'] && String(r['pulled_at#']) > asOf) asOf = String(r['pulled_at#']);
   });
   var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the usage tab = no AI use
   var firms = rows_(list).filter(function (r) { return !dropFirm_(skip, firmId_(r['Firm ID#'])); }).map(function (r) {
     var cid = String(r['Customer ID#']).trim();
-    var u = byCustomer[cid] || byFirm[firmId_(r['Firm ID#'])] || none;
+    var u = byFirm[firmId_(r['Firm ID#'])] || byCustomer[cid] || none;   // the firm's own row first
     var q = quota.byCustomer[cid] || 0;
     var pct = q > 0 ? Math.round(u.credits / q * 100) : null;
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), pct, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#']), Math.round(q)];
