@@ -1490,3 +1490,30 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .bug-firm-hits button:hover{border-color:var(--lm-blue)}
 .bug-firm-hits button:disabled{opacity:.5;cursor:not-allowed}
 .pf-prod-list .bug-fix-btn{margin-top:6px;font-size:12.5px;padding:4px 10px}
+/* Renewal prep (js/renewal-prep.js) — builds on the Call prep pop-up styles */
+.rp-risk{display:inline-block;vertical-align:middle;margin-left:8px;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:3px 10px}
+.rp-risk.rp-low{background:color-mix(in srgb,var(--st-good,#1a7f43) 18%,transparent);color:var(--st-good,#1a7f43)}
+.rp-risk.rp-medium{background:color-mix(in srgb,var(--st-warn) 20%,transparent);color:var(--st-warn)}
+.rp-risk.rp-high{background:color-mix(in srgb,var(--st-critical) 18%,transparent);color:var(--st-critical)}
+.rp-why{margin:4px 0 0;font-size:13.5px;opacity:.85}
+.rp-flags{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0;font-size:13px;font-weight:700}
+.rp-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;margin:14px 0}
+.rp-mrr,.rp-stats .rp-stat{background:var(--surface-2);border-radius:14px;padding:12px 14px}
+.rp-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.rp-stat span{display:block;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3)}
+.rp-stat b{display:block;font-size:20px;color:var(--text-1);font-variant-numeric:tabular-nums;margin-top:2px}
+.rp-stat small{display:block;font-size:12px;color:var(--text-2);margin-top:2px}
+.rp-stat em{font-style:normal;font-weight:700}
+.rp-trend{display:flex;align-items:flex-end;gap:3px;height:56px;margin-top:10px}
+.rp-trend span{flex:1;background:color-mix(in srgb,var(--lm-blue) 35%,transparent);border-radius:3px 3px 0 0;min-height:4px}
+.rp-trend span.is-now{background:var(--lm-blue)}
+.rp-trend-axis{display:flex;justify-content:space-between;color:var(--text-3)}
+.rp-obj{margin-top:12px}
+.rp-obj dl{margin:0;display:grid;gap:8px}
+.rp-obj dt{font-weight:700;color:var(--text-1);font-size:13.5px}
+.rp-obj dd{margin:2px 0 0;font-size:13.5px;color:var(--text-2)}
+.rp-more{margin-top:12px}
+.rp-more h5{margin:10px 0 4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-3)}
+.rp-more ul{margin:0;padding-left:18px;font-size:13px}
+.rp-more small{color:var(--text-3)}
+@media (max-width:760px){.rp-facts{grid-template-columns:1fr}.rp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
