@@ -71,7 +71,7 @@ I’m ${me.split(' ')[0]}, your Customer Success Manager at Lawmatics. I was loo
 
 I want to make sure you’re getting real value from it. Is anything getting in the way, or are there questions I can answer? Often a quick 20-minute call is all it takes to get lead scoring and follow-ups working the way you want.
 
-Would you have time for a short call this week or next? Just reply with a couple of times that work for you.
+Would you have time for a short call this week or next?
 
 Thanks,
 ${me}
