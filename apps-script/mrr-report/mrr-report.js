@@ -516,6 +516,7 @@ var AI_HEALTH = { bad: 25, good: 75 };   // % of the monthly credit allowance us
 var CB_SITE = 'lawmatics';
 var AI_QUOTA_CACHE = 'ai_quota2';
 var AI_QUOTA_EVERY_MS = 6 * 3600 * 1000;
+var AI_ONBOARDING_STATUSES = ['Pre-Kickoff', 'Open'];
 var AI_PULL_EVERY_MS = 6 * 3600 * 1000;  // 30-day usage barely moves hour to hour
 
 // warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
@@ -683,14 +684,26 @@ function readAiHealth_(skip) {
     if (r['pulled_at#'] && String(r['pulled_at#']) > asOf) asOf = String(r['pulled_at#']);
   });
   var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the usage tab = no AI use
-  var firms = rows_(list).filter(function (r) { return !dropFirm_(skip, firmId_(r['Firm ID#'])); }).map(function (r) {
+  // Firms still onboarding aren't graded yet — same rule as the Implementation tab's open onboardings
+  // (ChurnZero OnboardingStatus "Pre-Kickoff" or "Open", from the daily Accounts sync).
+  var onboarding = {};
+  var acc = SpreadsheetApp.openById(ACCOUNTS_SHEET_ID).getSheetByName(ACCOUNTS_TAB);
+  if (acc) rows_(acc).forEach(function (r) {
+    if (AI_ONBOARDING_STATUSES.indexOf(String(r['OnboardingStatus#']).trim()) !== -1) onboarding[firmId_(r['FirmId#'])] = true;
+  });
+  var inOnboarding = 0;
+  var firms = rows_(list).filter(function (r) {
+    var id = firmId_(r['Firm ID#']);
+    if (id && onboarding[id]) { inOnboarding++; return false; }
+    return !dropFirm_(skip, id);
+  }).map(function (r) {
     var cid = String(r['Customer ID#']).trim();
     var u = byFirm[firmId_(r['Firm ID#'])] || byCustomer[cid] || none;   // the firm's own row first
     var q = quota.byCustomer[cid] || 0;
     var pct = q > 0 ? Math.round(u.credits / q * 100) : null;
     return [String(r['Company#']).trim(), name_(r['Account Manager#']), pct, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#']), Math.round(q)];
   });
-  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, asOf: asOf, quotaAt: quota.at, firms: firms };
+  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, asOf: asOf, quotaAt: quota.at, onboarding: inOnboarding, firms: firms };
 }
 
 function cbGet_(path, params) {
@@ -742,7 +755,7 @@ function checkAiHealth() {
   if (h.error) { console.log(h.error); return; }
   var g = { good: 0, okay: 0, bad: 0, none: 0 };
   h.firms.forEach(function (f) { g[f[2] == null ? 'none' : f[2] >= h.good ? 'good' : f[2] >= h.bad ? 'okay' : 'bad']++; });
-  console.log(JSON.stringify(g) + ' · usage as of ' + h.asOf);
+  console.log(JSON.stringify(g) + ' · ' + h.onboarding + ' still onboarding (left out) · usage as of ' + h.asOf);
   h.firms.slice(0, 8).forEach(function (f) { console.log(f[0] + ': ' + f[6] + ' of ' + f[9] + ' credits = ' + f[2] + '%'); });
   writeCache_(CacheService.getScriptCache(), buildCsm_(), CSM_CACHE);   // the CSM tab shows it right away
 }
