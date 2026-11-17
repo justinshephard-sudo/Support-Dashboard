@@ -1,8 +1,10 @@
 /* ==========================================================================
-   Open Bugs (Resources tab) — open bugs in Shortcut's Customer Success workflow,
-   read-only. Filter by state, severity and team, search, or show only the ones
-   you reported; click one for its description and latest comments. Reads go
-   through apps-script/loop-tracker (bugs.js), which holds the Shortcut token.
+   Open Bugs (Resources tab) — open bugs in Shortcut's Customer Success workflow.
+   Filter by state, severity and team, search, or show only the ones you reported;
+   click one for its description and latest comments, to +1 it for another firm
+   (comment with that Firm ID), or — when it's Ready for Review — to mark the fix
+   confirmed. Everything goes through apps-script/loop-tracker (bugs.js), which
+   holds the Shortcut token.
    ========================================================================== */
 const BUG_SC_URL = 'https://app.shortcut.com/lawmatics-new/stories';
 const BUG_STORE = 'cs-bug-cache';
@@ -186,11 +188,31 @@ async function bugOpenPanel(id) {
           ${it.lab.map((l) => `<span class="loop-tag">${esc(l)}</span>`).join('')}</p>
         <div class="loop-facts"><span>Reported by ${esc(d.people[it.req] || '—')}</span><span>Opened ${esc(it.c)}</span><span>Last moved ${esc(it.m)}</span>
           ${it.own.length ? `<span>Owner: ${esc(it.own.map((o) => d.people[o] || '?').join(', '))}</span>` : ''}</div>
+        ${bugActionsHtml(it)}
         <div class="bug-desc"><p class="loop-muted">Loading the details…</p></div>
       </div>
     </div>`;
   document.body.appendChild(wrap);
-  wrap.addEventListener('click', (e) => { if (e.target === wrap || e.target.closest('.drill-close')) wrap.remove(); });
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap || e.target.closest('.drill-close')) { wrap.remove(); return; }
+    const pick = e.target.closest('[data-bug-firm]');
+    if (pick) {
+      const f = wrap.querySelector('#bugFirmQ');
+      f.value = pick.dataset.name; f.dataset.firmId = pick.dataset.bugFirm;
+      wrap.querySelector('.bug-firm-hits').innerHTML = '';
+      return;
+    }
+    if (e.target.closest('#bugPlusBtn')) { bugPlusOne(it, wrap); return; }
+    if (e.target.closest('#bugFixBtn')) bugFixConfirmed(it, wrap);
+  });
+  wrap.addEventListener('input', (e) => {
+    if (e.target.id !== 'bugFirmQ') return;
+    e.target.dataset.firmId = '';
+    const q = e.target.value.trim();
+    const hits = q.length < 2 || typeof FIRMS === 'undefined' ? [] : FIRMS.list.map((f) => [firmSearchScore(q, f), f]).filter(([sc]) => sc > 0)
+      .sort((a, b) => b[0] - a[0]).slice(0, 6).map(([, f]) => f);
+    wrap.querySelector('.bug-firm-hits').innerHTML = hits.map((f) => `<button type="button" data-bug-firm="${esc(f.firmId || '')}" data-name="${esc(f.name)}"${f.firmId ? '' : ' disabled title="No Firm ID"'}>${esc(f.name)}${f.firmId ? ` <span class="muted">· ${esc(f.firmId)}</span>` : ' <span class="muted">· no Firm ID</span>'}</button>`).join('');
+  });
   try {
     const res = await loopCall({ action: 'bugStory', id: it.id });
     const box = wrap.querySelector('.bug-desc');
@@ -200,6 +222,51 @@ async function bugOpenPanel(id) {
   } catch (e) {
     const box = wrap.querySelector('.bug-desc');
     if (box) box.innerHTML = `<p class="loop-muted">Couldn’t load the details: ${esc(e.message)}</p>`;
+  }
+}
+
+/* ---- +1 for a firm / fix confirmed (writes to Shortcut as the signed-in person when they're a member) ---- */
+const bugReadyForReview = (it) => /ready\s*for\s*review/i.test(bugStateName(it.st));
+function bugActionsHtml(it) {
+  return `<div class="bug-actions">
+      ${bugReadyForReview(it) ? `<div class="bug-act bug-fix"><div><b>Ready for review.</b> Checked it with the customer and it’s working?</div>
+        <textarea id="bugFixNote" rows="2" maxlength="1500" placeholder="Optional note (what you checked, which firm…)"></textarea>
+        <button type="button" class="mgr-btn bug-fix-btn" id="bugFixBtn">✅ Fix confirmed</button><span class="bug-act-msg" id="bugFixMsg"></span></div>` : ''}
+      <div class="bug-act"><div><b>Another firm seeing this?</b> Add a +1 with their Firm ID (it shows on that firm in Firm Lookup).</div>
+        <div class="bug-firm-pick"><input id="bugFirmQ" type="search" placeholder="Search a firm by name or Firm ID" autocomplete="off"><div class="bug-firm-hits"></div></div>
+        <textarea id="bugPlusNote" rows="2" maxlength="1500" placeholder="Optional note (what they're seeing, steps, conversation link…)"></textarea>
+        <button type="button" class="mgr-btn" id="bugPlusBtn">+1 for this firm</button><span class="bug-act-msg" id="bugPlusMsg"></span></div>
+    </div>`;
+}
+async function bugPlusOne(it, wrap) {
+  const q = wrap.querySelector('#bugFirmQ'), msg = wrap.querySelector('#bugPlusMsg'), btn = wrap.querySelector('#bugPlusBtn');
+  const firmId = q.dataset.firmId || (/^\d+$/.test(q.value.trim()) ? q.value.trim() : '');
+  if (!firmId) { msg.textContent = 'Pick a firm from the list first.'; return; }
+  const name = q.dataset.firmId ? q.value.trim() : ((typeof FIRMS !== 'undefined' && FIRMS.list.find((f) => f.firmId === firmId)) || {}).name || '';
+  btn.disabled = true; msg.textContent = 'Adding…';
+  try {
+    const r = await loopCall({ action: 'bugPlusOne', id: it.id, firmId, firmName: name, note: wrap.querySelector('#bugPlusNote').value });
+    msg.textContent = r.already ? `Already +1’d for ${name || 'Firm ' + firmId}.` : `✓ +1 added for ${name || 'Firm ' + firmId}.`;
+    if (!r.already) { it.nc = (it.nc || 0) + 1; q.value = ''; q.dataset.firmId = ''; wrap.querySelector('#bugPlusNote').value = ''; }
+  } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
+    msg.textContent = 'Couldn’t add it: ' + e.message;
+  }
+  btn.disabled = false;
+}
+async function bugFixConfirmed(it, wrap) {
+  const msg = wrap.querySelector('#bugFixMsg'), btn = wrap.querySelector('#bugFixBtn');
+  if (!confirm(`Mark #${it.id} as Fix Confirmed in Shortcut?`)) return;
+  btn.disabled = true; msg.textContent = 'Updating Shortcut…';
+  try {
+    const r = await loopCall({ action: 'bugFixConfirmed', id: it.id, note: wrap.querySelector('#bugFixNote').value });
+    msg.textContent = `✓ Moved to ${r.state}. Thanks!`;
+    BUG.data.items = BUG.data.items.filter((x) => x.id !== it.id);   // no longer open
+    renderBugs();
+  } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
+    msg.textContent = 'Couldn’t update it: ' + e.message;
+    btn.disabled = false;
   }
 }
 

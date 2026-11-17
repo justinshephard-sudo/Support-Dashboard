@@ -288,7 +288,7 @@ function doPost(e) {
       if (fr) return json_(fr);
     }
     if (/^bug/.test(b.action)) {
-      // Open Bugs (bugs.js): read-only Shortcut view for everyone signed in.
+      // Open Bugs (bugs.js): everyone signed in can read, +1 a bug for a firm, and confirm fixes.
       var bug = bugDoPost_(b, who);
       if (bug) return json_(bug);
     }

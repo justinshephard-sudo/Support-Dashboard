@@ -1473,3 +1473,19 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .pf-prod-meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--text-3);margin-top:3px}
 .pf-sev{font-weight:700}.pf-sev.s1,.pf-sev.s2{color:var(--slot-5)}
 .pf-prod-err{font-size:12.5px;margin-top:6px}
+
+/* open bugs: +1 for a firm, fix confirmed */
+.bug-actions{display:grid;gap:12px;margin:14px 0 6px}
+.bug-act{border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--surface-2);display:grid;gap:8px;font-size:14px}
+.bug-act textarea,.bug-act input{width:100%;font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-1);color:var(--text-1);box-sizing:border-box}
+.bug-act .mgr-btn{justify-self:start}
+.bug-fix{border-color:#9fd8b4;background:#effaf3}
+:root[data-theme="dark"] .bug-fix{background:#173324;border-color:#2c6b47}
+.bug-fix-btn{font-weight:700;color:#1a7f43}
+.bug-act-msg{font-size:13px;color:var(--text-2)}
+.bug-firm-pick{position:relative}
+.bug-firm-hits{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.bug-firm-hits button{text-align:left;font:inherit;font-size:13.5px;background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--text-1)}
+.bug-firm-hits button:hover{border-color:var(--lm-blue)}
+.bug-firm-hits button:disabled{opacity:.5;cursor:not-allowed}
+.pf-prod-list .bug-fix-btn{margin-top:6px;font-size:12.5px;padding:4px 10px}

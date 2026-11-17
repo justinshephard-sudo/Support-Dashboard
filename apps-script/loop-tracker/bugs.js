@@ -12,6 +12,11 @@
    Actions (POST via loop-tracker.js doPost):
      bugLoad   → every open bug (slim) + state, team and people names
      bugStory  → one bug's description and latest comments, for the side panel
+     bugFirm   → open bugs that give one Firm ID (Firm Lookup)
+     bugPlusOne     → anyone signed in: comment "+1 — Firm ID N (name) is also seeing this" + their note
+     bugFixConfirmed → anyone signed in, bug in "Ready for Review": moves it to "Fix Confirmed" + a comment
+   Writes post as the signed-in person when they're a Shortcut member (author_id, matched by email);
+   otherwise as the token's owner, with "from <email>" in the text.
    ========================================================================== */
 
 var SC_API = 'https://api.app.shortcut.com/api/v3';
@@ -176,6 +181,49 @@ function bugFirm_(b) {
   return out;
 }
 
+/* ---------- writes: +1 for a firm, fix confirmed ---------- */
+function bugAuthor_(who) {
+  var meta = bugMeta_(false), id = meta.emails[String(who.email || '').toLowerCase()] || null;
+  return { id: id, label: id ? '' : ' (from ' + who.email + ')' };
+}
+function bugComment_(storyId, text, author) {
+  var body = { text: text };
+  if (author.id) body.author_id = author.id;
+  return sc_('post', '/stories/' + storyId + '/comments', body);
+}
+function bugDropCaches_(firmId) {
+  var c = CacheService.getScriptCache();
+  if (firmId) c.remove('bugfirm2_' + firmId);
+  var d = chunkGet_('bug_');
+  if (d) { d.fetched = 0; chunkPut_('bug_', d, 6 * 3600); }   // next list load refetches
+}
+function bugPlusOne_(b, who) {
+  var id = Number(b.id), firmId = String(b.firmId || '').replace(/\D/g, ''), firm = String(b.firmName || '').trim().slice(0, 120);
+  var note = String(b.note || '').trim().slice(0, 1500);
+  if (!id) throw new Error('missing bug');
+  if (!firmId) throw new Error('Pick the firm (it needs a Firm ID).');
+  var st = sc_('get', '/stories/' + id);
+  var text = [st.name, st.description].concat((st.comments || []).filter(function (c) { return !c.deleted; }).map(function (c) { return c.text; })).join('\n');
+  if (bugMentionsFirm_(text, firmId)) return { ok: true, already: true };
+  var author = bugAuthor_(who);
+  bugComment_(id, '+1 — Firm ID ' + firmId + (firm ? ' (' + firm + ')' : '') + ' is also seeing this.' + author.label + (note ? '\n\n' + note : ''), author);
+  bugDropCaches_(firmId);
+  return { ok: true };
+}
+function bugFixConfirmed_(b, who) {
+  var id = Number(b.id), note = String(b.note || '').trim().slice(0, 1500);
+  if (!id) throw new Error('missing bug');
+  var meta = bugMeta_(false), st = sc_('get', '/stories/' + id), cur = meta.states[st.workflow_state_id] || {};
+  if (!/ready\s*for\s*review/i.test(cur.name || '')) throw new Error('This bug is in "' + (cur.name || 'another state') + '", not Ready for Review. Refresh the list.');
+  var target = Object.keys(meta.states).filter(function (k) { return meta.states[k].wf === st.workflow_id && /fix\s*confirmed/i.test(meta.states[k].name); })[0];
+  if (!target) throw new Error('This bug’s workflow has no "Fix Confirmed" state in Shortcut.');
+  var author = bugAuthor_(who);
+  sc_('put', '/stories/' + id, { workflow_state_id: Number(target) });
+  bugComment_(id, '✅ Fix confirmed' + author.label + '.' + (note ? '\n\n' + note : ''), author);
+  bugDropCaches_('');
+  return { ok: true, state: meta.states[target].name };
+}
+
 function bugDoPost_(b, who) {
   if (b.action === 'bugLoad') {
     var d = bugLoad_(!!b.force);
@@ -185,6 +233,8 @@ function bugDoPost_(b, who) {
   }
   if (b.action === 'bugStory') return bugStory_(b.id);
   if (b.action === 'bugFirm') return bugFirm_(b);
+  if (b.action === 'bugPlusOne') return bugPlusOne_(b, who);
+  if (b.action === 'bugFixConfirmed') return bugFixConfirmed_(b, who);
   return null;
 }
 
