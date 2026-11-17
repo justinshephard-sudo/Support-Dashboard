@@ -94,7 +94,7 @@ function renewalPrep_(b, who) {
   if (!who.manager && !(repEmail && repEmail === who.email)) throw new Error('Renewal prep is for the firm’s CSM or a manager.');
 
   var acct = renewalAccountRow_(firmId);
-  var contacts = czGet_('/Contact', { $filter: 'AccountId eq ' + a.Id, $select: 'FirstName,LastName,Email,Title' });
+  var contacts = czGet_('/Contact', { $filter: 'AccountId eq ' + a.Id, $select: 'FirstName,LastName,Email,Cf/Title,Cf/Role' });
   var emails = contacts.map(function (c) { return String(c.Email || '').toLowerCase(); }).filter(Boolean);
   var domains = {};
   emails.forEach(function (e) { var d = e.split('@')[1]; if (d && !FREE_MAIL.test(d + '.')) domains[d] = true; });
@@ -140,7 +140,7 @@ function renewalPrep_(b, who) {
       low: support.convos.filter(function (c) { return c.rating && c.rating <= 3; }).length,
       recent: support.convos.slice(0, 6).map(function (c) { return { date: c.date, title: c.title, state: c.state, rating: c.rating }; }) },
     signals: signals.slice(0, 6).map(function (s) { return { date: s.date, signal: s.signal, reason: s.reason }; }),
-    contacts: contacts.map(function (c) { return { name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim(), title: c.Title || '' }; }).filter(function (c) { return c.name; }).slice(0, 8),
+    contacts: contacts.map(function (c) { var cc = c.Cf || {}; return { name: (String(c.FirstName || '') + ' ' + String(c.LastName || '')).trim(), title: cc.Title || cc.Role || '' }; }).filter(function (c) { return c.name; }).slice(0, 8),
   };
   var shell = {
     ok: true, facts: facts,
