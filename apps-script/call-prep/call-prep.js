@@ -101,9 +101,70 @@ function partners_(b, who) {
       mrr: Math.round(Number(a.TotalContractAmount) || 0), seats: Number(a.LicenseCount) || 0, partner: String(cf.ReferralPartner || '').trim(),
       type: String(cf.PartnerType || ''), agency: cf.AgencyFirm ? 1 : 0, agencyClient: cf.AgencyClientFirm ? 1 : 0, onboarding: String(cf.OnboardingStatus || '') };
   });
+  // No Referral Partner in ChurnZero → fall back to the firm's parent account in Chargebee's hierarchy.
+  var parents = {};
+  try { parents = cbParents_(false); } catch (e) { console.error('Chargebee parents: ' + e.message); }
+  firms.forEach(function (f) {
+    if (!f.partner && f.id && parents[f.id]) { f.partner = parents[f.id]; f.partnerFrom = 'chargebee'; }
+  });
   var out = { ok: true, at: new Date().toISOString(), firms: firms };
   try { cache.put('partners2', JSON.stringify(out), 1800); } catch (e) { /* too big to cache */ }
   return out;
+}
+
+/* ---------- Chargebee hierarchy: Firm ID → parent account name ----------
+   Every Chargebee customer with a parent (relationship.parent_id), keyed by its cf_firm_id, valued with
+   the parent's company name (or its contact's name). Needs Script Property CB_API_KEY (read-only key, same
+   kind as the missed-payments watcher). Rebuilt every 4 hours by refreshCbParents (installCbParentsTrigger),
+   kept in the script cache; built on demand if the cache is empty. */
+var CB_SITE = 'lawmatics';
+function cbGet_(path, params) {
+  var key = PropertiesService.getScriptProperties().getProperty('CB_API_KEY');
+  if (!key) throw new Error('CB_API_KEY isn’t set in Script Properties.');
+  var qs = Object.keys(params || {}).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+  var r = UrlFetchApp.fetch('https://' + CB_SITE + '.chargebee.com/api/v2' + path + (qs ? '?' + qs : ''),
+    { headers: { Authorization: 'Basic ' + Utilities.base64Encode(key + ':') }, muteHttpExceptions: true });
+  if (r.getResponseCode() >= 300) throw new Error('Chargebee HTTP ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
+  return JSON.parse(r.getContentText());
+}
+function cbParents_(force) {
+  var cache = CacheService.getScriptCache();
+  var hit = !force && cache.get('cb_parents');
+  if (hit) return JSON.parse(hit);
+  var all = {}, offset = null, guard = 0;
+  do {
+    var p = { limit: 100 };
+    if (offset) p.offset = offset;
+    var res = cbGet_('/customers', p);
+    (res.list || []).forEach(function (x) {
+      var c = x.customer || {};
+      all[c.id] = { firmId: String(c.cf_firm_id || '').replace(/\D/g, ''), parent: (c.relationship || {}).parent_id || '',
+        name: String(c.company || ((c.first_name || '') + ' ' + (c.last_name || ''))).trim() };
+    });
+    offset = res.next_offset || null;
+  } while (offset && ++guard < 200);
+  var map = {};
+  Object.keys(all).forEach(function (id) {
+    var c = all[id], par = c.parent && all[c.parent];
+    if (c.firmId && par && par.name) map[c.firmId] = par.name;
+  });
+  try { cache.put('cb_parents', JSON.stringify(map), 6 * 3600); } catch (e) { console.error('cb_parents too big to cache'); }
+  return map;
+}
+function refreshCbParents() {
+  var m = cbParents_(true);
+  CacheService.getScriptCache().remove('partners2');
+  console.log('Chargebee parents: ' + Object.keys(m).length + ' child firms');
+}
+// Run once from the editor (after adding CB_API_KEY): builds the list now, logs Mirador Law's parent, and keeps it fresh every 4 hours.
+function installCbParentsTrigger() {
+  var m = cbParents_(true);
+  CacheService.getScriptCache().remove('partners2');
+  Logger.log(Object.keys(m).length + ' firms have a Chargebee parent · Firm 5612 (Mirador Law) → ' + (m['5612'] || 'none'));
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'refreshCbParents'; })) {
+    ScriptApp.newTrigger('refreshCbParents').timeBased().everyHours(4).create();
+    Logger.log('Installed: refreshCbParents every 4 hours.');
+  }
 }
 
 // "Close" on a new agency-client firm: its agency onboards it, so the onboarding is closed as

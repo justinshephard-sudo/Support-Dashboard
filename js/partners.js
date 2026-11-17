@@ -4,7 +4,8 @@
    viewer against the same list. Cached there for 30 minutes.
      Agency    = Agency Firm or Agency Client Firm is true
      Affiliate = Partner Type is Affiliate
-   Grouped by the account's Referral Partner. "New" = the account's Start Date.
+   Grouped by the account's Referral Partner; when that's blank, the firm's parent account in
+   Chargebee's hierarchy (marked "(Chargebee)"). "New" = the account's Start Date.
    ========================================================================== */
 const PARTNER_VIEWERS = ['kennedy@lawmatics.com'];
 const PT = { data: null, loading: null, error: '', charts: [], all: {}, active: true };
@@ -79,7 +80,7 @@ function ptMonths() {
 function ptFirmTable(firms, withGroup) {
   return `<div class="table-wrap"><table class="drill-table pt-table"><thead><tr><th>Firm</th>${withGroup ? '<th>Type</th>' : ''}<th>Referral partner</th><th>Start</th><th class="num">MRR</th><th>Status</th></tr></thead><tbody>
     ${firms.map((f) => `<tr><td><b>${esc(f.name)}</b>${f.id ? ` <span class="muted">#${esc(f.id)}</span>` : ''}</td>${withGroup ? `<td>${esc(ptKind(f))}</td>` : ''}
-      <td>${esc(ptPartner(f))}</td><td class="nowrap">${esc(ptDate(f.start))}</td><td class="num">${ptMoney(f.mrr)}</td>
+      <td>${esc(ptPartner(f))}${f.partnerFrom ? ' <span class="muted pt-from" title="No Referral Partner in ChurnZero — this is the firm’s parent account in Chargebee">(Chargebee)</span>' : ''}</td><td class="nowrap">${esc(ptDate(f.start))}</td><td class="num">${ptMoney(f.mrr)}</td>
       <td>${f.active ? (f.onboarding && f.onboarding !== 'Complete' ? `Onboarding · ${esc(f.onboarding)}` : 'Active') : '<span class="muted">Inactive</span>'} ${ptCloseBtn(f)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
@@ -136,7 +137,7 @@ function ptRender() {
     <div class="panel pt-new">${fresh.length ? `<ul class="pt-new-list">${fresh.map((f) => `
       <li><span class="pt-when">${esc(ptDate(f.start))}</span><b>${esc(f.name)}</b>
         ${PT_GROUPS.filter((g) => g.test(f)).map((g) => `<span class="pt-tag pt-${g.key}">${g.title}</span>`).join('')}
-        <span class="muted">${esc(ptPartner(f))}</span>${f.onboarding ? `<span class="muted">· ${esc(f.onboarding)}</span>` : ''}<span class="pt-mrr">${ptMoney(f.mrr)}</span>${ptCloseBtn(f)}</li>`).join('')}</ul>`
+        <span class="muted">${esc(ptPartner(f))}${f.partnerFrom ? ' <span class="muted pt-from" title="No Referral Partner in ChurnZero — this is the firm’s parent account in Chargebee">(Chargebee)</span>' : ''}</span>${f.onboarding ? `<span class="muted">· ${esc(f.onboarding)}</span>` : ''}<span class="pt-mrr">${ptMoney(f.mrr)}</span>${ptCloseBtn(f)}</li>`).join('')}</ul>`
       : `<div class="empty-note">No new agency or affiliate firms in the last 7 days.${lastNew ? ` Latest: <b>${esc(lastNew.name)}</b> (${esc(ptDate(lastNew.start))}).` : ''}</div>`}</div>
 
     ${PT_GROUPS.map((g) => {
