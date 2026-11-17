@@ -11,3 +11,4 @@ apps-script/call-prep/secret.js
 
 # Private: AM scorecard history (employee scores), pushed to Apps Script only
 apps-script/scorecards/am-history.js
+demo-build/

@@ -10,7 +10,7 @@
    State is kept in this browser (localStorage) until "Reset test data".
    ========================================================================== */
 const MOCK_KEY = 'cs-mock', MOCK_STATE = 'cs-mock-state';
-const MOCK_ON = LOCAL_ENV && (() => { try { return localStorage.getItem(MOCK_KEY) === 'on'; } catch (e) { return false; } })();
+const MOCK_ON = DEMO_ENV || (LOCAL_ENV && (() => { try { return localStorage.getItem(MOCK_KEY) === 'on'; } catch (e) { return false; } })());
 
 const MOCK_DAY = (n) => { const d = new Date(Date.now() - n * 864e5); return d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }); };
 const MOCK_WEIGHTS = { open: 40, since: 30, book: 15, value: 15 }, MOCK_CSM_WEIGHTS = { fit: 50, book: 25, since: 25 };
@@ -229,6 +229,9 @@ const MOCK_OUTCOMES = [
 function mockOpenFirm(firmId) {
   const m = MOCK.open.find((x) => x.firmId === String(firmId));
   if (m) return m;
+  const d = DEMO_ENV && window.DEMO_FIRM(firmId);   // test site: the made-up book has the real numbers
+  if (d) return { firmId: d.id, name: d.name, mrr: d.start, im: d.im, csm: d.csm, real: false,
+    contacts: [{ first: 'Jordan', last: d.name.replace(/^Test – /, '').split(' ')[0], onboarding: true, title: 'Managing Partner' }, { first: 'Casey', last: 'Rivera', onboarding: false, title: 'Office Manager' }] };
   const row = (IMPL.open || []).find((r) => String(r.FirmId) === String(firmId));
   if (!row) throw new Error('Firm not found in the test data. Reload the page.');
   return { firmId: String(firmId), name: row.Name, mrr: 0, im: row.AccountManager || '', csm: '', real: true,
@@ -258,6 +261,7 @@ function mockClose(b) {
   });
   const dm = outcome.form === 'full' ? contacts.find((c) => String(c.id) === String((b.answers || {}).decisionMaker)) : null;
   MOCK.open = MOCK.open.filter((x) => x.firmId !== f.firmId);
+  MOCK.closedIds = (MOCK.closedIds || []).concat(f.firmId);
   MOCK.completed.unshift({ firmId: f.firmId, name: f.name, mrr: f.mrr, completed: MOCK_DAY(0), outcome: outcome.status, im: f.im, csm: f.csm, am: f.im,
     owner: f.csm || 'Support', closedBy: (typeof AUTH !== 'undefined' && AUTH.email) || 'you',
     decisionMakers: dm ? [{ name: dm.name, title: dm.title, email: dm.email }] : [], answers });
@@ -308,7 +312,8 @@ function mockSet(b) {
 // Test firms assigned this session show in the Implementation tab's open onboardings, owned by their IM.
 function mockSyncImpl() {
   if (typeof IMPL === 'undefined' || !Array.isArray(IMPL.open)) return;
-  IMPL.open = IMPL.open.filter((r) => !r.__mock);
+  const closed = new Set(MOCK.closedIds || []);
+  IMPL.open = IMPL.open.filter((r) => !r.__mock && !closed.has(String(r.FirmId)));
   MOCK.open.forEach((f) => IMPL.open.unshift({ __mock: true, FirmId: f.firmId, Name: f.name, AccountManager: f.im, Specialist: f.im,
     Status: 'Pre-Kickoff', Stage: 'Kickoff', ImplementationType: 'Premium Onboarding', DaysInOnboarding: String(mockDays(f.start)), NextMeeting: '' }));
 }
@@ -340,7 +345,7 @@ if (RO_ON) {
   };
 }
 
-if (LOCAL_ENV) {
+if (LOCAL_ENV || DEMO_ENV) {
   if (MOCK_ON) {
     mockLoadState();
     const passFetch = window.fetch;
@@ -367,7 +372,7 @@ if (LOCAL_ENV) {
       mockSyncImpl();
     }
     const banner = document.querySelector('.local-banner');
-    if (!banner) return;
+    if (!banner || DEMO_ENV) return;
     if (MOCK_ON) banner.textContent += ' · TEST DATA: New Firm Assignment, Close onboarding and the CSM handoffs are made up';
     if (RO_ON) banner.textContent += ' · READ-ONLY: nothing is saved anywhere';
     const btn = (label, fn) => Object.assign(document.createElement('button'), { type: 'button', className: 'local-banner-btn', textContent: label, onclick: fn });

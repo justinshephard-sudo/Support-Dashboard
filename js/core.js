@@ -14,7 +14,7 @@
    else belongs inside a function. tools/bump-version.sh updates the ?v= cache keys. */
 
 // Don't let other sites embed the dashboard in a frame (clickjacking); GitHub Pages can't send frame-ancestors.
-if (window.top !== window.self) { try { window.top.location = window.self.location.href; } catch (e) { document.documentElement.innerHTML = ''; } }
+if (!window.CS_DEMO && window.top !== window.self) { try { window.top.location = window.self.location.href; } catch (e) { document.documentElement.innerHTML = ''; } }
 
 // Old "Support Team Report 2026" sheet — kept ONLY for the Accounts tab (firm lookup,
 // written by the ChurnZero Apps Script) and the incentive Overrides tab/webapp.
@@ -29,7 +29,8 @@ const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
    supports dry runs itself (DRY_RUN_OK) gets the call with dryRun: true, so it can show what it
    would have written. To really write from local, run in the console:
    localStorage.setItem('cs-live-writes', 'on')   (and remove it after). */
-const LOCAL_ENV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const DEMO_ENV = !!window.CS_DEMO;   // the shareable test site (js/demo.js): made-up data, no sign-in
+const LOCAL_ENV = !DEMO_ENV && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const DRY_RUN = LOCAL_ENV && (() => { try { return localStorage.getItem('cs-live-writes') !== 'on'; } catch (e) { return true; } })();
 const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart', 'handoffs', 'prep', 'prepStatus', 'calendarMatch', 'partners'];
 const DRY_RUN_OK = {};   // backend URL → actions it accepts with dryRun: true (filled in by the tabs that have them)
@@ -197,6 +198,12 @@ function enterApp(info, onReady) {
 }
 
 function initAuth(onReady) {
+  if (DEMO_ENV) {   // test site: no Google sign-in; "View as" in the banner picks who you are
+    const p = window.DEMO_PERSONA();
+    Object.assign(AUTH, { token: 'test-site', expiresAt: Date.now() + 365 * 864e5, email: p.email });
+    enterApp({ email: p.email, name: p.name }, onReady);
+    return;
+  }
   AUTH.tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.CLIENT_ID,
     scope: CONFIG.SCOPES,

@@ -81,11 +81,11 @@ function bootstrap() {
   setupTheme();
   setupMerlin();
   const start = () => initAuth(main);
-  if (window.google && google.accounts && google.accounts.oauth2) {
+  if (DEMO_ENV || (window.google && google.accounts && google.accounts.oauth2)) {
     start();
   } else {
     const t = setInterval(() => {
-      if (window.google && google.accounts && google.accounts.oauth2) { clearInterval(t); start(); }
+      if (DEMO_ENV || (window.google && google.accounts && google.accounts.oauth2)) { clearInterval(t); start(); }
     }, 120);
   }
 }

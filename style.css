@@ -1547,3 +1547,8 @@ a.ra-ref:hover{color:var(--lm-blue)}
 .bug-firm-hits button:hover{border-color:var(--lm-blue)}
 .bug-firm-hits button:disabled{opacity:.5;cursor:not-allowed}
 .pf-prod-list .bug-fix-btn{margin-top:6px;font-size:12.5px;padding:4px 10px}
+/* Test site banner (js/demo.js) */
+.demo-banner{position:sticky;top:0;z-index:1000;font-weight:600;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap}
+.demo-banner b{font-weight:800;letter-spacing:.06em}
+.demo-as{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.demo-as select{font:600 12.5px var(--font);border:1px solid rgba(58,42,0,.4);border-radius:999px;padding:2px 8px;background:#fff8d6;color:#3a2a00}
