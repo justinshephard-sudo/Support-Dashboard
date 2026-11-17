@@ -90,7 +90,9 @@ function bugFetch_() {
   var items = stories.filter(function (s) { return BUG_WORKFLOWS.indexOf(s.workflow_id) > -1; }).map(bugItem_);
   // Recently closed: done-state bugs completed in the last 30 days.
   var since = new Date(Date.now() - BUG_CLOSED_DAYS * 864e5).toISOString();
-  var done = sc_('post', '/stories/search', { story_type: 'bug', workflow_state_types: ['done'], completed_at_start: since }) || [];
+  var done = [];
+  try { done = sc_('post', '/stories/search', { story_type: 'bug', workflow_state_types: ['done'], completed_at_start: since }) || []; }
+  catch (e) { console.error('Recently closed bugs: ' + e.message); }   // the open list still loads
   var closed = done.filter(function (s) { return BUG_WORKFLOWS.indexOf(s.workflow_id) > -1; }).map(function (s) {
     var it = bugItem_(s); it.done = String(s.completed_at || s.moved_at || '').slice(0, 10); return it;
   });
