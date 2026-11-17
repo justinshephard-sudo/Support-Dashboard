@@ -54,7 +54,7 @@ function supportCallsLabel_(y, m) {
 
 function syncSupportCalls() {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Data - Monthly');
-  var rows = sh.getDataRange().getValues();
+  var rows = sh.getDataRange().getDisplayValues();   // Month cells are dates; compare their displayed "November 2026" text
   var head = rows[0], col = head.indexOf(SUPPORT_CALL_COL);
   if (col < 0) throw new Error('No "' + SUPPORT_CALL_COL + '" column on Data - Monthly');
   var now = new Date();
@@ -65,7 +65,7 @@ function syncSupportCalls() {
     var r = -1;
     for (var i = 1; i < rows.length; i++) if (String(rows[i][0]).trim() === label) { r = i; break; }
     if (r < 0) { console.log('No row for ' + label + ' yet'); return; }
-    if (!mm.always && rows[r][col] !== '' && rows[r][col] !== null) return;   // already filled
+    if (!mm.always && String(rows[r][col]).trim() !== '') return;   // already filled
     var res = supportCallsMonth_(mm.y, mm.m);
     sh.getRange(r + 1, col + 1).setValue(res.total);
     console.log(label + ': ' + res.total + ' ' + JSON.stringify(res.perRep));
