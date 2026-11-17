@@ -1643,7 +1643,7 @@ const CB_COLORS = ['#068bff', '#00cfdc', '#ff9011', '#ff612c', '#ffd23f', '#ff4f
 const CB_PLAYMATES = [
   'merlin-play-cat-feather', 'merlin-play-corgi-ball', 'merlin-play-pitbull-tug', 'merlin-play-kitten-wand',
   'merlin-play-pup-highfive', 'merlin-play-sphynx-ribbon', 'merlin-play-golden-fetch', 'merlin-play-stbernard-tug',
-  'merlin-play-bluepit-tug', 'merlin-dog',
+  'merlin-play-bluepit-tug', 'merlin-play-tortie-feather', 'merlin-dog',
 ];
 const CB_PHRASES = ['Team crushed it!', 'Support superstars!', 'Absolute legends!', 'Incredible work!', 'Let’s gooo!'];
 
@@ -1793,7 +1793,7 @@ function celebrate() {
     // screen is full of playmates from the very first frame.
     const narrow = window.innerWidth < 700;
     const LAP = narrow ? 7 : 9;   // seconds for one crossing
-    const perLane = narrow ? 3 : 5;  // fewer walkers on phones so they don't pile up
+    const perLane = narrow ? 3 : 6;  // fewer walkers on phones so they don't pile up
     const lanes = { top: mates.filter((_, i) => i % 2 === 0).slice(0, perLane), bottom: mates.filter((_, i) => i % 2 === 1).slice(0, perLane) };
     Object.entries(lanes).forEach(([lane, names]) => {
       names.forEach((name, k) => {
