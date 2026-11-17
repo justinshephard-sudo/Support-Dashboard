@@ -11,6 +11,14 @@
    ========================================================================== */
 window.CS_DEMO = true;
 (function () {
+  // The page may run inside a viewer that blocks confirm/alert pop-ups: confirmations go ahead,
+  // alerts show as a short notice at the bottom of the page.
+  window.confirm = () => true;
+  window.alert = (msg) => {
+    const t = document.createElement('div');
+    t.className = 'demo-toast'; t.textContent = String(msg);
+    document.body.appendChild(t); setTimeout(() => t.remove(), 5000);
+  };
   const KEY_AS = 'cs-demo-as', KEY_STATE = 'cs-demo-state';
   const TZ = 'America/Los_Angeles';
   const IMS = ['Callie Burns', 'Andy Galindo', 'Admir Karamovic', 'Swetha Devakumar', 'Max Castro', 'Rosa Flores'];
@@ -353,7 +361,7 @@ window.CS_DEMO = true;
     const p = persona();
     b.innerHTML = `<b>TEST SITE</b> · every firm and number is made up · nothing you do is saved outside this browser
       <label class="demo-as">View as <select id="demoAs">${PERSONAS.map((x) => `<option value="${x.email}"${x.email === p.email ? ' selected' : ''}>${x.label}</option>`).join('')}</select></label>`;
-    const reset = Object.assign(document.createElement('button'), { type: 'button', className: 'local-banner-btn', textContent: 'Reset test data', onclick: () => { if (confirm('Put all the test data back the way it started?')) window.DEMO_RESET(); } });
+    const reset = Object.assign(document.createElement('button'), { type: 'button', className: 'local-banner-btn', textContent: 'Reset test data', title: 'Put all the test data back the way it started', onclick: () => window.DEMO_RESET() });
     b.append(reset);
     document.body.prepend(b);
     b.querySelector('#demoAs').addEventListener('change', (e) => {
