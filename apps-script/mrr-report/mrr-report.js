@@ -119,7 +119,8 @@ function warmMrr() {
   // CSM inputs (the hourly month-end copy, the daily Accounts sync) change at most hourly.
   var csm = readCache_(cache, CSM_CACHE);
   if (!csm || Date.now() - csm.built > 55 * 60 * 1000) {
-    try { pullAiUsage_(); } catch (e) { console.error('Merlin AI usage: ' + (e && e.message || e)); }
+    // Merlin AI Usage is now refreshed externally, so pullAiUsage_ no longer runs here.
+    try { aiQuotas_(false); } catch (e) { console.error('AI credit allowances: ' + (e && e.message || e)); }
     try { writeCache_(cache, buildCsm_(), CSM_CACHE); } catch (e) { console.error(e && e.stack || e); }
   }
 }
@@ -504,12 +505,17 @@ var HISTORY_TAB = 'CSM Firm History';
 var CSM_CACHE = 'csm11_';
 var HEALTH = { good: 33, bad: 67 };      // churn score: lower is healthier — good under 33, bad 67+
 // Merlin AI Health: every firm paying for the AI credits add-on (Johnny's hourly snapshot lists
-// them), graded by the share of its new leads Merlin scored or worked in the last 30 days.
+// them), graded by how much of its credit allowance it used: AI credits used in the last 30 days
+// (Merlin AI Usage tab, refreshed externally) ÷ the add-on's monthly credits (its Chargebee quantity;
+// a yearly add-on's quantity is the year's credits, so ÷ 12). Needs Script Property CB_API_KEY.
 var AI_ADDON_TAB = 'AI Add-on Firms';
 // Firms managers took out of the CSM numbers ("Excluded Firms" tab; see apps-script/exclusions.gs).
 var EXCLUDED_TAB = 'Excluded Firms';
 var AI_USAGE_TAB = 'Merlin AI Usage';
-var AI_HEALTH = { bad: 15, good: 50, minLeads: 5 };   // % of new leads touched; under minLeads isn't graded
+var AI_HEALTH = { bad: 25, good: 75 };   // % of the monthly credit allowance used in the last 30 days
+var CB_SITE = 'lawmatics';
+var AI_QUOTA_CACHE = 'ai_quota2';
+var AI_QUOTA_EVERY_MS = 6 * 3600 * 1000;
 var AI_PULL_EVERY_MS = 6 * 3600 * 1000;  // 30-day usage barely moves hour to hour
 
 // warmMrr keeps this copy under an hour old; a viewer only rebuilds it if the trigger stopped.
@@ -657,29 +663,87 @@ function readHealth_(skip) {
   return { bad: HEALTH.bad, good: HEALTH.good, accounts: accounts, hasDone: hasDone, hasRenewals: hasRenewals };
 }
 
-// firms: [company, am, coverage % (null = too few new leads to grade), leads, scored, engaged, credits $, add-on MRR, firmId]
+// firms: [company, am, usage % (null = no allowance found), leads, scored, engaged, credits used, add-on MRR, firmId, monthly credits]
 function readAiHealth_(skip) {
   skip = skip || {};
   var ss = SpreadsheetApp.openById(MRR_SHEET_ID);
   var list = ss.getSheetByName(AI_ADDON_TAB);
   if (!list) return { error: 'Waiting for the AI add-on list — it arrives with the next hourly snapshot.' };
   var use = ss.getSheetByName(AI_USAGE_TAB);
-  if (!use) return { error: 'Waiting for Merlin usage from Metabase.' };
+  if (!use) return { error: 'Waiting for Merlin AI usage.' };
+  var quota;
+  try { quota = aiQuotas_(false); } catch (e) { return { error: 'Couldn’t read the AI credit allowances from Chargebee: ' + (e && e.message || e) }; }
   var byCustomer = {}, byFirm = {}, asOf = '';
   rows_(use).forEach(function (r) {
     var u = { leads: num_(r['leads_30d#']), scored: num_(r['leads_scored_30d#']), engaged: num_(r['leads_engaged_30d#']), credits: num_(r['ai_credits_30d#']) };
     var cid = String(r['billing_customer_id#'] || '').trim();
     if (cid) byCustomer[cid] = u;
     byFirm[firmId_(r['firm_id#'])] = u;
-    if (r['pulled_at#'] && r['pulled_at#'] > asOf) asOf = r['pulled_at#'];
+    if (r['pulled_at#'] && String(r['pulled_at#']) > asOf) asOf = String(r['pulled_at#']);
   });
-  var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the query = no leads and no AI use
+  var none = { leads: 0, scored: 0, engaged: 0, credits: 0 };   // not in the usage tab = no AI use
   var firms = rows_(list).filter(function (r) { return !dropFirm_(skip, firmId_(r['Firm ID#'])); }).map(function (r) {
-    var u = byCustomer[String(r['Customer ID#']).trim()] || byFirm[firmId_(r['Firm ID#'])] || none;
-    var cov = u.leads >= AI_HEALTH.minLeads ? Math.min(100, Math.round((u.scored + u.engaged) / u.leads * 100)) : null;
-    return [String(r['Company#']).trim(), name_(r['Account Manager#']), cov, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#'])];
+    var cid = String(r['Customer ID#']).trim();
+    var u = byCustomer[cid] || byFirm[firmId_(r['Firm ID#'])] || none;
+    var q = quota.byCustomer[cid] || 0;
+    var pct = q > 0 ? Math.round(u.credits / q * 100) : null;
+    return [String(r['Company#']).trim(), name_(r['Account Manager#']), pct, u.leads, u.scored, u.engaged, u.credits, money_(r['AI Add-on MRR#']), firmId_(r['Firm ID#']), Math.round(q)];
   });
-  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, minLeads: AI_HEALTH.minLeads, asOf: asOf, firms: firms };
+  return { bad: AI_HEALTH.bad, good: AI_HEALTH.good, asOf: asOf, quotaAt: quota.at, firms: firms };
+}
+
+function cbGet_(path, params) {
+  var key = PropertiesService.getScriptProperties().getProperty('CB_API_KEY');
+  if (!key) throw new Error('CB_API_KEY isn’t set in Script Properties');
+  var qs = Object.keys(params || {}).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+  var r = UrlFetchApp.fetch('https://' + CB_SITE + '.chargebee.com/api/v2' + path + (qs ? '?' + qs : ''),
+    { headers: { Authorization: 'Basic ' + Utilities.base64Encode(key + ':') }, muteHttpExceptions: true });
+  if (r.getResponseCode() >= 300) throw new Error('Chargebee HTTP ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
+  return JSON.parse(r.getContentText());
+}
+
+// Monthly AI credits each customer pays for: the AI credits add-on's quantity on every live
+// subscription (monthly add-on = credits a month; yearly = credits a year, so ÷ 12). Kept for 6 hours.
+function aiQuotas_(force) {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get(AI_QUOTA_CACHE);
+  if (hit) {
+    var h = JSON.parse(hit);
+    if (!force && Date.now() - h.at < AI_QUOTA_EVERY_MS) return h;
+  }
+  var by = {}, offset = null, guard = 0;
+  do {
+    var p = { limit: 100, 'status[in]': '["active","non_renewing","in_trial","future"]' };
+    if (offset) p.offset = offset;
+    var res = cbGet_('/subscriptions', p);
+    (res.list || []).forEach(function (x) {
+      var s = x.subscription || {};
+      (s.subscription_items || []).forEach(function (it) {
+        var id = String(it.item_price_id || '');
+        if (!/^ai-credits-addon/i.test(id)) return;
+        var qty = Number(it.quantity || 0);
+        var yearly = /yearly/i.test(id) || (s.billing_period_unit === 'year');
+        by[s.customer_id] = (by[s.customer_id] || 0) + (yearly ? qty / 12 : qty / Math.max(1, s.billing_period_unit === 'month' ? (s.billing_period || 1) : 1));
+      });
+    });
+    offset = res.next_offset;
+  } while (offset && ++guard < 200);
+  var out = { at: Date.now(), byCustomer: by };
+  cache.put(AI_QUOTA_CACHE, JSON.stringify(out), 21600);
+  return out;
+}
+
+// Editor check: logs a few firms' allowance and usage (run after adding CB_API_KEY).
+function checkAiHealth() {
+  var q = aiQuotas_(true);
+  console.log(Object.keys(q.byCustomer).length + ' customers with the AI credits add-on in Chargebee');
+  var h = readAiHealth_({});
+  if (h.error) { console.log(h.error); return; }
+  var g = { good: 0, okay: 0, bad: 0, none: 0 };
+  h.firms.forEach(function (f) { g[f[2] == null ? 'none' : f[2] >= h.good ? 'good' : f[2] >= h.bad ? 'okay' : 'bad']++; });
+  console.log(JSON.stringify(g) + ' · usage as of ' + h.asOf);
+  h.firms.slice(0, 8).forEach(function (f) { console.log(f[0] + ': ' + f[6] + ' of ' + f[9] + ' credits = ' + f[2] + '%'); });
+  writeCache_(CacheService.getScriptCache(), buildCsm_(), CSM_CACHE);   // the CSM tab shows it right away
 }
 
 // Runs the saved Metabase question (production data) into the Merlin AI Usage tab, at most every

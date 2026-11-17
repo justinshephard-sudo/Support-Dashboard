@@ -181,9 +181,9 @@ function csmFresh(rep) {
   return { firms, bands: [band(0, 30), band(30, 60), band(60, 90)], mrr: firms.reduce((t, f) => t + f.a[3], 0) };
 }
 
-// Merlin AI Health: add-on firms graded by the share of new leads Merlin scored or worked.
-// Off while the Metabase pull is down (stale since 2026-10-30); set true to bring it back.
-const CSM_AI_HEALTH_ON = false;
+// Merlin AI Health: add-on firms graded by how much of their monthly AI credit allowance they used
+// in the last 30 days (credits used ÷ the add-on's Chargebee quantity). Set false to hide it.
+const CSM_AI_HEALTH_ON = true;
 function csmAiHealth(rep) {
   const h = CSM.data.ai || {};
   const grade = (f) => (f[2] == null ? 'none' : f[2] >= h.good ? 'good' : f[2] >= h.bad ? 'okay' : 'bad');
@@ -297,7 +297,7 @@ function renderCsm() {
         <small>${CSM.data.health.hasRenewals ? (ren.firms.length ? `${ren.risky.length ? `<span class="neg">${ren.risky.length} at risk</span>` : 'none at risk'} · ${mrrMoney(ren.mrr)} MRR` : 'No annual contracts end in the next 90 days.') : 'Fills in after the next ChurnZero sync.'}</small></button>
       ${CSM_AI_HEALTH_ON ? `<button type="button" class="csm-row" data-csm-aihealth="${esc(rep)}">
         <span>Merlin AI health</span><b>${aiTotal} <small>AI firms</small></b>
-        ${!CSM.data.ai ? '<small>Loading…</small>' : CSM.data.ai.error ? `<small>${esc(CSM.data.ai.error)}</small>` : aiTotal ? csmHealthBar(ai, `under ${CSM.data.ai.minLeads || 5} leads`) : '<small>No firms with the AI credits add-on.</small>'}</button>` : ''}
+        ${!CSM.data.ai ? '<small>Loading…</small>' : CSM.data.ai.error ? `<small>${esc(CSM.data.ai.error)}</small>` : aiTotal ? csmHealthBar(ai, 'no allowance found') : '<small>No firms with the AI credits add-on.</small>'}</button>` : ''}
     </article>`;
   }).join('');
 
@@ -305,7 +305,7 @@ function renderCsm() {
     <div class="mrr-panel-head csm-head"><h3>${who && !isManager() ? 'Your book' : 'By rep'} <span id="csmExcl">${exclEntry('CSM')}</span></h3>
       <span class="mrr-step"><button type="button" data-csm-ym="-1" ${CSM.ym <= min ? 'disabled' : ''} aria-label="Previous month">‹</button><b>${esc(mrrYmLabel(CSM.ym))}</b><button type="button" data-csm-ym="1" ${CSM.ym >= cur ? 'disabled' : ''} aria-label="Next month">›</button></span></div>
     ${reps.length ? `<div class="csm-grid${solo ? ' csm-grid-solo' : ''}">${cards}</div>` : '<div class="empty-note">No reps found on the Implementation tab yet.</div>'}
-    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms. First 90 days counts active accounts whose ChurnZero onboarding completed date was in the last 90 days. Renewals are annual contracts (a Chargebee contract term) ending in the next 90 days; at risk means bad health, a cancellation flag, set not to renew, or an overdue invoice.${CSM_AI_HEALTH_ON && CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: good when Merlin scored or worked ${CSM.data.ai.good}%+ of their new leads in the last 30 days, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%; firms with fewer than ${CSM.data.ai.minLeads || 5} new leads aren’t graded.` : ''}</p>`;
+    <p class="mrr-note csm-foot">6- and 13-month retention follow the firms that just completed that month; all-time covers every firm in the rep’s book, including ones that left. Health is ChurnZero’s churn score, where lower is healthier: good is under ${CSM_HEALTH.good}, okay ${CSM_HEALTH.good}–${CSM_HEALTH.bad}, bad ${CSM_HEALTH.bad}+. AI upsells are AI credits add-ons and Merlin Copilot seats added to existing firms. First 90 days counts active accounts whose ChurnZero onboarding completed date was in the last 90 days. Renewals are annual contracts (a Chargebee contract term) ending in the next 90 days; at risk means bad health, a cancellation flag, set not to renew, or an overdue invoice.${CSM_AI_HEALTH_ON && CSM.data.ai && !CSM.data.ai.error ? ` Merlin AI health covers firms with the AI credits add-on: AI credits used in the last 30 days ÷ the credits they pay for each month (the add-on’s quantity in Chargebee). Good is ${CSM.data.ai.good}%+, okay ${CSM.data.ai.bad}–${CSM.data.ai.good}%, bad under ${CSM.data.ai.bad}%.` : ''}</p>`;
 }
 
 /* ---------- pop-ups ---------- */
@@ -380,18 +380,19 @@ function csmRenewDrill(rep) {
 function csmAiHealthDrill(rep) {
   const d = CSM.data.ai || {};
   const h = csmAiHealth(rep);
-  const few = `Under ${d.minLeads || 5} leads`;
-  const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', few]];
+  const order = [['bad', 'Bad'], ['okay', 'Okay'], ['good', 'Good'], ['none', 'No allowance']];
   const xh = csmExcluded(() => csmAiHealth(rep));
   const rows = order.flatMap(([k, l]) => h[k].sort((a, b) => (a[2] ?? 999) - (b[2] ?? 999)).map((f) => ({ f, k, l })))
     .concat(xh ? order.flatMap(([k, l]) => xh[k].map((f) => ({ f, k, l, x: true }))) : []);
-  const asOf = d.asOf ? `usage as of ${new Date(d.asOf).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : 'usage from a one-time Metabase export';
+  const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const asOf = d.asOf ? `usage as of ${when(d.asOf)}` : '';
+  const n = (v) => Number(v || 0).toLocaleString();
   MRR.drill = null;
-  mrrModal(`${rep} — Merlin AI health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} with under ${d.minLeads || 5} new leads (not graded)` : ''} · ${asOf}`,
-    `<div class="mrr-method"><p><b>Coverage</b> = new leads Merlin scored or worked with Engage in the last 30 days ÷ the firm’s new leads in that time, capped at 100% (re-scoring older leads can push it over).
-      Good is ${d.good}%+, okay ${d.bad}–${d.good}%, bad under ${d.bad}%. Firms with fewer than ${d.minLeads || 5} new leads aren’t graded. Every firm paying for the AI credits add-on is included, whenever it was added.</p></div>
-    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Health</th><th>Coverage</th><th>New leads</th><th>Scored</th><th>Engage</th><th>Credits used</th><th>Add-on MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
-      ${rows.map(({ f, k, l, x }) => `<tr${exclRow(x)}><td>${esc(f[0])}${x ? exclTag() : ''}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${f[3].toLocaleString()}</td><td>${f[4].toLocaleString()}</td><td>${f[5].toLocaleString()}</td><td>${mrrMoney(f[6])}</td><td>${mrrMoney(f[7])}</td>${overridesUnlocked ? `<td>${exclButton(f[8], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
+  mrrModal(`${rep} — Merlin AI health`, `${h.good.length} good · ${h.okay.length} okay · ${h.bad.length} bad${h.none.length ? ` · ${h.none.length} with no allowance found` : ''}${asOf ? ` · ${asOf}` : ''}`,
+    `<div class="mrr-method"><p><b>Usage</b> = AI credits used in the last 30 days ÷ the credits the firm pays for each month (the AI credits add-on’s quantity in Chargebee; a yearly add-on’s quantity is divided by 12). Over 100% means they’re into overage.
+      Good is ${d.good}%+, okay ${d.bad}–${d.good}%, bad under ${d.bad}%. “No allowance” means Chargebee shows no live AI credits add-on for the firm (it may have just been removed).</p></div>
+    <div class="table-wrap"><table class="drill-table mrr-table"><thead><tr><th>Company</th><th>Health</th><th>Usage</th><th>Credits used (30 days)</th><th>Monthly credits</th><th>New leads</th><th>Leads scored</th><th>Add-on MRR</th>${overridesUnlocked ? '<th></th>' : ''}</tr></thead><tbody>
+      ${rows.map(({ f, k, l, x }) => `<tr${exclRow(x)}><td>${esc(f[0])}${x ? exclTag() : ''}</td><td><span class="csm-pill h-${k}">${l}</span></td><td>${f[2] == null ? '—' : f[2] + '%'}</td><td>${n(f[6])}</td><td>${f[9] ? n(f[9]) : '—'}</td><td>${n(f[3])}</td><td>${n(f[4])}</td><td>${mrrMoney(f[7])}</td>${overridesUnlocked ? `<td>${exclButton(f[8], f[0], 'CSM')}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>`);
 }
 
