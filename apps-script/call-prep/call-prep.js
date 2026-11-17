@@ -112,6 +112,65 @@ function partners_(b, who) {
   return out;
 }
 
+/* ---------- New agency client firm → Slack DM to Kennedy ----------
+   Hourly (installAgencyAlerts): ChurnZero accounts with Agency Client Firm = true that started in the last
+   14 days and haven't been announced yet. Ops Comms DMs PARTNER_ALERT_TO through the "CS handoff queue →
+   Slack DMs" Zapier workflow (01a1e5c7, which accepts this script's ZAPIER_HOOK_KEY), so she can close the
+   onboarding on the Partnerships tab when the agency is onboarding the firm. Sent 7am–7pm PT on weekdays;
+   anything new overnight goes out the next morning. Seen firms: Script Property AGENCY_SEEN.
+   AGENCY_ALERTS_TEST = 'yes' sends to Justin's DM marked TEST instead. */
+var PARTNER_ALERT_TO = 'kennedy@lawmatics.com';
+var DM_HOOK = 'https://hooks.zapier.com/hooks/catch/14095940/CbQZ57FjBJ5vKBpFs/';
+var DASH_URL = 'https://justinshephard-sudo.github.io/Support-Dashboard/';
+
+function agencyNewFirms_() {
+  var since = Utilities.formatDate(new Date(Date.now() - 14 * 864e5), 'UTC', "yyyy-MM-dd'T'00:00:00'Z'");
+  return czGet_('/Account', { $filter: 'Cf/AgencyClientFirm eq true and StartDate ge ' + since, $top: 100,
+    $select: 'Id,Name,StartDate,IsActive,TotalContractAmount,Cf/FirmId,Cf/ReferralPartner,Cf/OnboardingStatus,Cf/AccountManager' });
+}
+function agencySeen_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('AGENCY_SEEN') || '[]'); } catch (e) { return []; }
+}
+function agencyMsg_(a, parents) {
+  var cf = a.Cf || {}, id = String(cf.FirmId || '');
+  var agency = String(cf.ReferralPartner || '').trim() || (parents[id] ? parents[id] + ' (Chargebee)' : 'not listed');
+  var start = String(a.StartDate || '').slice(0, 10);
+  return ':new: *New agency client firm: ' + a.Name + '*' + (id ? ' (Firm ' + id + ')' : '') + '\n'
+    + '• Agency: ' + agency + '\n'
+    + '• Started ' + (start || '—') + ' · $' + Math.round(Number(a.TotalContractAmount) || 0) + '/mo · Onboarding: ' + (cf.OnboardingStatus || 'not set')
+    + (cf.AccountManager ? ' · AM ' + cf.AccountManager : '') + '\n'
+    + 'If the agency is onboarding them, close it from the <' + DASH_URL + '|Partnerships tab> (Close → Onboarded by Third Party).';
+}
+function checkAgencyClients() {
+  var now = new Date(), hr = Number(Utilities.formatDate(now, 'America/Los_Angeles', 'H')), dow = Number(Utilities.formatDate(now, 'America/Los_Angeles', 'u'));
+  if (dow > 5 || hr < 7 || hr >= 19) return;
+  var seen = agencySeen_(), fresh = agencyNewFirms_().filter(function (a) { return seen.indexOf(a.Id) < 0; });
+  if (!fresh.length) return;
+  var parents = {};
+  try { parents = cbParents_(false); } catch (e) { /* no fallback */ }
+  var test = PropertiesService.getScriptProperties().getProperty('AGENCY_ALERTS_TEST') === 'yes';
+  var res = UrlFetchApp.fetch(DM_HOOK, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ id: Utilities.getUuid(), hookKey: ZAPIER_HOOK_KEY, test: test,
+      messages: fresh.map(function (a) { return { email: PARTNER_ALERT_TO, text: agencyMsg_(a, parents) }; }) }) });
+  if (res.getResponseCode() >= 300) { console.error('Agency alert hook ' + res.getResponseCode()); return; }
+  PropertiesService.getScriptProperties().setProperty('AGENCY_SEEN', JSON.stringify(seen.concat(fresh.map(function (a) { return a.Id; })).slice(-400)));
+  console.log('Agency alerts sent: ' + fresh.map(function (a) { return a.Name; }).join(', '));
+}
+// Run once from the editor: marks the agency client firms already in ChurnZero as seen (no flood of old ones),
+// sends ONE sample alert to Justin's DM (marked TEST), and installs the hourly check.
+function installAgencyAlerts() {
+  var list = agencyNewFirms_(), parents = {};
+  try { parents = cbParents_(false); } catch (e) { /* no fallback */ }
+  PropertiesService.getScriptProperties().setProperty('AGENCY_SEEN', JSON.stringify(list.map(function (a) { return a.Id; })));
+  var sample = list.slice().sort(function (x, y) { return String(y.StartDate).localeCompare(String(x.StartDate)); })[0];
+  if (sample) UrlFetchApp.fetch(DM_HOOK, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ id: Utilities.getUuid(), hookKey: ZAPIER_HOOK_KEY, test: true, messages: [{ email: PARTNER_ALERT_TO, text: agencyMsg_(sample, parents) }] }) });
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkAgencyClients'; })) {
+    ScriptApp.newTrigger('checkAgencyClients').timeBased().everyHours(1).create();
+  }
+  Logger.log(list.length + ' recent agency client firms marked as already seen. Sample sent to your DM: ' + (sample ? sample.Name : 'none') + '. Hourly check installed.');
+}
+
 /* ---------- Chargebee hierarchy: Firm ID → parent account name ----------
    Every Chargebee customer with a parent (relationship.parent_id), keyed by its cf_firm_id, valued with
    the parent's company name (or its contact's name). Needs Script Property CB_API_KEY (read-only key, same
