@@ -104,6 +104,7 @@ function parseAccounts(rows) {
       cbStart: get(r, 'ChargebeeStart'),
       addons: get(r, 'AddOns'),
       invBalance: get(r, 'InvoiceBalance'),
+      overdue: (() => { const [amt, n, since] = String(get(r, 'Overdue') || '').split('|'); return Number(amt) > 0 ? { amt: Number(amt), n: Number(n) || 1, since } : null; })(),
       legacy: get(r, 'LegacyContract'),
     });
   }
@@ -284,6 +285,11 @@ function openFirm(firmId, name) {
   const web = f.web ? ` · <a href="https://${esc(f.web.replace(/^https?:\/\//, ''))}" target="_blank" rel="noopener">🌐 ${esc(f.web)}</a>` : '';
   const badgeCls = hk === 'good' ? 'good' : hk === 'bad' ? 'bad' : 'warn';
   const dangerBadge = (f.danger || f.cancel) ? '<span class="pf-badge warn">⚠ Cancellation flagged</span>' : '';
+  // Overdue: 7+ days past due and $25+ (same rule as the missed-payments alerts). Badge only for current customers.
+  const od = f.overdue;
+  const odDays = od && od.since ? Math.max(0, Math.round((Date.now() - new Date(od.since + 'T12:00:00')) / 864e5)) : null;
+  const odBadge = od && !/cancel/i.test(f.cb || '') ? `<span class="pf-badge bad">⚠ $${od.amt.toLocaleString()} overdue</span>` : '';
+  const odText = od ? `$${od.amt.toLocaleString()} · ${od.n} invoice${od.n === 1 ? '' : 's'}${odDays != null ? ` · ${odDays} days late` : ''}` : '';
   const scoreN = toNumber(f.score);
   const scoreCls = scoreN == null ? '' : scoreN < 33 ? 'good' : scoreN < 67 ? 'warn' : 'bad';
   document.getElementById('profile').innerHTML = `
@@ -292,9 +298,10 @@ function openFirm(firmId, name) {
       <div class="pf-htext"><h3>${esc(f.name)}</h3><div class="sub">${sub}${web}</div></div>
       <div class="pf-hbadges">
         <span class="pf-badge ${badgeCls}">${h[0]}</span>
-        ${dangerBadge}
+        ${odBadge}${dangerBadge}
         ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
         ${typeof spButtonHtml === 'function' ? spButtonHtml() : ''}
+        ${f.firmId && overridesUnlocked && AUTH.email && MANAGER_EMAILS.includes(AUTH.email.toLowerCase()) && typeof raAuditFirm === 'function' ? `<button type="button" class="pill-btn" id="pfAudit" data-firm="${esc(f.firmId)}" data-name="${esc(f.name)}">🔍 Audit firm</button>` : ''}
       </div>
     </div>
     <div class="pf-grid">
@@ -313,7 +320,7 @@ function openFirm(firmId, name) {
         ${pfRow('Licenses', orDash(f.lic))}
         ${contractRowHtml(f)}
         ${f.addons ? `<div class="pf-row"><span class="k">Add-ons</span><span class="v">${f.addons.split(';').map((s) => esc(s.trim())).filter(Boolean).join('<br>')}</span></div>` : ''}
-        ${f.invBalance ? pfRow('Balance due', f.invBalance, 'bad') : ''}
+        ${od ? pfRow('Overdue', odText, 'bad') : f.invBalance ? pfRow('Balance due', f.invBalance) : ''}
         ${f.legacy ? pfRow('Legacy contract', f.legacy) : ''}
       </div>
       <div class="pf-card"><h4>❤️ Health &amp; Risk</h4>
@@ -327,10 +334,57 @@ function openFirm(firmId, name) {
         ${pfRow('Total SMS', orDash(f.sms))}
         ${pfRow('SMS plan', orDash(f.smsPlan))}
       </div>
-    </div>`;
+    </div>
+    <div class="pf-card pf-product" id="pfProduct" data-firm="${esc(f.firmId || f.name)}"><div class="res-loading">Looking for this firm’s bugs and feature requests…</div></div>`;
   document.getElementById('profile').querySelectorAll('[data-contract]').forEach((b) => {
     b.addEventListener('click', () => openContract(b.dataset.contract, b));
   });
   document.getElementById('profile').querySelector('[data-sp-open]')?.addEventListener('click', () => openServicePortal(f));
+  document.getElementById('pfAudit')?.addEventListener('click', (e) => raAuditFirm(e.currentTarget.dataset.firm, e.currentTarget.dataset.name));
   document.getElementById('profile').classList.add('show');
+  loadFirmProduct(f);
+}
+
+/* ---- Open bugs (Shortcut) + feature requests (Notion) for the firm ----
+   Bugs: the loop-tracker's `bugFirm` searches Shortcut for open bugs whose text gives this Firm ID
+   ("Firm ID 4323", "firm #4323" or a Lawmatics app link) — not a bare number, not the firm's name. Feature requests: the Notion list (`frLoad`, shared with
+   Resources), matched on its Firm ID field. */
+async function loadFirmProduct(f) {
+  const key = f.firmId || f.name;
+  const el = () => { const x = document.getElementById('pfProduct'); return x && x.dataset.firm === key ? x : null; };
+  const [bugs, frs] = await Promise.allSettled([
+    loopCall({ action: 'bugFirm', firmId: f.firmId || '', name: f.name }),
+    (typeof FR !== 'undefined' && FR.data) ? Promise.resolve(FR.data) : loopCall({ action: 'frLoad' }).then((d) => { if (typeof FR !== 'undefined' && !FR.data) FR.data = d; return d; }),
+  ]);
+  const box = el();
+  if (!box) return;   // another firm was opened meanwhile
+  const id = String(f.firmId || '').replace(/\D/g, '');
+  const frItems = frs.status === 'fulfilled' && id
+    ? (frs.value.items || []).filter((x) => String(x.f || '').split(/\D+/).includes(id)).sort((a, b) => b.req.length - a.req.length) : [];
+  const bugItems = bugs.status === 'fulfilled' ? bugs.value.items || [] : [];
+  const err = (r, what) => (r.status === 'rejected' ? `<div class="muted pf-prod-err">Couldn’t load ${what}: ${esc(r.reason && r.reason.message || 'error')}</div>` : '');
+  const bugHtml = bugItems.length ? `<ul class="pf-prod-list">${bugItems.slice(0, 8).map((b) => `<li>
+      <a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.t)}</a>
+      <div class="pf-prod-meta">${b.state ? `<span>${esc(b.state)}</span>` : ''}${b.sev ? `<span class="pf-sev s${b.sev}">Sev ${b.sev}</span>` : ''}<span>updated ${esc(b.u)}</span></div>${/production/i.test(b.state || '') ? `<button type="button" class="mgr-btn bug-fix-btn" data-fl-fix="${esc(b.id)}">✅ Fix confirmed</button>` : ''}</li>`).join('')}</ul>${bugItems.length > 8 ? `<div class="muted">+ ${bugItems.length - 8} more in Shortcut</div>` : ''}`
+    : bugs.status === 'fulfilled' ? `<div class="muted">${id ? 'No open bugs list this Firm ID.' : 'No Firm ID, so bugs can’t be matched.'}</div>` : '';
+  const frHtml = frItems.length ? `<ul class="pf-prod-list">${frItems.slice(0, 8).map((x) => `<li>
+      <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.t)}</a>
+      <div class="pf-prod-meta"><span><b>${x.req.length}</b> request${x.req.length === 1 ? '' : 's'}</span>${x.s ? `<span>${esc(x.s)}</span>` : ''}${x.r && x.r !== 'No' ? `<span>Roadmap: ${esc(x.r)}</span>` : ''}${x.a ? `<span>${esc(x.a)}</span>` : ''}</div></li>`).join('')}</ul>${frItems.length > 8 ? `<div class="muted">+ ${frItems.length - 8} more in Resources ▸ Feature Requests</div>` : ''}`
+    : frs.status === 'fulfilled' ? `<div class="muted">${id ? 'No feature requests list this Firm ID.' : 'No Firm ID, so feature requests can’t be matched.'}</div>` : '';
+  box.innerHTML = `<div class="pf-prod-grid">
+      <div><h4>🐞 Open bugs <span class="muted">${bugItems.length}</span></h4>${bugHtml}${err(bugs, 'bugs')}</div>
+      <div><h4>💡 Feature requests <span class="muted">${frItems.length}</span></h4>${frHtml}${err(frs, 'feature requests')}</div>
+    </div>`;
+  box.querySelectorAll('[data-fl-fix]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm(`Confirm the fix for ${f.name}? This moves the bug to Fix Confirmed in Shortcut.`)) return;
+    btn.disabled = true; btn.textContent = 'Updating…';
+    try {
+      const r = await loopCall({ action: 'bugFixConfirmed', id: btn.dataset.flFix, note: `Confirmed with ${f.name} (Firm ID ${f.firmId}).` });
+      btn.textContent = `✓ ${r.state}`;
+    } catch (e) {
+      if (isSessionError(e)) showSessionBanner(true);
+      btn.disabled = false; btn.textContent = '✅ Fix confirmed';
+      alert('Couldn’t update it: ' + e.message);
+    }
+  }));
 }

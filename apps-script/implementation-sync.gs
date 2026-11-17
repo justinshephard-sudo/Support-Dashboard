@@ -55,9 +55,11 @@ var IMPL_HISTORY_MONTHS = 24;         // months of completion/CSAT history kept 
 var IMPL_MONTHLY_COLUMNS = ['Month', 'OpenOnboardings', 'PreKickoff', 'OpenStatus', 'NeedsScheduling', 'Over70',
   'ClosedOnboardings', 'MedianDays', 'CsatPct', 'CsatResponses', 'StageCounts', 'UpdatedAt', 'RepStats'];
 var IMPL_EVENTS_TAB = 'Impl - Firm Events';
-var IMPL_EVENT_COLUMNS = ['Type', 'Month', 'Date', 'Name', 'FirmId', 'AccountManager', 'Specialist', 'Days', 'Score', 'Comment'];
+var IMPL_EVENT_COLUMNS = ['Type', 'Month', 'Date', 'Name', 'FirmId', 'AccountManager', 'Specialist', 'Days', 'Score', 'Comment', 'Excluded'];
 var IMPL_OPEN_COLUMNS = ['Name', 'FirmId', 'Status', 'Stage', 'Specialist', 'AccountManager',
-  'DaysInOnboarding', 'NextMeeting', 'ImplementationType'];
+  'DaysInOnboarding', 'NextMeeting', 'ImplementationType', 'Excluded', 'LastEmail', 'LastCustomerEmail'];
+var IMPL_EMAIL_DAYS = 21;   // how far back "last email" looks (the board flags 14+ quiet days)
+var IMPL_FREE_MAIL = /@(gmail|yahoo|outlook|hotmail|icloud|aol|live|msn|me|comcast|protonmail|ymail)\.com$/i;
 
 function syncImplementation() {
   var props = PropertiesService.getScriptProperties();
@@ -70,15 +72,19 @@ function syncImplementation() {
   var now = new Date();
 
   var excluded = excludedFirmIds_('IM');   // managers' "Excluded Firms" list (exclusions.gs)
-  var accounts = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
+  var eligible = fetchAllCZ_(base + '/Account?$top=' + CZ_PAGE_SIZE + '&$filter=' + encodeURIComponent('IsActive eq true'), headers)
     .filter(function (a) {
       var cf = a.Cf || {};
       var start = implStart_(a);
-      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true &&
-        start && start >= IMPL_MIN_START && !excluded[excludedFirmKey_(a.ExternalId || cf.FirmId)];
+      return cf.AgencyFirm !== true && cf.AgencyClientFirm !== true && cf.Consultant !== true && start && start >= IMPL_MIN_START;
     });
   var repName = czRepNamer_(base, headers);   // sync-accounts.gs
   var implRep_ = function (cf) { return repName(implRepRaw_(cf)); };
+  var isExcl_ = function (a) { return !!excluded[excludedFirmKey_(a.ExternalId || (a.Cf || {}).FirmId)]; };
+  var accounts = eligible.filter(function (a) { return !isExcl_(a); });
+  // Excluded firms still go into the drill-down tabs (Excluded = 1) so the page can show them struck
+  // through, but they never count toward any number.
+  var exAccounts = eligible.filter(isExcl_);
   var activeIds = {}, repOf = {}, byId = {};   // activeIds: account id -> start date
   accounts.forEach(function (a) {
     activeIds[String(a.Id)] = implStart_(a);
@@ -118,17 +124,47 @@ function syncImplementation() {
       cf.ImplementationSpecialist || '', implRep_(cf), days,
       next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || ''];
   });
+  exAccounts.filter(function (a) { return IMPL_OPEN_STATUSES.indexOf((a.Cf || {}).OnboardingStatus) !== -1; }).forEach(function (a) {
+    var cf = a.Cf || {}, next = nextMeeting[String(a.Id)] || '';
+    openRows.push([a.Name || '', a.ExternalId || cf.FirmId || '', cf.OnboardingStatus || '', cf.NewOnboardingCall || 'No stage set',
+      cf.ImplementationSpecialist || '', implRep_(cf) || '', Math.floor((now - implStart_(a)) / 86400000),
+      next ? Utilities.formatDate(new Date(next), tz, 'MMM d, yyyy') : '', cf.ImplementationType || '', '1']);
+  });
+  // Last email with each open firm (synced Gmail, either direction) and the last one the firm sent.
+  var lastMail = {};
+  try { lastMail = implLastEmails_(base, headers, open.concat(exAccounts.filter(function (a) { return IMPL_OPEN_STATUSES.indexOf((a.Cf || {}).OnboardingStatus) !== -1; })), now); }
+  catch (e) { console.error('last emails: ' + e.message); }
+  var idByFirm = {};
+  accounts.concat(exAccounts).forEach(function (a) { idByFirm[String(a.ExternalId || (a.Cf || {}).FirmId || '')] = String(a.Id); });
+  openRows.forEach(function (r) {
+    while (r.length < 10) r.push('');
+    var lm = lastMail[idByFirm[String(r[1])]] || {};
+    r[10] = lm.any ? Utilities.formatDate(new Date(lm.any), tz, 'yyyy-MM-dd') : '';
+    r[11] = lm.customer ? Utilities.formatDate(new Date(lm.customer), tz, 'yyyy-MM-dd') : '';
+  });
   openRows.sort(function (x, y) { return (Number(y[6]) || 0) - (Number(x[6]) || 0); });
 
   // --- completions per month (active firms) ---
   var events = [];        // drill-down rows for "Impl - Firm Events"
   var since = new Date(now.getFullYear(), now.getMonth() - IMPL_HISTORY_MONTHS + 1, 1);
-  function eventRow_(type, date, a, days, score, comment) {
+  function eventRow_(type, date, a, days, score, comment, excl) {
     var cf = a.Cf || {};
     return [type, Utilities.formatDate(date, tz, 'MMMM yyyy'), Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
       a.Name || '', a.ExternalId || cf.FirmId || '', implRep_(cf) || IMPL_UNASSIGNED,
-      cf.ImplementationSpecialist || '', days, score, comment];
+      cf.ImplementationSpecialist || '', days, score, comment, excl ? '1' : ''];
   }
+  // Excluded firms' completions: listed (struck through on the page), never counted.
+  var exStart = {}, exById = {};
+  exAccounts.forEach(function (a) {
+    var cf = a.Cf || {};
+    exStart[String(a.Id)] = implStart_(a);
+    exById[String(a.Id)] = a;
+    if (!cf.OnboardingCompletedDate) return;
+    if (cf.NewTimeInOnboarding != null && cf.NewTimeInOnboarding !== '' && Number(cf.NewTimeInOnboarding) < 0) return;
+    var doneAt = new Date(String(cf.OnboardingCompletedDate).slice(0, 10) + 'T12:00:00');
+    if (doneAt >= since) events.push(eventRow_('closed', doneAt, a,
+      cf.NewTimeInOnboarding == null || cf.NewTimeInOnboarding === '' ? '' : Number(cf.NewTimeInOnboarding), '', '', true));
+  });
   var completed = {};      // 'yyyy-MM' -> [days]
   var repCompleted = {};   // 'yyyy-MM' -> rep -> [days]
   accounts.forEach(function (a) {
@@ -155,6 +191,14 @@ function syncImplementation() {
   var csat = {};      // 'yyyy-MM' -> {pos, n}
   var repCsat = {};   // 'yyyy-MM' -> rep -> {pos, n}
   responses.forEach(function (r) {
+    var exS = exStart[String(r.AccountId)];
+    if (exS) {   // an excluded firm's response: listed, not counted
+      if (!r.IsPending && r.Score != null && r.ResponseDate && new Date(r.ResponseDate) >= exS) {
+        events.push(eventRow_('csat', new Date(r.ResponseDate), exById[String(r.AccountId)], '', Number(r.Score),
+          String(r.Comment || '').replace(/\s+/g, ' ').trim(), true));
+      }
+      return;
+    }
     var start = activeIds[String(r.AccountId)];
     // Only responses from this onboarding (on/after the firm's current start).
     if (r.IsPending || r.Score == null || !r.ResponseDate || !start || new Date(r.ResponseDate) < start) return;
@@ -228,6 +272,46 @@ function implRepRaw_(cf) {
 }
 
 // When the firm started: the account StartDate, or its current term start if that's blank.
+// accountId → { any, customer }: latest synced Gmail message in the last IMPL_EMAIL_DAYS days that went to or
+// came from one of the firm's contacts (by email, or by the firm's own email domain for non-free-mail domains).
+function implLastEmails_(base, headers, accts, now) {
+  var byEmail = {}, byDomain = {}, ids = accts.map(function (a) { return String(a.Id); });
+  for (var i = 0; i < ids.length; i += 15) {
+    var f = '(' + ids.slice(i, i + 15).map(function (x) { return 'AccountId eq ' + x; }).join(' or ') + ')';
+    fetchAllCZ_(base + '/Contact?$top=' + CZ_PAGE_SIZE + '&$select=AccountId,Email&$filter=' + encodeURIComponent(f), headers).forEach(function (c) {
+      var e = String(c.Email || '').trim().toLowerCase();
+      if (!e || /@lawmatics\.com$/.test(e)) return;
+      byEmail[e] = String(c.AccountId);
+      if (!IMPL_FREE_MAIL.test(e)) {
+        var d = e.split('@')[1];
+        byDomain[d] = byDomain[d] && byDomain[d] !== String(c.AccountId) ? 'x' : String(c.AccountId);   // shared domain → ambiguous
+      }
+    });
+  }
+  var acctOf = function (e) {
+    e = String(e || '').trim().toLowerCase();
+    if (!e || /@lawmatics\.com$/.test(e)) return null;
+    if (byEmail[e]) return byEmail[e];
+    var d = byDomain[e.split('@')[1]];
+    return d && d !== 'x' ? d : null;
+  };
+  var since = new Date(now.getTime() - IMPL_EMAIL_DAYS * 864e5).toISOString().replace(/\.\d+Z$/, 'Z');
+  var msgs = fetchAllCZ_(base + '/Message?$top=' + CZ_PAGE_SIZE + '&$select=DeliveryDate,EmailFromAddress,ToRecipients&$filter=' +
+    encodeURIComponent("Type eq 'Gmail' and DeliveryDate gt " + since), headers);
+  var out = {};
+  msgs.forEach(function (m) {
+    var when = m.DeliveryDate, from = acctOf(m.EmailFromAddress), seen = {};
+    if (from) seen[from] = true;
+    (m.ToRecipients || []).forEach(function (r) { var a = acctOf(r.Email); if (a) seen[a] = true; });
+    Object.keys(seen).forEach(function (a) {
+      var o = out[a] = out[a] || {};
+      if (!o.any || when > o.any) o.any = when;
+      if (a === from && (!o.customer || when > o.customer)) o.customer = when;
+    });
+  });
+  return out;
+}
+
 function implStart_(a) {
   var v = a.StartDate || (a.Cf || {}).CurrentTermStart;
   if (!v) return null;

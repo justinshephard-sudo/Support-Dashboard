@@ -1,5 +1,7 @@
 /* ==========================================================================
-   Excluded firms (Manager mode) — take a firm out of the Implementation (IM) and/or
+   Excluded firms — everyone can SEE which firms are left out of the Implementation (IM) and/or
+   CSM numbers (the list on each tab shows the ones that apply to it); only managers in Manager
+   mode can exclude or include a firm. Managers take a firm out of the Implementation (IM) and/or
    CSM numbers, e.g. test, internal or partner accounts. Saved to the "Excluded Firms"
    tab of the Support Team Report sheet through the manager-checked web app
    (apps-script/exclusions.gs). The IM sync re-runs about a minute after a change;
@@ -22,28 +24,53 @@ function loadExclusions(force) {
 }
 const exclScopeOf = (id) => (EXCL.rows.find((r) => r.id === exclKey(id)) || {}).scope || '';
 const isExcludedFrom = (id, area) => ['Both', area].includes(exclScopeOf(id));
-
-// Drop IM-excluded firms from the Implementation pop-up lists right away; the tiles catch up
-// when the sync re-runs.
-function exclApplyImpl() {
-  IMPL.open = IMPL.open.filter((f) => !isExcludedFrom(f.FirmId, 'IM'));
-  IMPL.events = IMPL.events.filter((e) => !isExcludedFrom(e.FirmId, 'IM'));
+// Who each excluded firm belongs to, from the firm rows already loaded on the page (IM lists, CSM data).
+function exclAmOf(id) {
+  id = exclKey(id);
+  const im = (typeof IMPL !== 'undefined' ? IMPL.open.concat(IMPL.events) : []).find((f) => exclKey(f.FirmId) === id);
+  if (im && im.AccountManager) return im.AccountManager;
+  const x = (typeof CSM !== 'undefined' && CSM.data && CSM.data.x) || {};
+  const h = ((x.health || {}).accounts || []).find((a) => exclKey(a[4]) === id);
+  if (h && h[1]) return h[1];
+  const f = ((x.history || {}).firms || []).find((r) => exclKey(r[6]) === id);
+  return f ? f[1] || '' : '';
 }
+// The excluded firms that apply to a tab. Reps only see the ones on their own book; managers see all.
+function exclRowsFor(area) {
+  const rows = EXCL.rows.filter((r) => r.scope === 'Both' || r.scope === area);
+  if (isManager()) return rows;
+  const names = [...new Set(EXCL.rows.map((r) => exclAmOf(r.id)).filter(Boolean)
+    .concat(typeof IMPL !== 'undefined' ? IMPL.open.map((f) => f.AccountManager) : []))];
+  const me = myRepName(names);
+  return me ? rows.filter((r) => exclAmOf(r.id) === me) : [];
+}
+// Struck-through rows in the pop-ups: the firm is listed but doesn't count toward any number.
+const exclTag = () => ' <span class="excl-tag" title="Excluded from these numbers by a manager">Excluded</span>';
+const exclRow = (on) => (on ? ' class="excl-row"' : '');
+
+// Mark IM-excluded firms in the Implementation lists (the sync writes them with Excluded = 1; a change made
+// on the page applies straight away). They stay in the pop-ups, struck through, and never count.
+function exclApplyImpl() {
+  IMPL.open.concat(IMPL.events).forEach((f) => { f._excl = f.Excluded === '1' || isExcludedFrom(f.FirmId, 'IM'); });
+}
+const implCounted = (rows) => rows.filter((f) => !f._excl);
 
 // The "Exclude" button on a firm row — Manager mode only.
 function exclButton(id, name, area) {
-  if (!overridesUnlocked || !exclKey(id)) return '';
+  if (!overridesUnlocked || !exclKey(id) || isExcludedFrom(id, area)) return '';
   return `<button type="button" class="excl-btn" data-excl="${esc(exclKey(id))}" data-name="${esc(name || '')}" data-area="${area}" title="Take this firm out of the ${area} numbers">Exclude</button>`;
 }
-// The "Excluded firms (n)" link at the top of the IM and CSM tabs — Manager mode only.
-function exclEntry() {
-  return overridesUnlocked ? `<button type="button" class="loop-btn excl-entry" data-excl-list>Excluded firms (${EXCL.rows.length})</button>` : '';
+// The "Excluded firms (n)" link at the top of the IM and CSM tabs: everyone sees it when firms are
+// excluded from that tab's numbers (managers in Manager mode always see it, to manage the list).
+function exclEntry(area) {
+  const n = exclRowsFor(area).length;
+  return n || overridesUnlocked ? `<button type="button" class="loop-btn excl-entry" data-excl-list="${area}">Excluded firms (${n})</button>` : '';
 }
 function renderExclEntries() {
   const impl = document.getElementById('implExcl');
-  if (impl) impl.innerHTML = exclEntry();
+  if (impl) impl.innerHTML = exclEntry('IM');
   const csm = document.getElementById('csmExcl');
-  if (csm) csm.innerHTML = exclEntry();
+  if (csm) csm.innerHTML = exclEntry('CSM');
 }
 
 async function exclSave(body) {
@@ -110,15 +137,17 @@ function openExcludeDialog(id, name, area) {
   });
 }
 
-function openExclusionList() {
-  const rows = EXCL.rows.slice().sort((a, b) => a.firm.localeCompare(b.firm));
+function openExclusionList(area) {
+  const label = area === 'CSM' ? 'CSM' : 'Implementation';
+  const manage = overridesUnlocked;   // only managers in Manager mode can include a firm again
+  const rows = (area ? exclRowsFor(area) : EXCL.rows).slice().sort((a, b) => a.firm.localeCompare(b.firm));
   const wrap = exclDialog(`
-    <div class="drill-head"><div><h3>Excluded firms</h3><div class="drill-note">Taken out of the Implementation and/or CSM numbers · the MRR Report still counts them</div></div>
+    <div class="drill-head"><div><h3>Excluded firms${area ? ` · ${label}` : ''}</h3><div class="drill-note">Left out of the ${area ? label : 'Implementation and/or CSM'} numbers by a manager · the MRR Report still counts them</div></div>
       <button type="button" class="drill-close" data-excl-close aria-label="Close">×</button></div>
-    <div class="drill-body">${rows.length ? `<div class="table-wrap"><table class="drill-table"><thead><tr><th>Firm</th><th>Firm ID</th><th>From</th><th>Reason</th><th>By</th><th>Added</th><th></th></tr></thead><tbody>
-      ${rows.map((r) => `<tr><td>${esc(r.firm || '—')}</td><td>${esc(r.id)}</td><td>${esc(r.scope)}</td><td>${esc(r.reason || '—')}</td><td>${esc(r.by.split('@')[0])}</td>
-        <td>${r.at ? esc(new Date(r.at).toLocaleDateString()) : '—'}</td><td><button type="button" class="excl-btn" data-unexcl="${esc(r.id)}">Include again</button></td></tr>`).join('')}
-    </tbody></table></div>` : '<div class="empty-note">No firms are excluded. Use “Exclude” on a firm in an Implementation or CSM pop-up (Manager mode).</div>'}</div>`, true);
+    <div class="drill-body">${rows.length ? `<div class="table-wrap"><table class="drill-table"><thead><tr><th>Firm</th><th>Firm ID</th><th>From</th><th>Reason</th><th>By</th><th>Added</th>${manage ? '<th></th>' : ''}</tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${esc(r.firm || '—')}</td><td>${esc(r.id)}</td><td>${esc(r.scope === 'Both' ? 'IM and CSM' : r.scope)}</td><td>${esc(r.reason || '—')}</td><td>${esc(r.by.split('@')[0])}</td>
+        <td>${r.at ? esc(new Date(r.at).toLocaleDateString()) : '—'}</td>${manage ? `<td><button type="button" class="excl-btn" data-unexcl="${esc(r.id)}">Include again</button></td>` : ''}</tr>`).join('')}
+    </tbody></table></div>` : `<div class="empty-note">No firms are excluded from the ${label} numbers.${manage ? ' Use “Exclude” on a firm in an Implementation or CSM pop-up.' : ''}</div>`}</div>`, true);
   wrap.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-unexcl]');
     if (!b) return;
@@ -127,7 +156,7 @@ function openExclusionList() {
     try {
       const r = EXCL.rows.find((x) => x.id === b.dataset.unexcl);
       await exclSave({ action: 'unexclude', firmId: b.dataset.unexcl });
-      openExclusionList();
+      openExclusionList(area);
       exclToast(`${(r && r.firm) || 'The firm'} counts again.` + (r && r.scope !== 'CSM' ? ' Implementation totals update in about a minute.' : ''));
     } catch (err) { b.textContent = err.message; }
   });
@@ -148,6 +177,7 @@ function setupExclusions() {
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-excl]');
     if (b) { e.stopPropagation(); openExcludeDialog(b.dataset.excl, b.dataset.name, b.dataset.area); return; }
-    if (e.target.closest('[data-excl-list]')) openExclusionList();
+    const l = e.target.closest('[data-excl-list]');
+    if (l) openExclusionList(l.dataset.exclList || '');
   }, true);
 }

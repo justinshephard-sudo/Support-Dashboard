@@ -182,6 +182,9 @@ function renderImplTeam(label) {
   const mine = !!IMPL.rep && IMPL.rep !== IMPL_NONE;
   document.getElementById('impl-tiles-section').hidden = !mine;
   document.getElementById('impl-tiles-title').textContent = isManager() ? `${IMPL.rep}’s numbers` : 'Your numbers';
+  // This week's calendar: the rep's own; a manager sees the picked rep, or every rep on the whole-team view.
+  renderCalendar('implCal', IMPL.rep === IMPL_NONE ? [] : IMPL.rep ? [IMPL.rep] : isManager() ? csmReps() : []);
+  renderSignals();   // managers only
   const m = IMPL.byLabel.get(label);
   if (!m) return;
   const v = (d) => {
@@ -314,6 +317,7 @@ function implDrillSpec(col, label) {
     case 'OpenOnboardings':
       // Soonest next meeting first; firms with nothing scheduled go last, longest in onboarding first.
       return Object.assign(snapshot('Open Onboardings', 'Pre-Kickoff and Open firms, as of today · soonest next meeting first' + who, [...open]), { close: true, prep: true,
+        cols: open.length && 'LastEmail' in open[0] ? IMPL_FIRM_COLS.concat([['LastEmail', 'Last email']]) : IMPL_FIRM_COLS,
         rows: label === latest ? [...open].sort(implByNextMeeting) : undefined });
     case 'NeedsScheduling':
       return snapshot('Need to Schedule', 'Open onboardings with no upcoming meeting, as of today' + who, open.filter((f) => !f.NextMeeting));
@@ -336,10 +340,11 @@ function implDrillSpec(col, label) {
       const noData = 'Firm detail appears after the next ChurnZero sync.';
       if (IMPL.rep) {
         const me = IMPL.rep;
-        const pos = rows.filter((r) => toNumber(r.Score) >= 4).length;
+        const counted = implCounted(rows);
+        const pos = counted.filter((r) => toNumber(r.Score) >= 4).length;
         return {
           title: isManager() ? `${me} — Onboarding CSAT` : 'Your Onboarding CSAT',
-          note: `${me} · ${label}` + (rows.length ? ` · ${fmtPct((pos / rows.length) * 100)} satisfied (4–5)` : ''),
+          note: `${me} · ${label}` + (counted.length ? ` · ${fmtPct((pos / counted.length) * 100)} satisfied (4–5)` : ''),
           cols: [['Name', 'Firm'], ['Score', 'Score'], ['Date', 'Date'], ['Comment', 'Comment']],
           rows, empty: IMPL.events.length ? 'No survey responses for your firms this month.' : noData,
         };
@@ -352,6 +357,31 @@ function implDrillSpec(col, label) {
     }
     default: return null;
   }
+}
+
+// Stalled: 14+ days into onboarding, no meeting scheduled, and no email with the firm (either way) in
+// 14+ days. LastEmail comes from the daily sync (synced Gmail, 21-day look-back; blank = none in that time).
+// Same rule as the Monday digest's "Stalled onboardings".
+const IMPL_STALL_DAYS = 14;
+function implQuietDays(r) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(r.LastEmail || '');
+  if (!m) return null;
+  return Math.floor((Date.now() - new Date(+m[1], m[2] - 1, +m[3]).getTime()) / 864e5);
+}
+function implStalled(r) {
+  if (!('LastEmail' in r) || r.NextMeeting || (toNumber(r.DaysInOnboarding) || 0) < IMPL_STALL_DAYS) return false;
+  const q = implQuietDays(r);
+  return q == null || q >= IMPL_STALL_DAYS;
+}
+function implStalledTag(r) {
+  if (!implStalled(r)) return '';
+  const q = implQuietDays(r);
+  return ` <span class="ob-stalled-tag" title="No meeting scheduled and no email with the firm in ${q == null ? '21+' : q} days">🧊 Stalled</span>`;
+}
+function implLastEmailText(r) {
+  const q = implQuietDays(r);
+  if (q == null) return 'No email in 21+ days';
+  return q === 0 ? 'Emailed today' : `Last email ${q}d ago`;
 }
 
 function implMeetingTime(f) {
@@ -382,7 +412,41 @@ function implDrillCell(key, row, median) {
   }
   if (key === 'Days' && median != null && toNumber(v) === median) return `${esc(v)} <span class="muted">· median</span>`;
   if (key === 'Comment') return v ? `<span class="drill-comment">${esc(v)}</span>` : '<span class="muted">–</span>';
+  if (key === 'LastEmail') { const q = implQuietDays(row); return q == null ? '<span class="muted">21+ days</span>' : `${esc(implFmtDate(v))}<br><small class="${q >= IMPL_STALL_DAYS ? 'neg' : 'muted'}">${q}d ago</small>`; }
   return esc(v || '–');
+}
+
+// Board view of open onboardings: a column per stage (in call order), cards keep the
+// list's order — soonest next meeting first, unscheduled firms last.
+function implBoardHtml(rows) {
+  const groups = new Map();
+  rows.forEach((r) => {
+    const st = r.Stage || 'No stage set';
+    if (!groups.has(st)) groups.set(st, []);
+    groups.get(st).push(r);
+  });
+  const stages = [...groups.keys()].sort((a, b) => implStageRank(a) - implStageRank(b) || a.localeCompare(b));
+  const color = (st) => { const c = IMPL_STAGE_COLORS[st] || '--slot-8'; return c.startsWith('--') ? `var(${c})` : c; };
+  const card = (r) => {
+    const d = toNumber(r.DaysInOnboarding);
+    const meta = [
+      r.NextMeeting ? `<span class="ob-card-next">📅 ${esc(r.NextMeeting)}</span>` : '<span class="ob-card-next none">No meeting scheduled</span>',
+      'LastEmail' in r ? `<span class="ob-card-mail${implStalled(r) ? ' late' : ''}">✉️ ${esc(implLastEmailText(r))}</span>` : '',
+      d != null && !Number.isNaN(d) ? `<span class="ob-card-days${d >= 70 ? ' late' : ''}">${fmtNum(d)} days</span>` : '',
+      !IMPL.rep && r.AccountManager ? `<span class="ob-card-am">${esc(r.AccountManager)}</span>` : '',
+      r.Status && r.Status !== 'Open' ? `<span class="ob-card-status">${esc(r.Status)}</span>` : '',
+    ].filter(Boolean).join('');
+    const btns = [
+      canCallPrep(r) ? `<button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : '',
+      canCloseOnboarding(r) && r.FirmId ? `<button type="button" class="ob-done-btn" data-close-firm="${esc(r.FirmId)}" data-name="${esc(r.Name)}">✓ Close</button>` : '',
+      overridesUnlocked ? exclButton(r.FirmId, r.Name, 'IM') : '',
+    ].filter(Boolean).join('');
+    return `<div class="ob-card${r._excl ? ' excl' : ''}${implStalled(r) ? ' stalled' : ''}"><div class="ob-card-name">${esc(r.Name || '–')}${r._excl ? exclTag() : ''}${implSignalMark(r)}${implStalledTag(r)}</div>`
+      + `<div class="ob-card-meta">${meta}</div>${btns ? `<div class="ob-card-btns">${btns}</div>` : ''}</div>`;
+  };
+  return `<div class="ob-board">${stages.map((st) => `<section class="ob-col" style="--ob-col:${color(st)}">`
+    + `<header class="ob-col-head"><span class="ob-col-dot"></span><span class="ob-col-name">${esc(st)}</span><span class="ob-col-count">${groups.get(st).length}</span></header>`
+    + `<div class="ob-col-cards">${groups.get(st).map(card).join('')}</div></section>`).join('')}</div>`;
 }
 
 function openImplDrill(col, label) {
@@ -392,20 +456,33 @@ function openImplDrill(col, label) {
   const back = document.createElement('div');
   back.className = 'drill-backdrop';
   back.id = 'impl-drill';
-  const count = spec.rows ? spec.rows.length : 0;
+  const count = spec.rows ? implCounted(spec.rows).length : 0;   // excluded firms are listed, not counted
   // Open onboardings can be closed (with the handoff form) by the firm's IM or a manager. On the split this
   // replaces the live site's simple "Onboarding complete" button, in the same far-right spot.
   const closeCol = spec.close && spec.rows && spec.rows.some(canCloseOnboarding);
   const closeCell = (r) => (closeCol ? `<td class="ob-done-cell">${canCloseOnboarding(r) && r.FirmId ? `<button type="button" class="ob-done-btn" data-close-firm="${esc(r.FirmId)}" data-name="${esc(r.Name)}">✓ Close onboarding</button>` : ''}</td>` : '');
-  const body = spec.rows && spec.rows.length
+  const listFor = (rows) => (rows && rows.length
     ? `<div class="table-wrap"><table class="drill-table${spec.fit ? ' drill-fit' : ''}"><thead><tr>${spec.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${overridesUnlocked ? '<th></th>' : ''}${closeCol ? '<th></th>' : ''}</tr></thead>`
-      + `<tbody>${spec.rows.map((r) => `<tr>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${closeCell(r)}</tr>`).join('')}</tbody></table></div>`
-    : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`;
-  back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
+      + `<tbody>${rows.map((r) => `<tr${exclRow(r._excl)}>${spec.cols.map(([k]) => `<td>${implDrillCell(k, r, spec.median)}${k === 'Name' && r._excl ? exclTag() : ''}${k === 'Name' ? implSignalMark(r) + implStalledTag(r) : ''}${k === 'Name' && spec.prep && canCallPrep(r) ? ` <button type="button" class="cp-btn" data-prep-firm="${esc(r.FirmId)}">Call prep</button>` : ''}</td>`).join('')}${overridesUnlocked ? `<td>${exclButton(r.FirmId, r.Name, 'IM')}</td>` : ''}${closeCell(r)}</tr>`).join('')}</tbody></table></div>`
+    : `<div class="empty-note">${esc(spec.empty || 'Nothing to show.')}</div>`);
+  // Open onboardings can also show as a board: one column per stage, soonest next meeting first.
+  const boardable = col === 'OpenOnboardings' && spec.rows && spec.rows.length;
+  let view = boardable ? ((() => { try { return localStorage.getItem('cs-ob-view'); } catch (e) { return null; } })() === 'board' ? 'board' : 'list') : 'list';
+  // Stalled filter (open onboardings): no meeting scheduled and no email with the firm in 14+ days.
+  const stalledN = boardable ? spec.rows.filter(implStalled).length : 0;
+  let onlyStalled = false;
+  const shown = () => (onlyStalled ? spec.rows.filter(implStalled) : spec.rows);
+  const bodyFor = (v) => (onlyStalled && !shown().length ? '<div class="empty-note">No stalled onboardings. 🎉</div>'
+    : v === 'board' ? implBoardHtml(shown()) : listFor(shown()));
+  const body = bodyFor(view);
+  back.innerHTML = `<div class="drill${spec.fit ? ' drill-firms' : ''}${view === 'board' ? ' drill-board' : ''}" role="dialog" aria-modal="true" aria-labelledby="impl-drill-title">
       <div class="drill-head">
         <div><h3 id="impl-drill-title">${esc(spec.title)}${spec.rows ? ` <span class="drill-count">${fmtNum(count)}</span>` : ''}</h3>
           ${spec.note ? `<div class="drill-note">${esc(spec.note)}${closeCol && LOCAL_ENV ? ' <button type="button" class="ob-preview" data-ob-preview>🎉 Preview the celebration</button>' : ''}</div>` : ''}</div>
-        <button type="button" class="drill-close" aria-label="Close">×</button>
+        <div class="drill-head-actions">${boardable && stalledN ? `<button type="button" class="ob-stalled-btn" data-ob-stalled aria-pressed="false" title="No meeting scheduled and no email with the firm in 14+ days">🧊 Stalled <b>${stalledN}</b></button>` : ''}${boardable ? `<div class="ob-view-switch" role="tablist" aria-label="View">
+            <button type="button" role="tab" class="ob-view-btn" data-ob-view="list" aria-selected="${view === 'list'}">☰ List</button>
+            <button type="button" role="tab" class="ob-view-btn" data-ob-view="board" aria-selected="${view === 'board'}">▦ Board</button></div>` : ''}
+          <button type="button" class="drill-close" aria-label="Close">×</button></div>
       </div>
       <div class="drill-body">${body}</div>
     </div>`;
@@ -413,6 +490,22 @@ function openImplDrill(col, label) {
     if (e.target === back) { closeImplDrill(); return; }
     const c = e.target.closest('[data-close-firm]');
     if (c) { openHandoff(c.dataset.closeFirm, c.dataset.name); return; }
+    const vb = e.target.closest('[data-ob-view]');
+    if (vb) {
+      view = vb.dataset.obView;
+      try { localStorage.setItem('cs-ob-view', view); } catch (err) { /* private mode */ }
+      back.querySelector('.drill').classList.toggle('drill-board', view === 'board');
+      back.querySelectorAll('[data-ob-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.obView === view)));
+      back.querySelector('.drill-body').innerHTML = bodyFor(view);
+      return;
+    }
+    const sb = e.target.closest('[data-ob-stalled]');
+    if (sb) {
+      onlyStalled = !onlyStalled;
+      sb.setAttribute('aria-pressed', String(onlyStalled));
+      back.querySelector('.drill-body').innerHTML = bodyFor(view);
+      return;
+    }
     const p = e.target.closest('[data-prep-firm]');
     if (p) { openCallPrep(IMPL.open.find((r) => String(r.FirmId) === p.dataset.prepFirm)); return; }
     if (e.target.closest('[data-ob-preview]')) { obDanceParty('Test Firm LLP', { preview: true }); return; }
@@ -458,7 +551,7 @@ function implRepStageCounts(label) {
   Object.entries(stats).forEach(([rep, st]) => { if (st.stages) out[rep] = st.stages; });
   const isCurrent = IMPL.months.length && label === IMPL.months[IMPL.months.length - 1].Month;
   if (!Object.keys(out).length && isCurrent) {
-    implMine(IMPL.open).forEach((f) => {
+    implCounted(implMine(IMPL.open)).forEach((f) => {
       const rep = f.AccountManager || 'Unassigned';
       const stage = f.Stage || 'No stage set';
       out[rep] = out[rep] || {};
@@ -521,7 +614,8 @@ function renderImplOverList() {
   // Lowest days first: firms that just crossed 70 days are the easiest to rescue.
   const over = implMine(IMPL.open).filter((f) => (toNumber(f.DaysInOnboarding) || 0) >= 70)
     .sort((a, b) => toNumber(a.DaysInOnboarding) - toNumber(b.DaysInOnboarding) || a.Name.localeCompare(b.Name));
-  document.getElementById('impl-over-note').textContent = `As of today · ${over.length} firm${over.length === 1 ? '' : 's'}`;
+  const overN = implCounted(over).length;
+  document.getElementById('impl-over-note').textContent = `As of today · ${overN} firm${overN === 1 ? '' : 's'}`;
   const cols = [['Name', 'Firm'], ['DaysInOnboarding', 'Days'], ['Status', 'Status'], ['Stage', 'Stage'],
     ['Specialist', 'Specialist'], ['AccountManager', 'IM'], ['NextMeeting', 'Next meeting']];
   const pages = Math.max(1, Math.ceil(over.length / IMPL_OVER_PAGE_SIZE));
@@ -529,9 +623,10 @@ function renderImplOverList() {
   const start = implOverPage * IMPL_OVER_PAGE_SIZE;
   const shown = over.slice(start, start + IMPL_OVER_PAGE_SIZE);
   const table = document.getElementById('impl-over');
-  table.querySelector('thead').innerHTML = `<tr>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr>`;
+  const txt = (k) => (['Status', 'Stage', 'Specialist', 'AccountManager'].includes(k) ? ' class="txt"' : '');
+  table.querySelector('thead').innerHTML = `<tr>${cols.map(([k, l]) => `<th${txt(k)}>${esc(l)}</th>`).join('')}</tr>`;
   table.querySelector('tbody').innerHTML = shown.length
-    ? shown.map((f) => `<tr>${cols.map(([k]) => `<td>${esc(f[k] || '–')}</td>`).join('')}</tr>`).join('')
+    ? shown.map((f) => `<tr${exclRow(f._excl)}>${cols.map(([k]) => `<td${txt(k)}>${esc(f[k] || '–')}${k === 'Name' && f._excl ? exclTag() : ''}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${cols.length}">No open onboardings at 70+ days.</td></tr>`;
 
   const pager = document.getElementById('impl-over-pager');

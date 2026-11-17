@@ -5,3 +5,9 @@ apps-script/contracts/secret.js
 apps-script/*/dash-auth.js
 !apps-script/shared/dash-auth.js
 apps-script/service-portal/secret.js
+
+apps-script/call-prep/secret.js
+.local-test/
+
+# Private: AM scorecard history (employee scores), pushed to Apps Script only
+apps-script/scorecards/am-history.js

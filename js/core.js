@@ -31,7 +31,7 @@ const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
    localStorage.setItem('cs-live-writes', 'on')   (and remove it after). */
 const LOCAL_ENV = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const DRY_RUN = LOCAL_ENV && (() => { try { return localStorage.getItem('cs-live-writes') !== 'on'; } catch (e) { return true; } })();
-const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart', 'handoffs', 'prep', 'prepStatus'];
+const READ_ACTIONS = [load, csm, get, page, handoffStart, handoffs, prep, prepStatus, calendarMatch, partners];
 const DRY_RUN_OK = {};   // backend URL → actions it accepts with dryRun: true (filled in by the tabs that have them)
 if (DRY_RUN) {
   const realFetch = window.fetch.bind(window);
@@ -74,7 +74,7 @@ const MANAGER_EMAILS = [
 const CONFIG = {
   CLIENT_ID: '1056458394718-fk8r113mqg2f55a9il4d4kg2a745d3ns.apps.googleusercontent.com',
   ALLOWED_DOMAIN: 'lawmatics.com',
-  SCOPES: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email',
+  SCOPES: 'https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly',
 };
 const ACCOUNTS_TAB = 'Accounts';   // tab the ChurnZero sync writes (see apps-script/sync-accounts.gs)
 // Signed contracts: metadata in the "Contracts" tab (written by apps-script/contracts), PDFs served
@@ -115,6 +115,15 @@ const isTeamOnly = (m, monthIdx) => {
   return from != null && monthIdx >= from;
 };
 const individualsOnly = (members, monthIdx) => (members || []).filter((m) => !isTeamOnly(m, monthIdx));
+// New reps in training (started 2026-11-16): shown on the leaderboard with an "In training" tag, but left
+// out of team numbers built from reps (overall CSAT %, average assigned per rep), incentives and the mascot.
+// Value = the month index (0 = Jan) they start counting; null = still in training. Matched on first name.
+const IN_TRAINING = { claire: null, dan: null, chelsea: null };
+const isTraining = (m, monthIdx) => {
+  const k = String(m.name || '').trim().split(/\s+/)[0].toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(IN_TRAINING, k)) return false;
+  return IN_TRAINING[k] == null || monthIdx < IN_TRAINING[k];
+};
 
 const LEADERBOARD_COLUMNS = [
   { key: 'convAssigned', label: 'Conv Assigned' },
@@ -196,7 +205,7 @@ function initAuth(onReady) {
       AUTH.token = resp.access_token;
       AUTH.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
       // Renewing an expired session: keep the page as it is, just swap the token.
-      if (AUTH.email) { hideSessionBanner(); saveAuth(readSavedAuth() || {}); return; }
+      if (AUTH.email) { hideSessionBanner(); saveAuth(readSavedAuth() || {}); if (AUTH.calPending) { AUTH.calPending = false; refreshCalendars(); } return; }
       let info;
       try {
         info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -269,7 +278,10 @@ function myRepName(names) {
     // Accents dropped first, so "Karamović" still matches admir.karamovic@.
     const parts = rep.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z\s-]/g, '').split(/[\s-]+/).filter(Boolean);
     const first = parts[0], last = parts[parts.length - 1];
-    return [first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local);
+    if ([first, `${first}.${last}`, `${first}${last}`, `${first[0]}${last}`, `${first}_${last}`].includes(local)) return true;
+    // First-name-only rows (e.g. "Claire", "Dan"): claire.ortiz@ → claire.
+    const head = local.split(/[._]/)[0];
+    return parts.length === 1 && (head === first || (head.length >= 3 && first.startsWith(head)));
   }) || null;
 }
 

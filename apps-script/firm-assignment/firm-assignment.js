@@ -68,6 +68,10 @@ var IM_FIELD = 'ImplementationManager', CSM_FIELD = 'CustomerSuccessManager';
 // live, this version keeps its rotation / tier / band settings under their own names so trying it
 // out can't change the live page's suggestions. Set to '' at go-live.
 var SPLIT_PROP = 'SPLIT_';
+// Duplicate ChurnZero users for the same person: their firms are folded into the real user, so a firm
+// assigned to the duplicate (e.g. Pittman Law Office → #120, Nov 2026) can't make a second "Kennedy" appear
+// in the rotation as a regular, lightly loaded rep.
+var DUPLICATE_USERS = { 120: PARTNER_REP_ID };
 
 function authorize() {
   SpreadsheetApp.openById(LOG_SHEET_ID);
@@ -253,6 +257,15 @@ function buildLoad_() {
     var im = cfGet_(cf, IM_FIELD), csm = cfGet_(cf, CSM_FIELD);
     add(imStat, im ? byName[nameKey_(im)] : a.UserAccountId, a, cf);
     add(csmStat, csm ? byName[nameKey_(csm)] : a.UserAccountId, a, cf);
+  });
+
+  Object.keys(DUPLICATE_USERS).forEach(function (dup) {
+    var d = reps[dup], to = DUPLICATE_USERS[dup];
+    if (!d) return;
+    var t = reps[to] || (reps[to] = { id: to, name: (users[to] && users[to].name) || d.name, am: false, firms: 0, mrr: 0, open: 0, openMrr: 0, lastStart: '' });
+    t.am = t.am || d.am; t.firms += d.firms; t.mrr += d.mrr; t.open += d.open; t.openMrr += d.openMrr;
+    if (d.lastStart > t.lastStart) t.lastStart = d.lastStart;
+    delete reps[dup];
   });
 
   // Assignments made from this page count as the rep's most recent assignment too.

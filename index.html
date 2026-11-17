@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2611091416">
+<link rel="stylesheet" href="style.css?v=1794939478">
 <link rel="icon" type="image/png" href="assets/logo-icon.png">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -79,6 +79,10 @@
         <button class="tab" data-tab="mrr">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/></svg>
           MRR Report
+        </button>
+        <button class="tab" data-tab="partners" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17 2 2a1 1 0 1 0 3-3"/><path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"/><path d="m21 3 1 11h-2"/><path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3"/><path d="M3 4h8"/></svg>
+          Partnerships
         </button>
       </nav>
     </div>
@@ -181,7 +185,7 @@
       </section>
 
       <section class="section">
-        <div class="section-head"><h2>Programs &amp; Content</h2><span class="rule"></span><span class="note">Entered by managers in manager mode</span></div>
+        <div class="section-head"><h2>Programs &amp; Content</h2><span class="rule"></span><span class="note">Updated automatically each morning · managers can still correct a value</span></div>
         <div id="manual-tiles" class="tiles"></div>
       </section>
 
@@ -192,7 +196,7 @@
         <section class="section-sub"><div id="quarter-tiles" class="tiles"></div></section>
         <div class="panel"><div class="table-wrap"><table id="quarterly-leaderboard"><thead></thead><tbody></tbody></table></div></div>
         <div class="section-head" style="margin-top:18px;"><h3 style="margin:0;">Quarter over Quarter</h3><span class="rule"></span><span class="note">Completed quarters only</span></div>
-        <div class="charts-grid">
+        <div class="charts-grid four">
           <div class="chart-card"><h3>New Conversations</h3><canvas id="chart-qoq-conversations"></canvas></div>
           <div class="chart-card"><h3>Phone Answer Rate</h3><canvas id="chart-qoq-answer-rate"></canvas></div>
           <div class="chart-card"><h3>Team CSAT %</h3><canvas id="chart-qoq-csat"></canvas></div>
@@ -235,6 +239,8 @@
       <section class="section" id="impl-tiles-section" hidden>
         <div class="section-head"><h2 id="impl-tiles-title"></h2><span class="rule"></span></div>
         <div id="impl-tiles" class="tiles"></div></section>
+      <section class="section cal-section" id="implCal" hidden></section>
+      <section class="section" id="implSignals" hidden></section>
       <p class="impl-note" id="impl-note" hidden></p>
 
       <section class="section">
@@ -293,6 +299,10 @@
           <a class="mgr-btn" id="scSheetLink" href="https://docs.google.com/spreadsheets/d/1j3Ry-8pZI_ccdl_AJoNTdTumXIcF8djRhlUFOaU4dq4/edit" target="_blank" rel="noopener">Open sheet ↗</a>
         </div>
       </div>
+      <div class="res-switch sc-tabs" role="tablist" aria-label="Team">
+        <button type="button" role="tab" class="res-switch-btn" data-sc-tab="support" aria-selected="true">Support</button>
+        <button type="button" role="tab" class="res-switch-btn" data-sc-tab="am" aria-selected="false">Account Managers</button>
+      </div>
       <div id="scError" class="error-banner" hidden></div>
       <div id="scBody"><div class="res-loading">Loading scorecards…</div></div>
     </div>
@@ -307,8 +317,34 @@
     </div>
   </div>
 
+  <!-- ===================== REP AUDITS (managers) ===================== -->
+  <div class="view" id="view-audit">
+    <div class="wrap">
+      <section class="loop-hero fr-hero ra-hero">
+        <div class="loop-hero-text">
+          <div class="loop-eyebrow">Manager mode · Coaching</div>
+          <h2>Rep <span>Audits</span></h2>
+          <p>Pick a support rep for a 30-day read of their Intercom conversations and Zoom customer calls: friction points, knowledge gaps, strengths and what to coach.</p>
+          <div class="loop-actions"><button type="button" class="loop-btn" id="raRefresh">↻ Refresh</button></div>
+        </div>
+      </section>
+      <div id="raBody"></div>
+    </div>
+  </div>
+
+  <!-- ===================== PARTNERSHIPS (managers + Kennedy) ===================== -->
+  <div class="view" id="view-partners">
+    <div class="wrap"><div id="partners"></div></div>
+  </div>
+
   <!-- ===================== CSM VIEW ===================== -->
   <div class="view" id="view-csm">
+    <div class="meta-line" id="csm-meta" hidden>
+      <span class="meta-sel">
+        <label for="csmRep">Rep</label>
+        <select id="csmRep" class="fb-select"></select>
+      </span>
+    </div>
     <div class="wrap"><div id="csm"></div></div>
   </div>
 
@@ -324,6 +360,8 @@
         <button type="button" role="tab" class="res-switch-btn" data-res-view="kb" aria-selected="true">Knowledge Base</button>
         <button type="button" role="tab" class="res-switch-btn" data-res-view="roundup" aria-selected="false">Product Roundup</button>
         <button type="button" role="tab" class="res-switch-btn" data-res-view="loop" aria-selected="false">Loop Tracker</button>
+        <button type="button" role="tab" class="res-switch-btn" data-res-view="fr" aria-selected="false">Feature Requests</button>
+        <button type="button" role="tab" class="res-switch-btn" data-res-view="bugs" aria-selected="false">Open Bugs</button>
         <button type="button" role="tab" class="res-switch-btn" data-res-view="firm" aria-selected="false">Firm Lookup</button>
       </div>
       <div id="resKB">
@@ -345,6 +383,8 @@
       </div>
       <div id="roundup" hidden></div>
       <div id="loop" hidden></div>
+      <div id="fr" hidden></div>
+      <div id="bugs" hidden></div>
       <div id="resFirm" hidden>
       <p class="res-firm-lead">Search any customer to see their account manager, billing, health, and usage — all in one place.</p>
       <div class="search-wrap">
@@ -374,22 +414,29 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt" crossorigin="anonymous" defer></script>
-<script src="js/core.js?v=2611091416" defer></script>
-<script src="js/support.js?v=2611091416" defer></script>
-<script src="js/implementation.js?v=2611091416" defer></script>
-<script src="js/call-prep.js?v=2611091416" defer></script>
-<script src="js/scorecards.js?v=2611091416" defer></script>
-<script src="js/firm-assignment.js?v=2611091416" defer></script>
-<script src="js/handoff.js?v=2611091416" defer></script>
-<script src="js/loop-tracker.js?v=2611091416" defer></script>
-<script src="js/roundup.js?v=2611091416" defer></script>
-<script src="js/resources.js?v=2611091416" defer></script>
-<script src="js/mrr.js?v=2611091416" defer></script>
-<script src="js/exclusions.js?v=2611091416" defer></script>
-<script src="js/csm.js?v=2611091416" defer></script>
-<script src="js/firm-lookup.js?v=2611091416" defer></script>
-<script src="js/service-portal.js?v=2611091416" defer></script>
-<script src="js/mock.js?v=2611091416" defer></script>
-<script src="js/boot.js?v=2611091416" defer></script>
+<script src="js/core.js?v=1794939478" defer></script>
+<script src="js/support.js?v=1794939478" defer></script>
+<script src="js/implementation.js?v=1794939478" defer></script>
+<script src="js/call-prep.js?v=1794939478" defer></script>
+<script src="js/scorecards.js?v=1794939478" defer></script>
+<script src="js/am-scorecards.js?v=1794939478" defer></script>
+<script src="js/firm-assignment.js?v=1794939478" defer></script>
+<script src="js/handoff.js?v=1794939478" defer></script>
+<script src="js/rep-audit.js?v=1794939478" defer></script>
+<script src="js/loop-tracker.js?v=1794939478" defer></script>
+<script src="js/feature-requests.js?v=1794939478" defer></script>
+<script src="js/bugs.js?v=1794939478" defer></script>
+<script src="js/roundup.js?v=1794939478" defer></script>
+<script src="js/resources.js?v=1794939478" defer></script>
+<script src="js/mrr.js?v=1794939478" defer></script>
+<script src="js/exclusions.js?v=1794939478" defer></script>
+<script src="js/calendar.js?v=1794939478" defer></script>
+<script src="js/signals.js?v=1794939478" defer></script>
+<script src="js/partners.js?v=1794939478" defer></script>
+<script src="js/csm.js?v=1794939478" defer></script>
+<script src="js/firm-lookup.js?v=1794939478" defer></script>
+<script src="js/service-portal.js?v=1794939478" defer></script>
+<script src="js/mock.js?v=1794939478" defer></script>
+<script src="js/boot.js?v=1794939478" defer></script>
 </body>
 </html>

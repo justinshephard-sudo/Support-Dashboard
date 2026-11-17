@@ -29,6 +29,7 @@ function setupTabs() {
     if (t.dataset.tab === 'impl') ensureTabData('impl').then(drawImplCharts);
     if (t.dataset.tab === 'services') mountServices();
     if (t.dataset.tab === 'resources') openResources();
+    if (t.dataset.tab === 'partners') openPartners();
   }));
 }
 
@@ -68,6 +69,10 @@ function bootstrap() {
   setupResources();
   setupRoundup();
   setupLoop();
+  setupFR();
+  setupBugs();
+  setupAudits();
+  setupAmScorecards();
   setupMrr();
   setupCsm();
   setupExclusions();

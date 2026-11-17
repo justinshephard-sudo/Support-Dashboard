@@ -86,8 +86,13 @@ const mrrReason = (e) => e.reason || 'Voluntary / unspecified';
 const mrrReasonCat = (e) => {
   if (!e.reason) return 'Other';
   if (e.reason === 'Not paid') return 'Non-payment';
-  const i = e.reason.indexOf(' - ');
-  return i === -1 ? 'Other' : e.reason.slice(0, i).trim() || 'Other';
+  // Known categories first, however the separator is typed ("Competitor - …", "Competitor- …",
+  // "Competitor – …", or just "Competitor"); anything else splits at its first dash.
+  const r = e.reason.trim(), low = r.toLowerCase();
+  const known = MRR_REASON_ORDER.find((c) => low === c.toLowerCase() || new RegExp(`^${c.toLowerCase()}\\s*[-–—:]`).test(low));
+  if (known) return known;
+  const m = r.match(/^(.+?)\s+[-–—]\s*|^(.+?)\s*[–—]\s*/);
+  return (m && (m[1] || m[2]) || '').trim() || 'Other';
 };
 const mrrChurnDate = (e) => e.date || e.ym + '-01';
 const mrrAm = (e) => (e.am || '').trim() || MRR_UNASSIGNED;
@@ -649,8 +654,9 @@ const MRR_CAT_LABEL = { u: 'Upgrade', r: 'Reactivation', d: 'Downgrade', c: 'Can
 function mrrOpenDrill(title, sub, rows, kind) {
   // Churn lists run by cancel date; movement lists start with the biggest losses.
   MRR.drill = { rows, kind, sort: kind === 'churn' ? 'date' : 'amt', dir: 1 };
-  const total = mrrSum(rows);
-  mrrModal(title, `${esc(sub)} · ${mrrPlural(rows.length, 'firm')} · ${mrrMoney(total, true)}`, mrrDrillTable());
+  const counted = rows.filter((e) => !e._excl);   // excluded firms (CSM) are listed struck through, not counted
+  const total = mrrSum(counted);
+  mrrModal(title, `${esc(sub)} · ${mrrPlural(counted.length, 'firm')} · ${mrrMoney(total, true)}`, mrrDrillTable());
 }
 
 function mrrDrillTable() {
@@ -672,7 +678,7 @@ function mrrDrillTable() {
   ].filter(Boolean);
   const arrow = (k) => (k === sort ? (dir === 1 ? ' ↑' : ' ↓') : '');
   return `<div class="table-wrap"><table class="drill-table mrr-table"><thead><tr>${cols.map(([k, l]) => `<th${k ? ` data-sort="${k}" class="sortable"` : ''}>${l}${k ? arrow(k) : ''}</th>`).join('')}</tr></thead>
-    <tbody>${list.map((e) => `<tr>${cols.map((c) => `<td>${c[2](e)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    <tbody>${list.map((e) => `<tr${e._excl ? ' class="excl-row"' : ''}>${cols.map((c, i) => `<td>${c[2](e)}${i === 0 && e._excl ? exclTag() : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function mrrDrillMonth(ym) { mrrOpenDrill(`Movement — ${mrrYmLabel(ym)}`, 'All existing-customer changes', MRR.all.filter((e) => e.ym === ym), 'move'); }
@@ -732,7 +738,7 @@ function mrrChartOpts(o) {
   const tick = cssVar('--faint'), grid = cssVar('--border');
   const fmt = (v) => (o.pct ? v + '%' : o.count ? v : (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US'));
   const valueAxis = { stacked: !!o.stacked, beginAtZero: true, grid: { color: grid }, ticks: { color: tick, callback: fmt, precision: 0 }, max: o.max };
-  const catAxis = { stacked: !!o.stacked, grid: { display: false }, ticks: { color: cssVar('--text-2'), font: { weight: 600 }, autoSkip: !o.horizontal } };
+  const catAxis = { stacked: !!o.stacked, grid: { display: false }, ticks: { color: cssVar('--text-2'), font: { weight: 600 }, autoSkip: !o.horizontal, maxRotation: o.horizontal ? undefined : 0 } };
   const scales = o.horizontal ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis };
   if (o.dual) scales.y2 = { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { color: tick, precision: 0 } };
   return {

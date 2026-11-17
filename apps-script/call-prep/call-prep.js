@@ -10,6 +10,10 @@
                 returns { pending, requestId }.
    prepStatus → { requestId } — the dashboard polls this until the prep arrives.
    prepResult → from the Zapier workflow (no Google sign-in; checked against a one-time token).
+   calendarMatch → { firmIds } — for the dashboard's weekly calendar: each open-onboarding firm's
+                contacts (names, emails, email domains) so a meeting titled with the client's name
+                ("Onboarding – Jane Doe") or with them invited finds its firm, plus rep name → email
+                from ChurnZero users (whose calendars to read). Cached 3 hours.
    complete   → { firmId } — the "Onboarding complete" button: sets the firm's Onboarding Status to
                 Complete in ChurnZero (the firm's IM / account manager or a manager). Until the IM/CSM
                 split's handoff form goes live, that's all it does. dryRun: true (local test) writes nothing.
@@ -22,7 +26,7 @@
      GONG_BASIC             Gong API "Basic" token (base64 of key:secret), as used by the
                             first-onboarding Zap — or GONG_ACCESS_KEY + GONG_ACCESS_SECRET
      GONG_BASE_URL          optional, defaults to Lawmatics' https://us-32500.api.gong.io
-     ZAPIER_HOOK_URL        optional, overrides the workflow's catch-hook URL below
+     ZAPIER_HOOK_URL        optional, overrides the catch-hook URL in secret.js
      ANTHROPIC_API_KEY      optional (direct Claude instead of Zapier)
      CZ_APP_KEY             ChurnZero write key (Admin → Application Keys), for "Onboarding complete"
      ASANA_TOKEN            Asana personal access token (read), for the firm's build tasks in the prep
@@ -36,11 +40,11 @@ var CLAUDE_MODEL = 'claude-opus-5-5';
 var GONG_LOOKBACK_DAYS = 150;
 var CACHE_HOURS = 12;
 var ASANA_WORKSPACE = '1199511629835021';
-// Catch hook of the Zapier workflow "CS Dashboard – Call Prep" (ZAPIER_HOOK_URL overrides it).
+// The Zapier workflow "CS Dashboard – Call Prep": its catch-hook URL (ZAPIER_HOOK_SECRET_URL) and the
+// key it checks (ZAPIER_HOOK_KEY) live in secret.js, which is pushed with clasp but kept out of git.
 // Where Zapier posts the finished prep: this web app's public /exec address. (ScriptApp.getService().getUrl()
 // can give a lawmatics.com-only or /dev address, which Zapier can't reach.)
 var CALLBACK_URL = 'https://script.google.com/macros/s/AKfycbwltwhfY4-dLO6F5uyfzxIXIMcb_N0_zrk-2q0atrk_c8fMj4USTTcEJK4QsChbmAVR/exec';
-var ZAPIER_HOOK_DEFAULT = 'https://hooks.zapier.com/hooks/catch/14095940/UmLNkN2lGE4oKLuI/';
 
 // What each call normally covers (CS Onboarding Roadmap deck). Call numbers follow the
 // ChurnZero onboarding stages ("First Onboarding" = call 1, …).
@@ -60,16 +64,236 @@ function doPost(e) {
   try { b = JSON.parse(e.postData.contents); } catch (err) { return dashJson_({ ok: false, error: 'bad request' }); }
   try {
     if (b.action === 'prepResult') return dashJson_(prepResult_(b));   // Zapier; checked by its token
+    if (b.action === 'signalVerdicts') return dashJson_(signalVerdicts_(b));   // Zapier; checked by its token
+    if (b.action === 'auditResult') return dashJson_(auditResult_(b));   // Zapier; checked by its token (rep-audit.js)
     var who = dashAuth_(b.token);
     if (!who.ok) return dashJson_(who);
     if (b.action === 'prep') return dashJson_(prep_(b, who));
     if (b.action === 'prepStatus') return dashJson_(prepStatus_(b));
     if (b.action === 'complete') return dashJson_(complete_(b, who));
+    if (b.action === 'calendarMatch') return dashJson_(calendarMatch_(b));
+    if (b.action === 'partners') return dashJson_(partners_(b, who));
+    if (b.action === 'closeThirdParty') return dashJson_(closeThirdParty_(b, who));
+    if (b.action === 'reviewSignal') return dashJson_(reviewSignal_(b, who));
+    if (/^audit/.test(b.action)) { var au = auditDoPost_(b, who); if (au) return dashJson_(au); }
     return dashJson_({ ok: false, error: 'unknown action' });
   } catch (err) {
     console.error(err && err.stack || err);
     return dashJson_({ ok: false, error: String((err && err.message) || err) });
   }
+}
+
+/* ---------- Partnerships tab ---------- */
+// Agency firms (Agency Firm or Agency Client Firm true) and affiliate firms (Partner Type = Affiliate),
+// with their referral partner. Managers and PARTNER_VIEWERS only (same list as js/partners.js).
+var PARTNER_VIEWERS = ['kennedy@lawmatics.com'];
+
+function partners_(b, who) {
+  if (!who.manager && PARTNER_VIEWERS.indexOf(who.email) < 0) return { ok: false, error: 'Partnerships is for managers and the partnerships team.' };
+  var cache = CacheService.getScriptCache();
+  var hit = !b.force && cache.get('partners2');
+  if (hit) return JSON.parse(hit);
+  var rows = czGet_('/Account', { $filter: "Cf/AgencyFirm eq true or Cf/AgencyClientFirm eq true or Cf/PartnerType eq 'Affiliate'", $top: 100,
+    $select: 'Id,Name,StartDate,IsActive,TotalContractAmount,LicenseCount,Cf/FirmId,Cf/ReferralPartner,Cf/PartnerType,Cf/AgencyFirm,Cf/AgencyClientFirm,Cf/OnboardingStatus' });
+  var firms = rows.map(function (a) {
+    var cf = a.Cf || {};
+    return { czId: a.Id, id: String(cf.FirmId || ''), name: String(a.Name || ''), start: String(a.StartDate || '').slice(0, 10), active: a.IsActive ? 1 : 0,
+      mrr: Math.round(Number(a.TotalContractAmount) || 0), seats: Number(a.LicenseCount) || 0, partner: String(cf.ReferralPartner || '').trim(),
+      type: String(cf.PartnerType || ''), agency: cf.AgencyFirm ? 1 : 0, agencyClient: cf.AgencyClientFirm ? 1 : 0, onboarding: String(cf.OnboardingStatus || '') };
+  });
+  // No Referral Partner in ChurnZero → fall back to the firm's parent account in Chargebee's hierarchy.
+  var parents = {};
+  try { parents = cbParents_(false); } catch (e) { console.error('Chargebee parents: ' + e.message); }
+  firms.forEach(function (f) {
+    if (!f.partner && f.id && parents[f.id]) { f.partner = parents[f.id]; f.partnerFrom = 'chargebee'; }
+  });
+  var out = { ok: true, at: new Date().toISOString(), firms: firms };
+  try { cache.put('partners2', JSON.stringify(out), 1800); } catch (e) { /* too big to cache */ }
+  return out;
+}
+
+/* ---------- New agency client firm → Slack DM to Kennedy ----------
+   Hourly (installAgencyAlerts): ChurnZero accounts with Agency Client Firm = true that started in the last
+   14 days and haven't been announced yet. Ops Comms DMs PARTNER_ALERT_TO through the "CS handoff queue →
+   Slack DMs" Zapier workflow (01a1e5c7, which accepts this script's ZAPIER_HOOK_KEY), so she can close the
+   onboarding on the Partnerships tab when the agency is onboarding the firm. Sent 7am–7pm PT on weekdays;
+   anything new overnight goes out the next morning. Seen firms: Script Property AGENCY_SEEN.
+   AGENCY_ALERTS_TEST = 'yes' sends to Justin's DM marked TEST instead. */
+var PARTNER_ALERT_TO = 'kennedy@lawmatics.com';
+var DM_HOOK = 'https://hooks.zapier.com/hooks/catch/14095940/CbQZ57FjBJ5vKBpFs/';
+var DASH_URL = 'https://justinshephard-sudo.github.io/Support-Dashboard/';
+
+function agencyNewFirms_() {
+  var since = Utilities.formatDate(new Date(Date.now() - 14 * 864e5), 'UTC', "yyyy-MM-dd'T'00:00:00'Z'");
+  return czGet_('/Account', { $filter: 'Cf/AgencyClientFirm eq true and StartDate ge ' + since, $top: 100,
+    $select: 'Id,Name,StartDate,IsActive,TotalContractAmount,Cf/FirmId,Cf/ReferralPartner,Cf/OnboardingStatus,Cf/AccountManager' });
+}
+function agencySeen_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('AGENCY_SEEN') || '[]'); } catch (e) { return []; }
+}
+function agencyMsg_(a, parents) {
+  var cf = a.Cf || {}, id = String(cf.FirmId || '');
+  var agency = String(cf.ReferralPartner || '').trim() || (parents[id] ? parents[id] + ' (Chargebee)' : 'not listed');
+  var start = String(a.StartDate || '').slice(0, 10);
+  return ':new: *New agency client firm: ' + a.Name + '*' + (id ? ' (Firm ' + id + ')' : '') + '\n'
+    + '• Agency: ' + agency + '\n'
+    + '• Started ' + (start || '—') + ' · $' + Math.round(Number(a.TotalContractAmount) || 0) + '/mo · Onboarding: ' + (cf.OnboardingStatus || 'not set')
+    + (cf.AccountManager ? ' · AM ' + cf.AccountManager : '') + '\n'
+    + 'If the agency is onboarding them, close it from the <' + DASH_URL + '|Partnerships tab> (Close → Onboarded by Third Party).';
+}
+function checkAgencyClients() {
+  var now = new Date(), hr = Number(Utilities.formatDate(now, 'America/Los_Angeles', 'H')), dow = Number(Utilities.formatDate(now, 'America/Los_Angeles', 'u'));
+  if (dow > 5 || hr < 7 || hr >= 19) return;
+  var seen = agencySeen_(), fresh = agencyNewFirms_().filter(function (a) { return seen.indexOf(a.Id) < 0; });
+  if (!fresh.length) return;
+  var parents = {};
+  try { parents = cbParents_(false); } catch (e) { /* no fallback */ }
+  var test = PropertiesService.getScriptProperties().getProperty('AGENCY_ALERTS_TEST') === 'yes';
+  var res = UrlFetchApp.fetch(DM_HOOK, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ id: Utilities.getUuid(), hookKey: ZAPIER_HOOK_KEY, test: test,
+      messages: fresh.map(function (a) { return { email: PARTNER_ALERT_TO, text: agencyMsg_(a, parents) }; }) }) });
+  if (res.getResponseCode() >= 300) { console.error('Agency alert hook ' + res.getResponseCode()); return; }
+  PropertiesService.getScriptProperties().setProperty('AGENCY_SEEN', JSON.stringify(seen.concat(fresh.map(function (a) { return a.Id; })).slice(-400)));
+  console.log('Agency alerts sent: ' + fresh.map(function (a) { return a.Name; }).join(', '));
+}
+// Run once from the editor: marks the agency client firms already in ChurnZero as seen (no flood of old ones),
+// sends ONE sample alert to Justin's DM (marked TEST), and installs the hourly check.
+function installAgencyAlerts() {
+  var list = agencyNewFirms_(), parents = {};
+  try { parents = cbParents_(false); } catch (e) { /* no fallback */ }
+  PropertiesService.getScriptProperties().setProperty('AGENCY_SEEN', JSON.stringify(list.map(function (a) { return a.Id; })));
+  var sample = list.slice().sort(function (x, y) { return String(y.StartDate).localeCompare(String(x.StartDate)); })[0];
+  if (sample) UrlFetchApp.fetch(DM_HOOK, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ id: Utilities.getUuid(), hookKey: ZAPIER_HOOK_KEY, test: true, messages: [{ email: PARTNER_ALERT_TO, text: agencyMsg_(sample, parents) }] }) });
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkAgencyClients'; })) {
+    ScriptApp.newTrigger('checkAgencyClients').timeBased().everyHours(1).create();
+  }
+  Logger.log(list.length + ' recent agency client firms marked as already seen. Sample sent to your DM: ' + (sample ? sample.Name : 'none') + '. Hourly check installed.');
+}
+
+/* ---------- Chargebee hierarchy: Firm ID → parent account name ----------
+   Every Chargebee customer with a parent (relationship.parent_id), keyed by its cf_firm_id, valued with
+   the parent's company name (or its contact's name). Needs Script Property CB_API_KEY (read-only key, same
+   kind as the missed-payments watcher). Rebuilt every 4 hours by refreshCbParents (installCbParentsTrigger),
+   kept in the script cache; built on demand if the cache is empty. */
+var CB_SITE = 'lawmatics';
+function cbGet_(path, params) {
+  var key = PropertiesService.getScriptProperties().getProperty('CB_API_KEY');
+  if (!key) throw new Error('CB_API_KEY isn’t set in Script Properties.');
+  var qs = Object.keys(params || {}).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+  var r = UrlFetchApp.fetch('https://' + CB_SITE + '.chargebee.com/api/v2' + path + (qs ? '?' + qs : ''),
+    { headers: { Authorization: 'Basic ' + Utilities.base64Encode(key + ':') }, muteHttpExceptions: true });
+  if (r.getResponseCode() >= 300) throw new Error('Chargebee HTTP ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
+  return JSON.parse(r.getContentText());
+}
+function cbParents_(force) {
+  var cache = CacheService.getScriptCache();
+  var hit = !force && cache.get('cb_parents');
+  if (hit) return JSON.parse(hit);
+  var all = {}, offset = null, guard = 0;
+  do {
+    var p = { limit: 100 };
+    if (offset) p.offset = offset;
+    var res = cbGet_('/customers', p);
+    (res.list || []).forEach(function (x) {
+      var c = x.customer || {};
+      all[c.id] = { firmId: String(c.cf_firm_id || '').replace(/\D/g, ''), parent: (c.relationship || {}).parent_id || '',
+        name: String(c.company || ((c.first_name || '') + ' ' + (c.last_name || ''))).trim() };
+    });
+    offset = res.next_offset || null;
+  } while (offset && ++guard < 200);
+  var map = {};
+  Object.keys(all).forEach(function (id) {
+    var c = all[id], par = c.parent && all[c.parent];
+    if (c.firmId && par && par.name) map[c.firmId] = par.name;
+  });
+  try { cache.put('cb_parents', JSON.stringify(map), 6 * 3600); } catch (e) { console.error('cb_parents too big to cache'); }
+  return map;
+}
+function refreshCbParents() {
+  var m = cbParents_(true);
+  CacheService.getScriptCache().remove('partners2');
+  console.log('Chargebee parents: ' + Object.keys(m).length + ' child firms');
+}
+// Run once from the editor (after adding CB_API_KEY): builds the list now, logs Mirador Law's parent, and keeps it fresh every 4 hours.
+function installCbParentsTrigger() {
+  var m = cbParents_(true);
+  CacheService.getScriptCache().remove('partners2');
+  Logger.log(Object.keys(m).length + ' firms have a Chargebee parent · Firm 5612 (Mirador Law) → ' + (m['5612'] || 'none'));
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'refreshCbParents'; })) {
+    ScriptApp.newTrigger('refreshCbParents').timeBased().everyHours(4).create();
+    Logger.log('Installed: refreshCbParents every 4 hours.');
+  }
+}
+
+// "Close" on a new agency-client firm: its agency onboards it, so the onboarding is closed as
+// Onboarded by Third Party. Only agency-client firms still open (Pre-Kickoff, Open or blank).
+var THIRD_PARTY_STATUS = 'Onboarded by Third Party';
+function closeThirdParty_(b, who) {
+  if (!who.manager && PARTNER_VIEWERS.indexOf(who.email) < 0) return { ok: false, error: 'Only managers and the partnerships team can close these.' };
+  var id = Number(b.czId);
+  if (!id) throw new Error('missing account');
+  var acct = czGet_('/Account', { $filter: 'Id eq ' + id, $select: 'Id,Name,ExternalId,Cf/AgencyClientFirm,Cf/OnboardingStatus' })[0];
+  if (!acct) throw new Error('That firm wasn’t found in ChurnZero.');
+  var cf = acct.Cf || {};
+  if (!cf.AgencyClientFirm) throw new Error(acct.Name + ' isn’t marked as an agency client firm in ChurnZero.');
+  if (cf.OnboardingStatus && OPEN_STATUSES.indexOf(cf.OnboardingStatus) < 0) throw new Error(acct.Name + '’s onboarding is already ' + cf.OnboardingStatus + '.');
+  if (b.dryRun) return { ok: true, dryRun: true, firm: acct.Name };
+  var appKey = PropertiesService.getScriptProperties().getProperty('CZ_APP_KEY');
+  if (!appKey) throw new Error('The ChurnZero write key (CZ_APP_KEY) isn’t set up yet.');
+  var res = UrlFetchApp.fetch(CZ_WRITE, { method: 'post', muteHttpExceptions: true, payload: {
+    appKey: appKey, accountExternalId: acct.ExternalId, action: 'setAttribute', entity: 'account', name: 'OnboardingStatus', value: THIRD_PARTY_STATUS } });
+  if (res.getResponseCode() >= 300) { console.error('ChurnZero write ' + res.getResponseCode()); throw new Error('ChurnZero rejected the change (HTTP ' + res.getResponseCode() + ').'); }
+  var confirmed = false;
+  for (var i = 0; i < 4 && !confirmed; i++) {
+    Utilities.sleep(2500);
+    var after = czGet_('/Account', { $filter: 'Id eq ' + id, $select: 'Id,Cf/OnboardingStatus' })[0];
+    confirmed = !!after && (after.Cf || {}).OnboardingStatus === THIRD_PARTY_STATUS;
+  }
+  CacheService.getScriptCache().remove('partners2');
+  console.log('Closed by third party: ' + acct.Name + ' (' + id + ') by ' + who.email + (confirmed ? '' : ' — not confirmed yet'));
+  return { ok: true, firm: acct.Name, status: THIRD_PARTY_STATUS, confirmed: confirmed };
+}
+
+/* ---------- calendar matching ---------- */
+
+var FREE_MAIL = /^(gmail|googlemail|yahoo|ymail|hotmail|outlook|icloud|aol|live|msn|me|mac|comcast|att|sbcglobal|verizon|protonmail|proton)\./;
+
+function calendarMatch_(b) {
+  var ids = (b.firmIds || []).map(function (x) { return String(x).replace(/[^\d]/g, ''); }).filter(Boolean)
+    .filter(function (x, i, a) { return a.indexOf(x) === i; }).slice(0, 400).sort();
+  var cache = CacheService.getScriptCache();
+  var key = 'calm_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, ids.join(','))).slice(0, 22);
+  var hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+
+  var byAcct = {};   // ChurnZero account Id → Firm ID
+  for (var i = 0; i < ids.length; i += 15) {
+    var f = ids.slice(i, i + 15).map(function (id) { return "Cf/FirmId eq '" + id + "'"; }).join(' or ');
+    czGet_('/Account', { $filter: f, $select: 'Id,Cf/FirmId' }).forEach(function (a) { byAcct[a.Id] = String((a.Cf || {}).FirmId || ''); });
+  }
+  var firms = {};
+  var acctIds = Object.keys(byAcct);
+  for (var j = 0; j < acctIds.length; j += 15) {
+    var g = acctIds.slice(j, j + 15).map(function (id) { return 'AccountId eq ' + id; }).join(' or ');
+    czGet_('/Contact', { $filter: g, $select: 'AccountId,FirstName,LastName,Email' }).forEach(function (c) {
+      var firmId = byAcct[c.AccountId];
+      if (!firmId) return;
+      var x = firms[firmId] = firms[firmId] || { names: [], emails: [], domains: [] };
+      var name = (String(c.FirstName || '').trim() + ' ' + String(c.LastName || '').trim()).trim();
+      if (name && name.indexOf(' ') > 0 && x.names.indexOf(name) < 0) x.names.push(name);   // first + last only; one word is too loose
+      var email = String(c.Email || '').trim().toLowerCase();
+      if (email && x.emails.indexOf(email) < 0) x.emails.push(email);
+      var d = email.split('@')[1];
+      if (d && !FREE_MAIL.test(d) && !/lawmatics\.com$/.test(d) && x.domains.indexOf(d) < 0) x.domains.push(d);
+    });
+  }
+  var reps = {};
+  var users = czUsers_();
+  Object.keys(users).forEach(function (k) { var u = users[k]; if (u.name && u.email && u.active !== false) reps[u.name] = String(u.email).toLowerCase(); });
+  var out = { ok: true, firms: firms, reps: reps };
+  try { cache.put(key, JSON.stringify(out), 3 * 3600); } catch (e) { /* too big to cache */ }
+  return out;
 }
 
 /* ---------- the prep ---------- */
@@ -134,12 +358,12 @@ function prep_(b, who) {
     return out;
   }
   // Through Zapier: hand off, then the dashboard polls prepStatus until prepResult lands.
-  var hook = props.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT;
-  if (!hook) throw new Error('The Zapier hook (ZAPIER_HOOK_URL) isn’t set up yet.');
+  var hook = props.getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? '' : ZAPIER_HOOK_SECRET_URL);
+  if (!hook || typeof ZAPIER_HOOK_KEY === 'undefined') throw new Error('The Zapier hook (ZAPIER_HOOK_URL) isn’t set up yet.');
   var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
   cache.put('req_' + requestId, JSON.stringify({ secret: secret, key: key, shell: out, at: Date.now() }), 3600);
   var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ requestId: requestId, token: secret, callbackUrl: CALLBACK_URL,
+    payload: JSON.stringify({ requestId: requestId, token: secret, hookKey: ZAPIER_HOOK_KEY, callbackUrl: CALLBACK_URL,
       instructions: prompt.system + '\n\n' + prompt.task + '\n\nReturn ONLY a JSON object (no code fence) with exactly these keys: ' +
         JSON.stringify(PREP_SCHEMA.properties, null, 0),
       context: prompt.context, transcript: transcript || '' }) });
@@ -454,7 +678,7 @@ function checkKeys() {
   var g = gongFetch_('/v2/users');
   Logger.log('Gong: ' + ((g && g.users) || []).length + ' users on the first page');
   var p = PropertiesService.getScriptProperties();
-  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || ZAPIER_HOOK_DEFAULT) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
+  Logger.log('Zapier hook: ' + (p.getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? 'not set' : 'secret.js')) + ' · direct Claude key: ' + (p.getProperty('ANTHROPIC_API_KEY') ? 'set' : 'not set (uses Zapier)'));
   Logger.log('Zapier posts results to: ' + CALLBACK_URL);
   var a = asanaTasks_('Garcia Sheppard');
   Logger.log('Asana: ' + (a.ok ? a.tasks.length + ' task(s) for Garcia Sheppard: ' + a.tasks.map(function (t) { return (t.completed ? '✓ ' : '○ ') + t.name; }).join(' | ') : a.error));
@@ -467,4 +691,434 @@ function checkKeys() {
 function checkPrep(firmId) {
   var out = prep_({ firmId: firmId || '5447', stage: '' }, { ok: true, manager: true, email: '' });
   Logger.log(JSON.stringify(out, null, 2));
+}
+
+// Run from the editor: lists the workspace's Gong trackers and checks whether this script's Gong key can
+// read tracker hits on calls (for the planned Call signals panel). Logs names and counts only.
+function checkGongTrackers() {
+  try {
+    var t = gongFetch_('/v2/settings/trackers');
+    var list = (t && (t.keywordTrackers || t.trackers)) || [];
+    Logger.log('Trackers in Gong: %s', list.length);
+    list.forEach(function (x) {
+      var n = x.trackerName || x.name;
+      var nk = 0; (x.languageKeywords || []).forEach(function (l) { nk += (l.keywords || []).length; });
+      Logger.log(' - "%s"%s · %s phrases%s', n, x.enabled === false ? ' (off)' : '', nk, signalTracker_(n) ? '  ← dashboard uses this as ' + signalTracker_(n) : '');
+    });
+  } catch (e) { Logger.log('Tracker list: %s', e.message); }
+  // Hits per tracker on the last 7 days of calls (all reps), and how many the customer said.
+  try {
+    var to = new Date(), from = new Date(to.getTime() - 7 * 864e5), tally = {}, calls = 0, cursor = null, guard = 0;
+    do {
+      var c = gongFetch_('/v2/calls/extensive', { cursor: cursor || undefined, filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
+        contentSelector: { exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
+      ((c && c.calls) || []).forEach(function (x) {
+        calls++;
+        var ext = {};
+        (x.parties || []).forEach(function (p) { if (p.affiliation === 'External') ext[p.speakerId] = true; });
+        ((x.content || {}).trackers || []).forEach(function (k) {
+          if (!k.count) return;
+          var e = tally[k.name] = tally[k.name] || { calls: 0, hits: 0, customer: 0 };
+          e.calls++; e.hits += k.count;
+          e.customer += (k.occurrences || []).filter(function (o) { return ext[o.speakerId]; }).length;
+        });
+      });
+      cursor = c && c.records && c.records.cursor;
+    } while (cursor && guard++ < 10);
+    Logger.log('Last 7 days: %s calls', calls);
+    Object.keys(tally).sort().forEach(function (n) { var e = tally[n]; Logger.log(' - "%s": %s calls, %s hits, %s by the customer', n, e.calls, e.hits, e.customer); });
+  } catch (e) { Logger.log('Tracker hits on calls: %s', e.message); }
+}
+
+/* ---------- Call signals ----------
+   Hourly (installCallSignalsTrigger): the IMs' Gong calls from the last few days, with hits on
+   the Gong trackers in SIGNAL_TRACKERS, matched to their onboarding firm, into the "Call Signals"
+   tab of the Support Team Report sheet (one row per call × tracker, kept SIGNAL_KEEP_DAYS). The
+   Implementation tab shows them to managers. Gong keeps processing calls for a while after they
+   end, so every run re-reads the last SIGNAL_WINDOW_DAYS and replaces those calls' rows. */
+var SIGNAL_SHEET_ID = '1eqPYnDmD194GREzSIlfceLWmQyaBRW18mptL_uVRKCc';
+var SIGNAL_TAB = 'Call Signals';
+// Only what the customer says counts (a hit by our IM is ignored), and only on calls with someone from outside.
+// Feature Request was dropped 2026-11-04 as noise.
+// Each signal and the Gong tracker names that feed it, preferred first (matched ignoring case and dash
+// style). 2026-11-04: tightened onboarding trackers; Competitors and Feature Request dropped as noise.
+// 2026-11-10: Pushback dropped (onboarding talk about being busy isn't an alarm); Justin turned its Gong tracker off.
+// 2026-11-10: Justin repurposed the Gong "Ai pushback" tracker as "Ai Sold vs Reality".
+var SIGNAL_TRACKERS = ['Onboarding – Churn risk', 'Onboarding – Blocked by a bug', 'Onboarding – Sold vs reality'];
+var SIGNAL_ALIASES = {
+  // Justin tightened the existing Churn / Product Bugs / Implementation Objection trackers in place (2026-11-04).
+  // ("At risk", a Gong AI tracker, was tried and dropped: it flagged happy customers.)
+  // 2026-11-06: only Justin's trained AI trackers count now; the keyword trackers (Churn, Product Bugs,
+  // Implementation Objection) were dropped along with their old flags.
+  'Onboarding – Churn risk': ['Ai churn risk'],
+  'Onboarding – Blocked by a bug': ['Ai Onboarding Bug'],
+  'Onboarding – Pushback': ['Ai pushback'],
+  'Onboarding – Sold vs reality': ['Ai Sold vs Reality'],
+};
+var SIGNAL_VERSION = '12';      // bump when the rules change: the next run rebuilds the last SIGNAL_FIRST_DAYS
+var SIGNAL_WINDOW_DAYS = 3;
+var SIGNAL_FIRST_DAYS = 30;     // the first run fills in the last month
+var SIGNAL_KEEP_DAYS = 90;
+var SIGNAL_COLUMNS = ['CallId', 'Date', 'Rep', 'FirmId', 'Firm', 'CallTitle', 'CallUrl', 'Minutes', 'Tracker', 'Count', 'CustomerCount', 'Quotes', 'GongTracker',
+  'Verdict', 'Reason'];
+// AI second check (2026-11-10): each Gong hit, with ~2 minutes of transcript around it, goes to Claude (AI by Zapier,
+// through the call-prep workflow) which answers whether it's a REAL alarm. Only Verdict = yes shows on the page and
+// in the digest; blank = waiting for the check. Verdicts are kept in the "Call Signal Verdicts" tab (key CallId|Tracker).
+var SIGNAL_VERDICT_TAB = 'Call Signal Verdicts';
+var SIGNAL_JUDGE_MAX = 20;   // hits per AI request
+// Bump when the instructions change: every hit gets judged again under the new rules.
+var SIGNAL_JUDGE_VERSION = '3';   // 3: Sold vs reality added   // 2026-11-10: Lawmatics integrations (Google Ads, CallRail, email/calendar sync…) count as Lawmatics
+var SIGNAL_JUDGE_PROMPT = [
+  'You review moments that a Gong tracker flagged on Lawmatics onboarding calls. Lawmatics is legal CRM / client intake software.',
+  'On these calls an implementation manager (\"Lawmatics\") sets up a new customer law firm (\"Customer\"). Customers constantly describe their OLD software,',
+  'their previous vendor, how they work today, problems with other tools, and their own clients. None of that is an alarm.',
+  '',
+  'For each hit decide if it is a REAL alarm that a manager should act on:',
+  '- \"Onboarding – Churn risk\": the Customer says, about LAWMATICS, that they may cancel, leave, not renew, want a refund, are switching',
+  '  away, or seriously doubt Lawmatics is worth it / is what they were sold.',
+  '- \"Onboarding – Blocked by a bug\": the Customer says something IN LAWMATICS is broken right now (error, won\u2019t save/load, behaves wrong)',
+  '  AND it is stopping or delaying their setup.',
+  '  Lawmatics INTEGRATIONS are part of Lawmatics: Google Ads, Facebook/Meta lead ads, CallRail, Gmail/Outlook email sync, Google/Outlook',
+  '  calendar sync, Zoom, QuickBooks/LawPay/payments, e-signature, Zapier, website forms and any other connection set up inside Lawmatics.',
+  '  If one of those won\u2019t connect, errors, or doesn\u2019t sync, that IS a real alarm even if the root cause may be on the other company\u2019s',
+  '  side, unless it is clearly a simple setup step that was fixed on the call. A problem with a tool used outside Lawmatics is not.',
+  '- \"Onboarding – Sold vs reality\": the Customer says Lawmatics is missing something, works differently, or costs/includes something',
+  '  different from what they were TOLD BEFORE BUYING (by sales, a demo, or the website) \u2014 e.g. \"we were told it could\u2026\", \"sales said\u2026\",',
+  '  \"the demo showed\u2026\", \"that\u2019s what we bought it for\", \"nobody told us\u2026\". It must be a claim about what they were promised.',
+  '  Answer false for: \"can it do X?\" questions with no claim of a promise, feature requests, describing their old software, bugs',
+  '  (that is the bug signal), talk of leaving (churn signal), or the IM explaining what Lawmatics does.',
+  'Answer real = false when the Customer is: describing a previous system or vendor; explaining their current process; talking about',
+  'cancelling a meeting, a consult, a client matter, or another tool; asking how to do something; confused but not blocked; making small',
+  'talk; or repeating/agreeing with what Lawmatics said. Also false when only Lawmatics says it. When unsure, answer false.',
+  '',
+  'Each hit has: key, signal, and context (the transcript around the moment, each line labeled Customer: or Lawmatics:).',
+  'Return ONLY JSON (no code fence): {\"verdicts\":[{\"key\":\"<key>\",\"real\":true|false,\"reason\":\"<max 15 words>\"}]} with one entry per hit.',
+].join('\n');
+
+// "Reviewed" on a flagged call (managers): one row per call in the "Call Signal Reviews" tab, which
+// the page reads to hide reviewed calls. undo removes the row.
+var SIGNAL_REVIEW_TAB = 'Call Signal Reviews';
+function reviewSignal_(b, who) {
+  if (!who.manager) return { ok: false, error: 'Only managers can review call signals.' };
+  var callId = String(b.callId || '').replace(/[^\w-]/g, '').slice(0, 40);
+  if (!callId) throw new Error('missing call');
+  if (b.dryRun) return { ok: true, dryRun: true };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+    var sh = ss.getSheetByName(SIGNAL_REVIEW_TAB);
+    if (!sh) { sh = ss.insertSheet(SIGNAL_REVIEW_TAB); sh.getRange(1, 1, 1, 3).setValues([['CallId', 'ReviewedBy', 'ReviewedAt']]).setFontWeight('bold'); }
+    var ids = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues().map(function (r) { return r[0]; }) : [];
+    for (var i = ids.length - 1; i >= 0; i--) if (ids[i] === callId) sh.deleteRow(i + 2);
+    var at = new Date().toISOString();
+    if (!b.undo) sh.appendRow(["'" + callId, who.email, at]);
+    return { ok: true, callId: callId, reviewed: !b.undo, by: who.email, at: at };
+  } finally { lock.releaseLock(); }
+}
+
+// Run once from the editor: authorizes the sheet access, installs the hourly run, and fills the tab.
+function installCallSignalsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'syncCallSignals') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('syncCallSignals').timeBased().everyHours(1).create();
+  syncCallSignals();
+}
+
+function syncCallSignals() {
+  var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+  var sh = ss.getSheetByName(SIGNAL_TAB) || ss.insertSheet(SIGNAL_TAB);
+  var props = PropertiesService.getScriptProperties();
+  // A new SIGNAL_VERSION or AI-check version re-reads the last 30 days, so every hit is judged under the current rules.
+  var rebuild = props.getProperty('SIGNAL_VERSION') !== SIGNAL_VERSION + '.' + SIGNAL_JUDGE_VERSION;
+  var old = !rebuild && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, SIGNAL_COLUMNS.length).getDisplayValues() : [];
+  var days = old.length ? SIGNAL_WINDOW_DAYS : SIGNAL_FIRST_DAYS;
+  var to = new Date(), from = new Date(to.getTime() - days * 864e5);
+
+  // The IMs: whoever owns an open onboarding (Impl - Open Firms), as Gong users.
+  var open = sheetRows_(ss.getSheetByName('Impl - Open Firms'));
+  var users = czUsers_(), byName = {};
+  Object.keys(users).forEach(function (k) { if (users[k].name) byName[users[k].name] = users[k]; });
+  var gongIds = {}, repByGong = {};
+  open.forEach(function (f) {
+    var u = byName[f.AccountManager];
+    if (!u || gongIds[f.AccountManager] !== undefined) return;
+    var id = gongUserId_(u.email);
+    gongIds[f.AccountManager] = id;
+    if (id) repByGong[id] = f.AccountManager;
+  });
+  var ids = Object.keys(repByGong);
+  if (!ids.length) throw new Error('No IMs found in Gong.');
+  var match = calendarMatch_({ firmIds: open.map(function (f) { return f.FirmId; }) }).firms;
+
+  var calls = [], cursor = null, guard = 0;
+  do {
+    var r = gongFetch_('/v2/calls/extensive', { cursor: cursor || undefined,
+      filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString(), primaryUserIds: ids },
+      contentSelector: { context: 'Extended', exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
+    calls = calls.concat((r && r.calls) || []);
+    cursor = r && r.records && r.records.cursor;
+  } while (cursor && guard++ < 30);
+
+  var rows = [], seen = {}, needQuotes = [];
+  calls.forEach(function (c) {
+    var m = c.metaData || {};
+    seen[m.id] = true;
+    var external = {};
+    (c.parties || []).forEach(function (p) { if (p.affiliation === 'External' && p.speakerId) external[p.speakerId] = true; });
+    var hits = ((c.content || {}).trackers || []).filter(function (t) {
+      return signalTracker_(t.name) && (t.occurrences || []).some(function (o) { return external[o.speakerId]; });
+    });
+    // Where both the new and the old tracker fired for the same signal, keep only the preferred one.
+    hits = hits.filter(function (t) {
+      return !hits.some(function (u) { return u !== t && signalTracker_(u.name) === signalTracker_(t.name) && signalAliasRank_(u.name) < signalAliasRank_(t.name); });
+    });
+    if (!hits.length) return;
+    var firm = signalFirm_(c, open, match);
+    hits.forEach(function (t) {
+      var occ = (t.occurrences || []).filter(function (o) { return external[o.speakerId]; }).sort(function (a, b) { return a.startTime - b.startTime; });
+      var row = { CallId: m.id, Date: String(m.started || '').slice(0, 19), Rep: repByGong[m.primaryUserId] || '', FirmId: firm ? firm.FirmId : '',
+        Firm: firm ? firm.Name : '', CallTitle: m.title || 'Call', CallUrl: m.url || '', Minutes: Math.round((m.duration || 0) / 60),
+        Tracker: signalTracker_(t.name), Count: occ.length, CustomerCount: occ.length, GongTracker: t.name,
+        _occ: occ, _ext: external };
+      rows.push(row);
+      if (needQuotes.indexOf(m.id) < 0) needQuotes.push(m.id);
+    });
+  });
+
+  // The sentence at each hit, from the transcripts (20 calls per request).
+  var quotes = {};
+  for (var i = 0; i < needQuotes.length; i += 20) {
+    var tr = gongFetch_('/v2/calls/transcript', { filter: { callIds: needQuotes.slice(i, i + 20) } });
+    ((tr && tr.callTranscripts) || []).forEach(function (x) {
+      var sents = [];
+      (x.transcript || []).forEach(function (seg) { (seg.sentences || []).forEach(function (s) { sents.push({ start: s.start, end: s.end, text: s.text, who: seg.speakerId }); }); });
+      quotes[x.callId] = sents;
+    });
+  }
+  // Each hit is checked against the tracker's own phrases: the customer must have said one of them within a
+  // few seconds of the hit, and that sentence becomes the quote. Hits that don't check out are dropped as
+  // false alarms. (Trackers with no phrase list in Gong, e.g. AI trackers, keep the sentence at the hit.)
+  var phrases = signalKeywords_();
+  rows = rows.filter(function (row) {
+    var sents = quotes[row.CallId] || [];
+    var list = phrases[signalKey_(row.GongTracker)] || [];
+    var found = row._occ.map(function (o) {
+      var ms = o.startTime * 1000;   // tracker hits are in seconds, transcript sentences in ms
+      var near = sents.filter(function (s) { return s.who === o.speakerId && s.end >= ms - 3000 && s.start <= ms + 8000; });
+      if (list.length) {
+        for (var i = 0; i < near.length; i++) {
+          var hit = signalPhraseIn_(near[i].text, list);
+          if (hit) return { t: Math.round(near[i].start / 1000), customer: true, text: near[i].text.slice(0, 280), phrase: hit };
+        }
+        return null;
+      }
+      // AI trackers: Gong marks a moment, not a phrase, so the sentence right at the hit is often filler
+      // ("Okay.", "Give me one second."). Quote the customer's most substantial sentence around the hit
+      // instead, and treat a hit with nothing substantial nearby as noise.
+      var words = function (t) { return String(t || '').split(/\s+/).filter(Boolean).length; };
+      var best = null;
+      sents.forEach(function (s) {
+        if (s.who !== o.speakerId || s.end < ms - 15000 || s.start > ms + 25000 || words(s.text) < 7) return;
+        if (!best || words(s.text) > words(best.text)) best = s;
+      });
+      return best ? { t: Math.round(best.start / 1000), customer: true, text: best.text.slice(0, 280) } : null;
+    }).filter(Boolean);
+    if (!found.length && (list.length || sents.length)) return false;   // nothing substantial said: noise
+    row.Count = row.CustomerCount = found.length || row.Count;
+    row.Quotes = JSON.stringify(found.slice(0, 3));
+    // ~2 minutes of transcript around the first hit, both sides labeled, for the AI check.
+    var at = (row._occ[0] ? row._occ[0].startTime * 1000 : (found[0] ? found[0].t * 1000 : 0));
+    row._ctx = sents.filter(function (s) { return s.end >= at - 60000 && s.start <= at + 60000; })
+      .map(function (s) { return (row._ext[s.who] ? 'Customer: ' : 'Lawmatics: ') + s.text; }).join('\n').slice(0, 3000);
+    return true;
+  });
+
+  // Verdicts already given; anything without one goes to the AI check (once every 3 hours at most).
+  var verdicts = signalVerdicts_load_();
+  var pending = [];
+  rows.forEach(function (row) {
+    var v = verdicts[SIGNAL_JUDGE_VERSION + ':' + row.CallId + '|' + row.Tracker];
+    if (v) { row.Verdict = v.verdict; row.Reason = v.reason; }
+    else { row.Verdict = ''; row.Reason = ''; if (row._ctx) pending.push(row); }
+  });
+  var vi = SIGNAL_COLUMNS.indexOf('Verdict'), ri = SIGNAL_COLUMNS.indexOf('Reason'), ti = SIGNAL_COLUMNS.indexOf('Tracker');
+  old.forEach(function (r) {
+    var v = verdicts[SIGNAL_JUDGE_VERSION + ':' + r[0] + '|' + r[ti]];
+    r[vi] = v ? v.verdict : ''; r[ri] = v ? v.reason : '';
+  });
+
+  // Keep older rows for calls this run didn't re-read; drop anything past SIGNAL_KEEP_DAYS.
+  var cutoff = new Date(to.getTime() - SIGNAL_KEEP_DAYS * 864e5).toISOString().slice(0, 19);
+  var keep = old.filter(function (r) { return !seen[r[0]] && r[1] >= cutoff; });
+  var out = keep.concat(rows.map(function (r) { return SIGNAL_COLUMNS.map(function (c) { return r[c] === undefined ? '' : r[c]; }); }))
+    .sort(function (a, b) { return a[1] < b[1] ? 1 : -1; });
+  sh.clearContents();
+  var all = [SIGNAL_COLUMNS].concat(out).map(function (r) { return r.map(function (v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }); });
+  sh.getRange(1, 1, all.length, SIGNAL_COLUMNS.length).setNumberFormat('@').setValues(all);
+  props.setProperty('SIGNAL_VERSION', SIGNAL_VERSION + '.' + SIGNAL_JUDGE_VERSION);
+  var sent = 0;
+  try { sent = signalJudge_(pending); } catch (e) { console.error('AI check: ' + (e && e.message)); }
+  console.log('Call signals: ' + calls.length + ' calls read, ' + rows.length + ' tracker rows written (' + out.length + ' kept in all), ' +
+    sent + ' sent to the AI check');
+}
+
+// verdicts by "CallId|Tracker" → { verdict: 'yes' | 'no', reason }.
+function signalVerdicts_load_() {
+  var sh = SpreadsheetApp.openById(SIGNAL_SHEET_ID).getSheetByName(SIGNAL_VERDICT_TAB);
+  var out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 3).getDisplayValues().forEach(function (r) { if (r[0]) out[r[0]] = { verdict: r[1], reason: r[2] }; });
+  return out;
+}
+
+// Sends hits without a verdict to the call-prep Zapier workflow (kind "signals"); it posts back signalVerdicts.
+function signalJudge_(pending) {
+  var cache = CacheService.getScriptCache();
+  var todo = pending.filter(function (r) { return !cache.get('sigsent_' + Utilities.base64EncodeWebSafe(SIGNAL_JUDGE_VERSION + ':' + r.CallId + '|' + r.Tracker)); }).slice(0, SIGNAL_JUDGE_MAX);
+  if (!todo.length) return 0;
+  var hook = PropertiesService.getScriptProperties().getProperty('ZAPIER_HOOK_URL') || (typeof ZAPIER_HOOK_SECRET_URL === 'undefined' ? '' : ZAPIER_HOOK_SECRET_URL);
+  if (!hook || typeof ZAPIER_HOOK_KEY === 'undefined') throw new Error('Zapier hook not set up');
+  var requestId = Utilities.getUuid(), secret = Utilities.getUuid();
+  var items = todo.map(function (r) { return { key: r.CallId + '|' + r.Tracker, signal: r.Tracker, context: r._ctx }; });
+  cache.put('sigreq_' + requestId, JSON.stringify({ secret: secret, keys: items.map(function (i) { return i.key; }) }), 6 * 3600);
+  var res = UrlFetchApp.fetch(hook, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ kind: 'signals', requestId: requestId, token: secret, hookKey: ZAPIER_HOOK_KEY, callbackUrl: CALLBACK_URL,
+      instructions: SIGNAL_JUDGE_PROMPT, items: JSON.stringify(items) }) });
+  if (res.getResponseCode() >= 300) throw new Error('Zapier HTTP ' + res.getResponseCode());
+  todo.forEach(function (r) { cache.put('sigsent_' + Utilities.base64EncodeWebSafe(SIGNAL_JUDGE_VERSION + ':' + r.CallId + '|' + r.Tracker), '1', 3 * 3600); });
+  return todo.length;
+}
+
+// Zapier posts the AI's verdicts back here (checked by the one-time token). Saves them and fills the
+// Verdict / Reason columns of the Call Signals tab straight away.
+function signalVerdicts_(b) {
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get('sigreq_' + String(b.requestId || ''));
+  if (!raw) return { ok: false, error: 'unknown or expired request' };
+  var req = JSON.parse(raw);
+  if (!b.token || b.token !== req.secret) return { ok: false, error: 'bad token' };
+  if (!Array.isArray(b.verdicts)) { console.error('AI check: ' + (b.error || 'no verdicts')); return { ok: true, saved: 0 }; }
+  var asked = {};
+  req.keys.forEach(function (k) { asked[k] = true; });
+  var got = {};
+  b.verdicts.forEach(function (v) {
+    if (v && asked[v.key]) got[v.key] = { verdict: v.real === true ? 'yes' : 'no', reason: dashSafe_(String(v.reason || '').slice(0, 200)) };
+  });
+  var keys = Object.keys(got);
+  if (!keys.length) return { ok: true, saved: 0 };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = SpreadsheetApp.openById(SIGNAL_SHEET_ID);
+    var vs = ss.getSheetByName(SIGNAL_VERDICT_TAB);
+    if (!vs) { vs = ss.insertSheet(SIGNAL_VERDICT_TAB); vs.getRange(1, 1, 1, 4).setValues([['Key', 'Verdict', 'Reason', 'At']]).setFontWeight('bold'); }
+    var now = new Date().toISOString();
+    vs.getRange(vs.getLastRow() + 1, 1, keys.length, 4).setNumberFormat('@')
+      .setValues(keys.map(function (k) { return [SIGNAL_JUDGE_VERSION + ':' + k, got[k].verdict, got[k].reason, now]; }));
+    var sh = ss.getSheetByName(SIGNAL_TAB);
+    if (sh && sh.getLastRow() > 1) {
+      var n = sh.getLastRow() - 1;
+      var vals = sh.getRange(2, 1, n, SIGNAL_COLUMNS.length).getDisplayValues();
+      var vi = SIGNAL_COLUMNS.indexOf('Verdict'), ri = SIGNAL_COLUMNS.indexOf('Reason'), ti = SIGNAL_COLUMNS.indexOf('Tracker');
+      var changed = false;
+      vals.forEach(function (r) { var g = got[r[0] + '|' + r[ti]]; if (g) { r[vi] = g.verdict; r[ri] = g.reason; changed = true; } });
+      if (changed) sh.getRange(2, vi + 1, n, 2).setNumberFormat('@').setValues(vals.map(function (r) { return [r[vi], r[ri]]; }));
+    }
+  } finally { lock.releaseLock(); }
+  return { ok: true, saved: keys.length };
+}
+
+// Gong tracker name → its keyword phrases (lowercase), from Gong's tracker settings. {} if unavailable.
+function signalKeywords_() {
+  var out = {};
+  try {
+    var t = gongFetch_('/v2/settings/trackers');
+    ((t && (t.keywordTrackers || t.trackers)) || []).forEach(function (x) {
+      var words = [];
+      (x.languageKeywords || []).forEach(function (l) { words = words.concat(l.keywords || []); });
+      words = words.concat(x.keywords || []);
+      out[signalKey_(x.trackerName || x.name)] = words.map(function (w) { return signalNorm_(w); }).filter(Boolean);
+    });
+  } catch (e) { console.error('Tracker phrases: ' + e.message); }
+  return out;
+}
+function signalKey_(s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); }
+function signalNorm_(s) { return String(s || '').toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+// The first phrase said in the text, word by word (each word may carry an ending: cancel → cancelling), or ''.
+function signalPhraseIn_(text, phrases) {
+  var words = signalNorm_(text).split(' ');
+  for (var p = 0; p < phrases.length; p++) {
+    var pw = phrases[p].split(' ');
+    for (var i = 0; i + pw.length <= words.length; i++) {
+      var ok = true;
+      for (var j = 0; j < pw.length && ok; j++) ok = words[i + j] === pw[j] || (pw[j].length >= 4 && words[i + j].indexOf(pw[j]) === 0);
+      if (ok) return phrases[p];
+    }
+  }
+  return '';
+}
+
+// Gong tracker name → our SIGNAL_TRACKERS spelling (ignoring case, spaces and -/–/—), or ''.
+function signalTracker_(name) {
+  var key = function (s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); };
+  return SIGNAL_TRACKERS.filter(function (n) { return SIGNAL_ALIASES[n].some(function (a) { return key(a) === key(name); }); })[0] || '';
+}
+// Rank of a Gong tracker name among its signal's aliases (0 = preferred).
+function signalAliasRank_(name) {
+  var key = function (s) { return String(s || '').toLowerCase().replace(/[\s\-–—]+/g, ' ').trim(); };
+  var sig = signalTracker_(name);
+  return sig ? SIGNAL_ALIASES[sig].map(key).indexOf(key(name)) : 99;
+}
+
+// The call's onboarding firm: a firm contact on the call, then their email domain, then the call's
+// Salesforce account name, then a contact's or the firm's name in the title.
+function signalFirm_(c, open, match) {
+  var norm = function (s) { return ' ' + String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' '; };
+  var emails = (c.parties || []).map(function (p) { return String(p.emailAddress || '').toLowerCase(); }).filter(Boolean);
+  var title = norm((c.metaData || {}).title);
+  var crm = [];
+  (c.context || []).forEach(function (ctx) { (ctx.objects || []).forEach(function (o) {
+    if (o.objectType === 'Account') (o.fields || []).forEach(function (f) { if (f.name === 'Name') crm.push(norm(f.value)); });
+  }); });
+  var info = function (f) { return match[String(f.FirmId)] || { names: [], emails: [], domains: [] }; };
+  var tests = [
+    function (f) { return emails.some(function (e) { return info(f).emails.indexOf(e) >= 0; }); },
+    function (f) { return emails.some(function (e) { return info(f).domains.indexOf(e.split('@')[1]) >= 0; }); },
+    function (f) { return crm.indexOf(norm(f.Name)) >= 0; },
+    function (f) { return info(f).names.some(function (n) { return norm(n).trim().indexOf(' ') > 0 && title.indexOf(norm(n)) >= 0; }); },
+    function (f) { var k = norm(firmCore_(f.Name)); return k.trim().length >= 4 && title.indexOf(k) >= 0; },
+  ];
+  for (var i = 0; i < tests.length; i++) { var hit = open.filter(tests[i])[0]; if (hit) return hit; }
+  return null;
+}
+
+function sheetRows_(sh) {
+  if (!sh) return [];
+  var v = sh.getDataRange().getDisplayValues();
+  var head = v[0] || [];
+  return v.slice(1).map(function (r) { var o = {}; head.forEach(function (h, i) { o[String(h).trim()] = r[i]; }); return o; });
+}
+
+// Run from the editor: shows how Gong labels speakers on a few recent calls with tracker hits
+// (field names, affiliations, speaker-id formats only — no names, emails or quotes).
+function debugSignalSpeakers() {
+  var to = new Date(), from = new Date(to.getTime() - 7 * 864e5);
+  var r = gongFetch_('/v2/calls/extensive', { filter: { fromDateTime: from.toISOString(), toDateTime: to.toISOString() },
+    contentSelector: { exposedFields: { parties: true, content: { trackers: true, trackerOccurrences: true } } } });
+  var shown = 0;
+  ((r && r.calls) || []).some(function (c) {
+    var hits = ((c.content || {}).trackers || []).filter(function (t) { return signalTracker_(t.name) && t.count > 0; });
+    if (!hits.length) return false;
+    Logger.log('Call %s · parties: %s', ++shown, JSON.stringify((c.parties || []).map(function (p) {
+      return { affiliation: p.affiliation, speakerId: p.speakerId ? String(p.speakerId).slice(0, 6) + '…' : null, keys: Object.keys(p).join(',') };
+    })));
+    var t = hits[0];
+    Logger.log('  tracker keys: %s', Object.keys(t).join(','));
+    Logger.log('  occurrence sample: %s', JSON.stringify((t.occurrences || []).slice(0, 2).map(function (o) {
+      var x = {}; Object.keys(o).forEach(function (k) { x[k] = k === 'speakerId' ? String(o[k]).slice(0, 6) + '…' : o[k]; }); return x;
+    })));
+    Logger.log('  phrases sample: %s', JSON.stringify((t.phrases || []).slice(0, 1).map(function (p) { return { keys: Object.keys(p).join(','), occ: (p.occurrences || []).slice(0, 1) }; })));
+    return shown >= 2;
+  });
+  if (!shown) Logger.log('No calls with these trackers in the last 7 days (first page).');
 }
