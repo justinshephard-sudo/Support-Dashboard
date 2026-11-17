@@ -358,7 +358,7 @@ async function loadFirmProduct(f) {
   const err = (r, what) => (r.status === 'rejected' ? `<div class="muted pf-prod-err">Couldn’t load ${what}: ${esc(r.reason && r.reason.message || 'error')}</div>` : '');
   const bugHtml = bugItems.length ? `<ul class="pf-prod-list">${bugItems.slice(0, 8).map((b) => `<li>
       <a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.t)}</a>
-      <div class="pf-prod-meta">${b.state ? `<span>${esc(b.state)}</span>` : ''}${b.sev ? `<span class="pf-sev s${b.sev}">Sev ${b.sev}</span>` : ''}<span>updated ${esc(b.u)}</span></div>${/ready\s*for\s*review/i.test(b.state || '') ? `<button type="button" class="mgr-btn bug-fix-btn" data-fl-fix="${esc(b.id)}">✅ Fix confirmed</button>` : ''}</li>`).join('')}</ul>${bugItems.length > 8 ? `<div class="muted">+ ${bugItems.length - 8} more in Shortcut</div>` : ''}`
+      <div class="pf-prod-meta">${b.state ? `<span>${esc(b.state)}</span>` : ''}${b.sev ? `<span class="pf-sev s${b.sev}">Sev ${b.sev}</span>` : ''}<span>updated ${esc(b.u)}</span></div>${/production/i.test(b.state || '') ? `<button type="button" class="mgr-btn bug-fix-btn" data-fl-fix="${esc(b.id)}">✅ Fix confirmed</button>` : ''}</li>`).join('')}</ul>${bugItems.length > 8 ? `<div class="muted">+ ${bugItems.length - 8} more in Shortcut</div>` : ''}`
     : bugs.status === 'fulfilled' ? `<div class="muted">${id ? 'No open bugs list this Firm ID.' : 'No Firm ID, so bugs can’t be matched.'}</div>` : '';
   const frHtml = frItems.length ? `<ul class="pf-prod-list">${frItems.slice(0, 8).map((x) => `<li>
       <a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.t)}</a>

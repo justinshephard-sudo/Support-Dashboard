@@ -10,11 +10,11 @@
    for firms). Everyone signed in to the dashboard can read.
 
    Actions (POST via loop-tracker.js doPost):
-     bugLoad   → every open bug (slim) + state, team and people names
+     bugLoad   → every open bug (slim) + bugs closed in the last 30 days + state, team and people names
      bugStory  → one bug's description and latest comments, for the side panel
      bugFirm   → open bugs that give one Firm ID (Firm Lookup)
      bugPlusOne     → anyone signed in: comment "+1 — Firm ID N (name) is also seeing this" + their note
-     bugFixConfirmed → anyone signed in, bug in "Ready for Review": moves it to "Fix Confirmed" + a comment
+     bugFixConfirmed → anyone signed in, bug "On Production": moves it to "Fix Confirmed" + a comment
    Writes post as the signed-in person when they're a Shortcut member (author_id, matched by email);
    otherwise as the token's owner, with "from <email>" in the text.
    ========================================================================== */
@@ -22,6 +22,7 @@
 var SC_API = 'https://api.app.shortcut.com/api/v3';
 var BUG_WORKFLOWS = [500005403];      // Customer Success
 var BUG_FRESH_MS = 10 * 60 * 1000;
+var BUG_CLOSED_DAYS = 30;
 
 function sc_(method, path, payload) {
   var token = PropertiesService.getScriptProperties().getProperty('SHORTCUT_TOKEN');
@@ -87,18 +88,24 @@ function bugFetch_() {
     story_type: 'bug', archived: false, workflow_state_types: ['backlog', 'unstarted', 'started'],
   }) || [];
   var items = stories.filter(function (s) { return BUG_WORKFLOWS.indexOf(s.workflow_id) > -1; }).map(bugItem_);
+  // Recently closed: done-state bugs completed in the last 30 days.
+  var since = new Date(Date.now() - BUG_CLOSED_DAYS * 864e5).toISOString();
+  var done = sc_('post', '/stories/search', { story_type: 'bug', workflow_state_types: ['done'], completed_at_start: since }) || [];
+  var closed = done.filter(function (s) { return BUG_WORKFLOWS.indexOf(s.workflow_id) > -1; }).map(function (s) {
+    var it = bugItem_(s); it.done = String(s.completed_at || s.moved_at || '').slice(0, 10); return it;
+  });
   var states = {};
   Object.keys(meta.states).forEach(function (id) {
     var s = meta.states[id];
-    if (BUG_WORKFLOWS.indexOf(s.wf) > -1 && s.type !== 'done') states[id] = { name: s.name, type: s.type, pos: s.pos };
+    if (BUG_WORKFLOWS.indexOf(s.wf) > -1) states[id] = { name: s.name, type: s.type, pos: s.pos };
   });
   // Only the names the list actually uses, so the payload stays small.
   var people = {}, groups = {};
-  items.forEach(function (it) {
+  items.concat(closed).forEach(function (it) {
     [it.req].concat(it.own).forEach(function (id) { if (id && meta.people[id]) people[id] = meta.people[id]; });
     if (it.g && meta.groups[it.g]) groups[it.g] = meta.groups[it.g];
   });
-  return { ok: true, items: items, states: states, people: people, groups: groups, at: new Date().toISOString(), fetched: Date.now() };
+  return { ok: true, items: items, closed: closed, states: states, people: people, groups: groups, at: new Date().toISOString(), fetched: Date.now() };
 }
 
 function bugLoad_(force) {
@@ -214,7 +221,7 @@ function bugFixConfirmed_(b, who) {
   var id = Number(b.id), note = String(b.note || '').trim().slice(0, 1500);
   if (!id) throw new Error('missing bug');
   var meta = bugMeta_(false), st = sc_('get', '/stories/' + id), cur = meta.states[st.workflow_state_id] || {};
-  if (!/ready\s*for\s*review/i.test(cur.name || '')) throw new Error('This bug is in "' + (cur.name || 'another state') + '", not Ready for Review. Refresh the list.');
+  if (!/production/i.test(cur.name || '')) throw new Error('This bug is in "' + (cur.name || 'another state') + '", not On Production. Refresh the list.');
   var target = Object.keys(meta.states).filter(function (k) { return meta.states[k].wf === st.workflow_id && /fix\s*confirmed/i.test(meta.states[k].name); })[0];
   if (!target) throw new Error('This bug’s workflow has no "Fix Confirmed" state in Shortcut.');
   var author = bugAuthor_(who);
@@ -229,7 +236,7 @@ function bugDoPost_(b, who) {
     var d = bugLoad_(!!b.force);
     var me = null;
     try { me = bugMeta_(false).emails[who.email] || null; } catch (e) { /* list still loads */ }
-    return { ok: true, items: d.items, states: d.states, people: d.people, groups: d.groups, at: d.at, stale: !!d.stale, me: me };
+    return { ok: true, items: d.items, closed: d.closed || [], states: d.states, people: d.people, groups: d.groups, at: d.at, stale: !!d.stale, me: me };
   }
   if (b.action === 'bugStory') return bugStory_(b.id);
   if (b.action === 'bugFirm') return bugFirm_(b);

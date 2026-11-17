@@ -2,19 +2,20 @@
    Open Bugs (Resources tab) — open bugs in Shortcut's Customer Success workflow.
    Filter by state, severity and team, search, or show only the ones you reported;
    click one for its description and latest comments, to +1 it for another firm
-   (comment with that Firm ID), or — when it's Ready for Review — to mark the fix
-   confirmed. Everything goes through apps-script/loop-tracker (bugs.js), which
+   (comment with that Firm ID), or — when it's On Production — to mark the fix
+   confirmed. "Recently closed" lists bugs closed in the last 30 days. Everything goes through apps-script/loop-tracker (bugs.js), which
    holds the Shortcut token.
    ========================================================================== */
 const BUG_SC_URL = 'https://app.shortcut.com/lawmatics-new/stories';
 const BUG_STORE = 'cs-bug-cache';
 const BUG_PAGE = 20;
-const BUG = { data: null, loading: false, q: '', state: '', sev: '', team: '', sort: 'sev', mine: false, page: 0, note: '' };
+const BUG = { data: null, loading: false, q: '', state: '', sev: '', team: '', sort: 'sev', mine: false, page: 0, note: '', closed: false };
 
 const bugSevLabel = (n) => (n ? 'S' + n : '—');
 const bugStateName = (id) => BUG.data.states[id]?.name || 'Other';
 const bugIsProd = (id) => /production/i.test(bugStateName(id));
 const bugDays = (d) => (d ? Math.max(0, Math.round((Date.now() - new Date(d + 'T12:00:00')) / 864e5)) : 0);
+const bugClosed = () => BUG.data.closed || [];
 const bugAge = (d) => {
   const n = bugDays(d);
   return n === 0 ? 'today' : n < 45 ? n + 'd' : new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', year: 'numeric' });
@@ -47,8 +48,8 @@ async function loadBugs(force) {
 function bugFiltered(skip) {
   const d = BUG.data;
   const words = BUG.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  let list = d.items.filter((it) => {
-    if (skip !== 'state' && BUG.state && String(it.st) !== BUG.state) return false;
+  let list = (BUG.closed ? bugClosed() : d.items).filter((it) => {
+    if (!BUG.closed && skip !== 'state' && BUG.state && String(it.st) !== BUG.state) return false;
     if (BUG.sev && String(it.sev) !== BUG.sev) return false;
     if (BUG.team && it.g !== BUG.team) return false;
     if (BUG.mine && it.req !== d.me) return false;
@@ -64,6 +65,7 @@ function bugFiltered(skip) {
     old: (a, b) => a.c.localeCompare(b.c),
     moved: (a, b) => b.m.localeCompare(a.m),
   };
+  if (BUG.closed) return list.sort((a, b) => (b.done || '').localeCompare(a.done || ''));
   return list.sort(sorts[BUG.sort] || sorts.sev);
 }
 
@@ -81,7 +83,7 @@ function bugRow(it) {
           ${d.groups[it.g] ? `<span class="loop-tag">${esc(d.groups[it.g])}</span>` : ''}
           ${d.people[it.req] ? `<span class="loop-tag">by ${esc(d.people[it.req])}</span>` : ''}
           ${it.nc ? `<span class="loop-tag">💬 ${it.nc}</span>` : ''}
-          <span class="loop-when">#${it.id} · open ${esc(bugAge(it.c))}</span>
+          <span class="loop-when">#${it.id} · ${it.done ? `closed ${esc(bugAge(it.done))}${bugAge(it.done) === 'today' ? '' : ' ago'}` : `open ${esc(bugAge(it.c))}`}</span>
         </span>
       </button>
       <a class="bug-link" href="${safeUrl(it.url)}" target="_blank" rel="noopener" aria-label="Open #${it.id} in Shortcut">↗</a>
@@ -96,7 +98,8 @@ function renderBugs() {
   const sev12 = all.filter((it) => it.sev === 1 || it.sev === 2).length;
   const week = all.filter((it) => bugDays(it.c) <= 7).length;
   const prodN = all.filter((it) => bugIsProd(it.st)).length;
-  const mineN = d.me ? all.filter((it) => it.req === d.me).length : 0;
+  const mineN = d.me ? (BUG.closed ? bugClosed() : all).filter((it) => it.req === d.me).length : 0;
+  const closedN = bugClosed().length;
   const forStates = bugFiltered('state');
   const stateIds = Object.keys(d.states).sort((a, b) => d.states[a].pos - d.states[b].pos);
   const stateCount = (id) => forStates.filter((it) => String(it.st) === id).length;
@@ -130,8 +133,9 @@ function renderBugs() {
       </div>
     </section>
     <div class="bug-states" role="tablist" aria-label="Workflow state">
-      <button type="button" class="bug-chip${BUG.state ? '' : ' on'}" data-bug-state="">All <b>${forStates.length}</b></button>
-      ${stateIds.filter((id) => stateCount(id)).map((id) => `<button type="button" class="bug-chip${BUG.state === id ? ' on' : ''}${bugIsProd(id) ? ' prod' : ''}" data-bug-state="${esc(id)}">${esc(d.states[id].name)} <b>${stateCount(id)}</b></button>`).join('')}
+      <button type="button" class="bug-chip${BUG.state || BUG.closed ? '' : ' on'}" data-bug-state="">All open <b>${BUG.closed ? all.length : forStates.length}</b></button>
+      ${stateIds.filter((id) => !BUG.closed && stateCount(id)).map((id) => `<button type="button" class="bug-chip${BUG.state === id ? ' on' : ''}${bugIsProd(id) ? ' prod' : ''}" data-bug-state="${esc(id)}">${esc(d.states[id].name)} <b>${stateCount(id)}</b></button>`).join('')}
+      <button type="button" class="bug-chip bug-chip-closed${BUG.closed ? ' on' : ''}" data-bug-closed>✓ Recently closed <b>${closedN}</b></button>
     </div>
     <div class="fr-tools">
       <div class="search-box fr-search">
@@ -140,10 +144,10 @@ function renderBugs() {
       </div>
       <select id="bugSev" aria-label="Severity"><option value="">All severities</option>${sevs.map((s) => `<option value="${s}"${String(s) === BUG.sev ? ' selected' : ''}>${s ? 'Severity ' + s : 'No severity'}</option>`).join('')}</select>
       ${teams.length > 1 ? `<select id="bugTeam" aria-label="Team"><option value="">All teams</option>${teams.map((g) => `<option value="${esc(g)}"${g === BUG.team ? ' selected' : ''}>${esc(d.groups[g])}</option>`).join('')}</select>` : ''}
-      <select id="bugSort" aria-label="Sort">${[['sev', 'Worst first'], ['new', 'Newest'], ['old', 'Open longest'], ['moved', 'Recently moved']].map(([k, l]) => `<option value="${k}"${BUG.sort === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      ${BUG.closed ? '' : `<select id="bugSort" aria-label="Sort">${[['sev', 'Worst first'], ['new', 'Newest'], ['old', 'Open longest'], ['moved', 'Recently moved']].map(([k, l]) => `<option value="${k}"${BUG.sort === k ? ' selected' : ''}>${l}</option>`).join('')}</select>`}
     </div>
-    <div class="fr-scope"><span>${fmtNum(list.length)} bug${list.length === 1 ? '' : 's'}${BUG.mine ? ' you reported' : ''}</span></div>
-    ${shown.length ? `<ul class="fr-list">${shown.map(bugRow).join('')}</ul>` : `<p class="loop-empty">${BUG.q ? 'No open bug matches that search.' : 'Nothing here.'}</p>`}
+    <div class="fr-scope"><span>${fmtNum(list.length)} bug${list.length === 1 ? '' : 's'}${BUG.mine ? ' you reported' : ''}${BUG.closed ? ` closed in the last 30 days, newest first` : ''}</span></div>
+    ${shown.length ? `<ul class="fr-list">${shown.map(bugRow).join('')}</ul>` : `<p class="loop-empty">${BUG.q ? `No ${BUG.closed ? 'closed' : 'open'} bug matches that search.` : BUG.closed ? 'No bugs closed in the last 30 days.' : 'Nothing here.'}</p>`}
     ${pages > 1 ? `<div class="pager"><button type="button" class="pager-btn" data-bug-page="-1"${BUG.page === 0 ? ' disabled' : ''}>‹ Prev</button>
       <span class="pager-info">${fmtNum(BUG.page * BUG_PAGE + 1)}–${fmtNum(BUG.page * BUG_PAGE + shown.length)} of ${fmtNum(list.length)}</span>
       <button type="button" class="pager-btn" data-bug-page="1"${BUG.page >= pages - 1 ? ' disabled' : ''}>Next ›</button></div>` : ''}
@@ -170,7 +174,7 @@ function bugMd(src) {
 }
 
 async function bugOpenPanel(id) {
-  const it = BUG.data.items.find((x) => String(x.id) === String(id));
+  const it = BUG.data.items.concat(bugClosed()).find((x) => String(x.id) === String(id));
   if (!it) return;
   const d = BUG.data;
   document.getElementById('bugPanelWrap')?.remove();
@@ -188,7 +192,7 @@ async function bugOpenPanel(id) {
           ${it.lab.map((l) => `<span class="loop-tag">${esc(l)}</span>`).join('')}</p>
         <div class="loop-facts"><span>Reported by ${esc(d.people[it.req] || '—')}</span><span>Opened ${esc(it.c)}</span><span>Last moved ${esc(it.m)}</span>
           ${it.own.length ? `<span>Owner: ${esc(it.own.map((o) => d.people[o] || '?').join(', '))}</span>` : ''}</div>
-        ${bugActionsHtml(it)}
+        ${it.done ? `<p class="loop-muted">Closed ${esc(it.done)}.</p>` : bugActionsHtml(it)}
         <div class="bug-desc"><p class="loop-muted">Loading the details…</p></div>
       </div>
     </div>`;
@@ -226,10 +230,10 @@ async function bugOpenPanel(id) {
 }
 
 /* ---- +1 for a firm / fix confirmed (writes to Shortcut as the signed-in person when they're a member) ---- */
-const bugReadyForReview = (it) => /ready\s*for\s*review/i.test(bugStateName(it.st));
+const bugOnProduction = (it) => bugIsProd(it.st);
 function bugActionsHtml(it) {
   return `<div class="bug-actions">
-      ${bugReadyForReview(it) ? `<div class="bug-act bug-fix"><div><b>Ready for review.</b> Checked it with the customer and it’s working?</div>
+      ${bugOnProduction(it) ? `<div class="bug-act bug-fix"><div><b>On production.</b> Checked it with the customer and it’s working?</div>
         <textarea id="bugFixNote" rows="2" maxlength="1500" placeholder="Optional note (what you checked, which firm…)"></textarea>
         <button type="button" class="mgr-btn bug-fix-btn" id="bugFixBtn">✅ Fix confirmed</button><span class="bug-act-msg" id="bugFixMsg"></span></div>` : ''}
       <div class="bug-act"><div><b>Another firm seeing this?</b> Add a +1 with their Firm ID (it shows on that firm in Firm Lookup).</div>
@@ -262,6 +266,7 @@ async function bugFixConfirmed(it, wrap) {
     const r = await loopCall({ action: 'bugFixConfirmed', id: it.id, note: wrap.querySelector('#bugFixNote').value });
     msg.textContent = `✓ Moved to ${r.state}. Thanks!`;
     BUG.data.items = BUG.data.items.filter((x) => x.id !== it.id);   // no longer open
+    if (BUG.data.closed) BUG.data.closed.unshift({ ...it, done: new Date().toISOString().slice(0, 10) });
     renderBugs();
   } catch (e) {
     if (isSessionError(e)) showSessionBanner(true);
@@ -286,10 +291,11 @@ function setupBugs() {
     const open = e.target.closest('.bug-open');
     if (open) { bugOpenPanel(open.dataset.id); return; }
     const chip = e.target.closest('[data-bug-state]');
-    if (chip) { BUG.state = chip.dataset.bugState; BUG.page = 0; renderBugs(); return; }
+    if (chip) { BUG.state = chip.dataset.bugState; BUG.closed = false; BUG.page = 0; renderBugs(); return; }
+    if (e.target.closest('[data-bug-closed]')) { Object.assign(BUG, { closed: !BUG.closed, state: '', page: 0 }); renderBugs(); return; }
     const pg = e.target.closest('[data-bug-page]');
     if (pg) { BUG.page += Number(pg.dataset.bugPage); renderBugs(); root.querySelector('.bug-states')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    const reset = () => Object.assign(BUG, { q: '', state: '', sev: '', team: '', mine: false, page: 0, sort: 'sev' });
+    const reset = () => Object.assign(BUG, { q: '', state: '', sev: '', team: '', mine: false, page: 0, sort: 'sev', closed: false });
     if (e.target.closest('[data-bug-reset]')) { reset(); renderBugs(); return; }
     if (e.target.closest('[data-bug-sev12]')) { reset(); BUG.sort = 'sev'; renderBugs(); return; }
     if (e.target.closest('[data-bug-new]')) { reset(); BUG.sort = 'new'; renderBugs(); return; }
