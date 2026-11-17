@@ -37,5 +37,6 @@ if want "$ONLY" bound; then
 fi
 if want "$ONLY" master; then
   cp "$AS/data-overrides.gs" "$MASTER/data-overrides.js"
+  cp "$AS/support-calls.gs" "$MASTER/support-calls.js"
   push cs-report-master "$MASTER" AKfycbxcel6P0QYZm8m3FKYDFtOOBLpRL6_KvrmIcS5ShrAbuTUPFXSrLtQ3SLDhrDeg6-pSww
 fi
