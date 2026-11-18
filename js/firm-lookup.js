@@ -301,6 +301,7 @@ function openFirm(firmId, name) {
         ${odBadge}${dangerBadge}
         ${f.freq ? `<span class="pf-badge">${esc(f.freq)} user</span>` : ''}
         ${typeof spButtonHtml === 'function' ? spButtonHtml() : ''}
+        ${f.firmId && typeof csmHandoffOpen === 'function' && typeof faCall === 'function' ? `<button type="button" class="pill-btn" id="pfHandoff" data-firm="${esc(f.firmId)}" hidden>📋 Onboarding handoff</button>` : ''}
         ${f.firmId && overridesUnlocked && AUTH.email && MANAGER_EMAILS.includes(AUTH.email.toLowerCase()) && typeof raAuditFirm === 'function' ? `<button type="button" class="pill-btn" id="pfAudit" data-firm="${esc(f.firmId)}" data-name="${esc(f.name)}">🔍 Audit firm</button>` : ''}
       </div>
     </div>
@@ -341,8 +342,24 @@ function openFirm(firmId, name) {
   });
   document.getElementById('profile').querySelector('[data-sp-open]')?.addEventListener('click', () => openServicePortal(f));
   document.getElementById('pfAudit')?.addEventListener('click', (e) => raAuditFirm(e.currentTarget.dataset.firm, e.currentTarget.dataset.name));
+  pfHandoffCheck(f);
   document.getElementById('profile').classList.add('show');
   loadFirmProduct(f);
+}
+
+/* ---- Onboarding handoff button: shows only when the firm has a handoff form (checked in the background) ---- */
+async function pfHandoffCheck(f) {
+  const btn = document.getElementById('pfHandoff');
+  if (!btn) return;
+  btn.addEventListener('click', () => csmHandoffOpen(f.firmId));
+  try {
+    // One light history list per session (shared with the CSM page), not a call per firm.
+    if (!CSM.hoHist) CSM.hoHist = await (CSM.hoHistLoading || (CSM.hoHistLoading = faCall({ action: 'handoffHistory' }).finally(() => { CSM.hoHistLoading = null; })));
+    const h = (CSM.hoHist.firms || []).find((x) => String(x.firmId) === String(f.firmId));
+    if (document.getElementById('pfHandoff') !== btn || !h) return;   // another firm opened meanwhile, or no form
+    btn.title = `Onboarding closed ${h.completed || ''}${h.im ? ' by ' + h.im : ''}`;
+    btn.hidden = false;
+  } catch (e) { /* no button when it can't be checked */ }
 }
 
 /* ---- Open bugs (Shortcut) + feature requests (Notion) for the firm ----

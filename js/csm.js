@@ -358,7 +358,7 @@ function csmHandoffsHtml() {
   const firms = d ? csmHandoffFirms() : [];
   const waiting = firms.filter((f) => f.waiting), done = firms.filter((f) => !f.waiting);
   const head = `<div class="mrr-panel-head csm-head"><h3>Handoff queue${d ? ` <span class="muted">· ${waiting.length} waiting</span>` : ''}</h3>
-    <button type="button" class="loop-btn" id="csmHoRefresh">↻ Refresh</button></div>`;
+    <span class="csm-ho-headbtns"><button type="button" class="loop-btn" id="csmHoHistory" title="Every handoff form, any date">📚 History</button><button type="button" class="loop-btn" id="csmHoRefresh">↻ Refresh</button></span></div>`;
   if (!d) {
     return head + (CSM.hoError ? `<div class="error-banner">Couldn’t load the handoffs: ${esc(CSM.hoError)}</div>` : '<div class="res-loading">Pulling the handoff queue…</div>');
   }
@@ -408,7 +408,60 @@ async function csmAcceptHandoff(firmId, btn) {
 function csmHandoffDrill(firmId) {
   const d = CSM.handoffs;
   const f = d && d.firms.find((x) => x.firmId === String(firmId));
-  if (!f) return;
+  if (f) csmHandoffShow(f, d);
+}
+
+/* ---------- handoff history: every form ever submitted (CSM page ▸ History, Firm Lookup button) ---------- */
+// The list comes from the handoff log (light); opening one fetches that firm's full handoff.
+async function csmHandoffHistory() {
+  if (!CSM.hoHist) {
+    mrrModal('Handoff history', 'Every onboarding closed through the dashboard', '<div class="res-loading">Pulling the handoff history…</div>');
+    try { CSM.hoHist = await faCall({ action: 'handoffHistory' }); } catch (e) {
+      if (isSessionError(e)) showSessionBanner(true);
+      mrrModal('Handoff history', '', `<div class="error-banner">Couldn’t load the history: ${esc(e.message)}</div>`);
+      return;
+    }
+  }
+  const rep = CSM.rep && CSM.rep !== CSM_NONE ? CSM.rep : null;
+  const all = (CSM.hoHist.firms || []).filter((f) => !rep || f.csm === rep || f.im === rep);
+  MRR.drill = null;
+  mrrModal(`Handoff history${rep ? ` — ${rep}` : ''}`, `${all.length} handoff form${all.length === 1 ? '' : 's'} · newest first · ${rep ? 'firms handed to or from this rep' : 'whole team'}`,
+    `<div class="csm-hist-tools"><input type="search" id="csmHistQ" placeholder="Search firm, Firm ID, IM or CSM" aria-label="Search handoffs" value="${esc(CSM.hoHistQ || '')}"></div>
+     <div id="csmHistList">${csmHistTable(all, rep)}</div>`);
+  const wrap = document.getElementById('mrrDrill');
+  const q = document.getElementById('csmHistQ');
+  q.addEventListener('input', () => { CSM.hoHistQ = q.value; document.getElementById('csmHistList').innerHTML = csmHistTable(all, rep); });
+  wrap.addEventListener('click', (e) => { const r = e.target.closest('[data-ho-hist]'); if (r) csmHandoffOpen(r.dataset.hoHist, { back: csmHandoffHistory }); });
+  wrap.addEventListener('keydown', (e) => { const r = e.key === 'Enter' && e.target.closest('[data-ho-hist]'); if (r) csmHandoffOpen(r.dataset.hoHist, { back: csmHandoffHistory }); });
+}
+function csmHistTable(all, rep) {
+  const q = String(CSM.hoHistQ || '').trim().toLowerCase();
+  const list = q ? all.filter((f) => [f.name, f.firmId, f.im, f.csm].join(' ').toLowerCase().includes(q)) : all;
+  if (!list.length) return `<div class="empty-note">${q ? 'No handoffs match.' : 'No handoff forms yet. They appear here once IMs close onboardings from the dashboard.'}</div>`;
+  return `<div class="table-wrap"><table class="drill-table mrr-table csm-ho-table"><thead><tr><th>Firm</th><th>Completed</th><th>IM</th><th>CSM</th><th>Outcome</th><th>Sentiment</th><th>Tech savvy</th><th>Status</th></tr></thead><tbody>
+    ${list.map((f) => `<tr class="csm-hist-row" data-ho-hist="${esc(f.firmId)}" tabindex="0">
+      <td><b>${esc(f.name)}</b><br><small class="muted">Firm ${esc(f.firmId)}${f.mrr ? ` · ${fmtMoney(f.mrr)}/mo` : ''}</small></td>
+      <td>${f.completed ? esc(csmHoDay(f.completed)) : '—'}</td><td>${esc(f.im || '—')}</td><td>${esc(f.csm || 'Support')}</td>
+      <td>${f.outcome === 'Complete' ? 'Complete' : `<span class="mrr-badge">${esc(String(f.outcome || '—').replace(/^Complete - /, ''))}</span>`}</td>
+      <td>${csmMood(f.sentiment)}</td><td>${f.techSavvy ? `<b>${esc(f.techSavvy)}</b><small class="muted"> / 5</small>` : '<span class="muted">—</span>'}</td>
+      <td>${f.waiting ? '<span class="csm-pill h-okay">Waiting</span>' : f.acceptedAt ? `<span class="csm-ho-accepted">✓ ${esc(csmHoWhen(f.acceptedAt))}</span>` : '<span class="muted">—</span>'}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+// One firm's handoff, fetched fresh (history rows, Firm Lookup button).
+async function csmHandoffOpen(firmId, opts) {
+  MRR.drill = null;
+  mrrModal('Onboarding handoff', '', '<div class="res-loading">Opening the handoff…</div>', opts);
+  try {
+    const r = await faCall({ action: 'handoff', firmId: String(firmId) });
+    if (!r.firm) { mrrModal('Onboarding handoff', '', '<div class="empty-note">This firm has no handoff form. Forms exist for onboardings closed from the dashboard.</div>', opts); return; }
+    csmHandoffShow(r.firm, r, opts);
+  } catch (e) {
+    if (isSessionError(e)) showSessionBanner(true);
+    mrrModal('Onboarding handoff', '', `<div class="error-banner">Couldn’t open the handoff: ${esc(e.message)}</div>`, opts);
+  }
+}
+
+function csmHandoffShow(f, d, opts) {
   const a = f.answers;
   const val = (fld) => {
     const v = a[fld.key];
@@ -431,7 +484,7 @@ function csmHandoffDrill(firmId) {
   MRR.drill = null;
   mrrModal(`${f.name} — handoff`,
     `Completed ${esc(csmHoDay(f.completed))} · ${fmtMoney(f.mrr)}/mo · IM ${esc(f.im || '—')}${f.csm ? ` · CSM ${esc(f.csm)}` : ''}${f.owner ? ` · Owner ${esc(f.owner)}` : ''}${f.closedBy ? ` · closed by ${esc(f.closedBy)}` : ''}`,
-    `<div class="csm-ho">${body}</div>`);
+    `<div class="csm-ho">${body}</div>`, opts);
 }
 
 /* ---------- pop-ups ---------- */
@@ -651,7 +704,8 @@ function setupCsm() {
   root.addEventListener('click', (e) => {
     const t = e.target;
     if (t.closest('#csmRefresh')) { loadCsm(true); loadCsmHandoffs(true); return; }
-    if (t.closest('#csmHoRefresh')) { CSM.handoffs = null; document.getElementById('csmHandoffs').innerHTML = csmHandoffsHtml(); loadCsmHandoffs(true); return; }
+    if (t.closest('#csmHoHistory')) { csmHandoffHistory(); return; }
+    if (t.closest('#csmHoRefresh')) { CSM.hoHist = null; CSM.handoffs = null; document.getElementById('csmHandoffs').innerHTML = csmHandoffsHtml(); loadCsmHandoffs(true); return; }
     const ho = t.closest('[data-csm-ho]');
     if (ho) { csmHandoffDrill(ho.dataset.csmHo); return; }
     const acc = t.closest('[data-csm-accept]');

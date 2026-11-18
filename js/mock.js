@@ -266,7 +266,7 @@ function mockClose(b) {
     owner: f.csm || 'Support', closedBy: (typeof AUTH !== 'undefined' && AUTH.email) || 'you',
     decisionMakers: dm ? [{ name: dm.name, title: dm.title, email: dm.email }] : [], answers });
   mockSave();
-  CSM.handoffs = null;   // the CSM page picks it up next time it opens
+  CSM.handoffs = null; CSM.hoHist = null;   // the CSM page picks it up next time it opens
   return { ok: true, confirmed: true, testData: true, outcome: outcome.status, ownerMovedTo: f.csm || 'Support', unsaved: 0 };
 }
 
@@ -287,6 +287,42 @@ function mockHandoffs() {
   return { ok: true, days: 7, since: MOCK_DAY(6), remind: 2, escalate: 4, sections: MOCK_SECTIONS,
     fields: MOCK_FIELDS.map(({ key, section, label, type }) => ({ key, section, label, type })), firms };
 }
+// Handoff history: every test handoff, plus (on the test site) made-up forms for firms in the test book
+// that finished onboarding, so Firm Lookup's "Onboarding handoff" button and the History list have data.
+let MOCK_DEMO_HO = null;   // not saved: rebuilt from the test book each load
+function mockDemoHandoffs() {
+  if (!DEMO_ENV || typeof window.DEMO_FIRMS !== 'function') return [];
+  if (MOCK_DEMO_HO) return MOCK_DEMO_HO;
+  const pick = (a, i) => a[i % a.length];
+  const SENT = ['Positive', 'Positive', 'Neutral', 'Negative'];
+  MOCK_DEMO_HO = window.DEMO_FIRMS().filter((f) => !f.onboarding && f.doneDay && f.doneDay >= MOCK_DAY(365)).map((f, i) => {
+    const csm = f.csm && f.csm !== f.im ? f.csm : '';
+    const r = mockDone(f.name, f.id, f.start, Math.max(0, Math.round((Date.now() - new Date(f.doneDay + 'T12:00:00')) / 864e5)),
+      i % 11 === 5 ? 'Complete - Never Engaged' : 'Complete', f.im, csm, pick(['Maria Lopez', 'Jordan Pike', 'Sam Reed', 'Priya Shah', 'Dana Ruiz'], i), 'Managing Partner', i % 11 === 5 ? {} : {
+        intakeBuilt: pick(['Web form → auto-text → consult scheduler, intake questionnaire before the call.', 'Phone intake with the internal intake form; Google Ads leads auto-assigned.', 'Two web forms by practice area, automations by case type, e-sign engagement letter.'], i),
+        painPoints: pick(['Reporting is confusing.', 'Calendar sync with Outlook.', '', 'Texting templates need edits.'], i),
+        goal: pick(['Respond to every lead within 5 minutes.', 'Sign 20% more cases.', 'Stop losing weekend leads.'], i),
+        techSavvy: String(1 + (i * 3) % 5), sentiment: pick(SENT, i),
+        openItems: pick(['', 'Referral-partner report.', 'Second training for the new hire.'], i),
+        notes: pick(['Champion is very responsive.', 'Prefers phone over email.', 'Office manager runs day to day — loop her in.', 'Watch renewal; was frustrated by a bug.'], i) });
+    if (csm) Object.assign(r, { acceptedBy: csm.split(' ')[0].toLowerCase() + '@lawmatics.com', acceptedAt: f.doneDay + ' 10:00' });
+    return r;
+  });
+  return MOCK_DEMO_HO;
+}
+function mockAllHandoffs() { return MOCK.completed.concat(mockDemoHandoffs()); }
+function mockHandoffHistory() {
+  const firms = mockAllHandoffs().map((f) => ({ firmId: f.firmId, name: f.name, mrr: f.mrr, completed: f.completed, outcome: f.outcome, im: f.im, csm: f.csm,
+    owner: f.owner, closedBy: f.closedBy, acceptedBy: f.acceptedBy || '', acceptedAt: f.acceptedAt || '', waiting: !!f.csm && !f.acceptedAt,
+    sentiment: f.answers.sentiment || '', techSavvy: f.answers.techSavvy || '' })).sort((x, y) => y.completed.localeCompare(x.completed) || x.name.localeCompare(y.name));
+  return { ok: true, sections: MOCK_SECTIONS, fields: MOCK_FIELDS.map(({ key, section, label, type }) => ({ key, section, label, type })), firms };
+}
+function mockHandoff(b) {
+  const f = mockAllHandoffs().find((x) => x.firmId === String(b.firmId));
+  const firm = f ? Object.assign({}, f, { waiting: !!f.csm && !f.acceptedAt, waitDays: 0, acceptedBy: f.acceptedBy || '', acceptedAt: f.acceptedAt || '', canAccept: false }) : null;
+  return { ok: true, sections: MOCK_SECTIONS, fields: MOCK_FIELDS.map(({ key, section, label, type }) => ({ key, section, label, type })), firm };
+}
+
 function mockAccept(b) {
   const f = MOCK.completed.find((x) => x.firmId === String(b.firmId));
   if (!f) throw new Error('That firm isn’t in the handoff queue.');
@@ -319,7 +355,7 @@ function mockSyncImpl() {
 }
 
 const MOCK_ACTIONS = {
-  load: mockLoad, assign: mockAssign, handoffStart: mockHandoffStart, closeOnboarding: mockClose, handoffs: mockHandoffs, acceptHandoff: mockAccept,
+  load: mockLoad, assign: mockAssign, handoffStart: mockHandoffStart, closeOnboarding: mockClose, handoffs: mockHandoffs, acceptHandoff: mockAccept, handoffHistory: mockHandoffHistory, handoff: mockHandoff,
   setRotation: mockSet, setTier: mockSet, setCsmBands: mockSet,
 };
 
@@ -328,7 +364,7 @@ const MOCK_ACTIONS = {
    APIs. Test data (below) still fakes New Firm Assignment and Close onboarding on top of this. */
 const RO_KEY = 'cs-readonly';
 const RO_ON = LOCAL_ENV && (() => { try { return localStorage.getItem(RO_KEY) !== 'off'; } catch (e) { return true; } })();
-const RO_READS = new Set(['load', 'csm', 'handoffs', 'get', 'page', 'prepStatus', 'handoffStart']);
+const RO_READS = new Set(['load', 'csm', 'handoffs', 'handoffHistory', 'handoff', 'get', 'page', 'prepStatus', 'handoffStart']);
 const RO_BLOCKED = [];
 
 if (RO_ON) {

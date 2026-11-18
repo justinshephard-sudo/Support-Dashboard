@@ -1941,3 +1941,10 @@ body.au-open{overflow:hidden}
 .tl-none{font-size:13px;color:var(--text-3);padding:6px 0}
 .tl-more{margin-top:8px}
 @media (max-width:760px){.tk-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.tk-row{grid-template-columns:28px minmax(0,1fr)}.tk-due,.tk-acts{grid-column:2}.tl-top{grid-template-columns:1fr}}
+
+/* Handoff history (CSM page ▸ History, Firm Lookup ▸ Onboarding handoff) */
+.csm-ho-headbtns{display:flex;gap:8px;flex-wrap:wrap}
+.csm-hist-tools{margin:0 0 12px}
+.csm-hist-tools input{width:100%;max-width:420px;box-sizing:border-box;font:inherit;font-size:13.5px;color:var(--text-1);background:var(--surface-1);border:1px solid var(--border);border-radius:999px;padding:8px 14px}
+.csm-hist-row{cursor:pointer}
+.csm-hist-row:hover,.csm-hist-row:focus-visible{background:var(--surface-2);outline:none}

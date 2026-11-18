@@ -32,7 +32,7 @@ const REPORT_SHEET_ID = '1ymoTST_Yl_beQhzIVGyY2uXgQ9OMc5YWn5ZugcfWOik';
 const DEMO_ENV = !!window.CS_DEMO;   // the shareable test site (js/demo.js): made-up data, no sign-in
 const LOCAL_ENV = !DEMO_ENV && /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const DRY_RUN = LOCAL_ENV && (() => { try { return localStorage.getItem('cs-live-writes') !== 'on'; } catch (e) { return true; } })();
-const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart', 'handoffs', 'prep', 'prepStatus', 'calendarMatch', 'partners'];
+const READ_ACTIONS = ['load', 'csm', 'get', 'page', 'handoffStart', 'handoffs', 'handoffHistory', 'handoff', 'prep', 'prepStatus', 'calendarMatch', 'partners'];
 const DRY_RUN_OK = {};   // backend URL → actions it accepts with dryRun: true (filled in by the tabs that have them)
 if (DRY_RUN) {
   const realFetch = window.fetch.bind(window);

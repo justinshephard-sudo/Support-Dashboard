@@ -302,10 +302,18 @@ function recentHandoffs_(b, who) {
   var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
   var since = Utilities.formatDate(new Date(Date.now() - (HANDOFF_DAYS - 1) * 864e5), 'America/Los_Angeles', 'yyyy-MM-dd');
   var show = rows.filter(function (r) { return !r['Accepted At'] || r['Accepted At'].slice(0, 10) >= since; });
-  var base = { ok: true, days: HANDOFF_DAYS, since: since, remind: HANDOFF_REMIND, escalate: HANDOFF_ESCALATE, sections: HANDOFF_SECTIONS,
-    fields: HANDOFF_FIELDS.map(function (f) { return { key: f.key, section: f.section, label: f.label, type: f.type }; }) };
-  if (!show.length) return Object.assign(base, { firms: [] });
+  var base = Object.assign({ ok: true, days: HANDOFF_DAYS, since: since, remind: HANDOFF_REMIND, escalate: HANDOFF_ESCALATE }, handoffShape_());
+  return Object.assign(base, { firms: handoffDetails_(show, users, who, today) });
+}
 
+function handoffShape_() {
+  return { sections: HANDOFF_SECTIONS,
+    fields: HANDOFF_FIELDS.map(function (f) { return { key: f.key, section: f.section, label: f.label, type: f.type }; }) };
+}
+
+// Full handoff for each queue row (or log-only row, noQueue): ChurnZero fields, decision makers, the logged answers.
+function handoffDetails_(show, users, who, today) {
+  if (!show.length) return [];
   var cfSel = ['FirmId', 'OnboardingStatus', 'OnboardingCompletedDate', 'AccountManager', IM_FIELD, CSM_FIELD]
     .concat(HANDOFF_FIELDS.filter(function (f) { return f.cz && f.type !== 'contact'; }).map(function (f) { return f.cz; }));
   var sel = 'Id,Name,ExternalId,TotalContractAmount,UserAccountId,' + cfSel.map(function (f) { return 'Cf/' + f; }).join(',');
@@ -329,15 +337,62 @@ function recentHandoffs_(b, who) {
       if ((v === '' || v === 'None' || v == null) && la[f.key]) v = String(la[f.key]);
       if (v != null && v !== '' && v !== 'None') answers[f.key] = f.type === 'scale' ? String(Math.round(Number(v)) || v) : String(v);
     });
-    var waiting = !r['Accepted At'];
+    var waiting = !r.noQueue && !r['Accepted At'];
     return { firmId: r['Firm ID'], name: a.Name || r['Firm'], mrr: Number(a.TotalContractAmount) || 0,
       completed: r['Completed'] || String(cf.OnboardingCompletedDate || '').slice(0, 10), outcome: r['Outcome'] || String(cf.OnboardingStatus || ''),
       im: r['IM'], csm: r['CSM'], am: repLabel_(users, cf.AccountManager), owner: (users[a.UserAccountId] || {}).name || '',
       closedBy: log.by || '', decisionMakers: dms[a.Id] || [], answers: answers,
       waiting: waiting, waitDays: waiting ? queueBizDays_(r['Added'] || r['Completed'], today) : 0,
-      acceptedBy: r['Accepted By'], acceptedAt: r['Accepted At'], canAccept: waiting && !!who && handoffCanAccept_(who, r) };
+      acceptedBy: r['Accepted By'] || '', acceptedAt: r['Accepted At'] || '', canAccept: waiting && !!who && handoffCanAccept_(who, r) };
   }).sort(function (x, y) { return (y.waiting - x.waiting) || (x.waiting ? x.completed.localeCompare(y.completed) : y.acceptedAt.localeCompare(x.acceptedAt)) || x.name.localeCompare(y.name); });
-  return Object.assign(base, { firms: firms });
+  return firms;
+}
+
+/* ---------- handoff history (CSM page ▸ History, Firm Lookup ▸ Onboarding handoff) ----------
+   Every onboarding closed through the dashboard, newest first, from the "Onboarding Handoffs" log
+   (it keeps each form's answers for good) joined to the queue (CSM, accepted). Light: no ChurnZero calls. */
+function handoffLogByFirm_(since) {
+  var sh = SpreadsheetApp.openById(LOG_SHEET_ID).getSheetByName(HANDOFF_TAB), out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, Math.min(sh.getLastRow() - 1, 5000), 11).getDisplayValues().forEach(function (r) {
+    var id = String(r[3]).replace(/^'/, '');
+    if (String(r[0]).slice(0, 10) < since || !id || out[id]) return;   // newest first: the first row per firm wins
+    var ans = {};
+    try { ans = JSON.parse(String(r[9]).replace(/^'/, '')); } catch (e) { /* not JSON */ }
+    out[id] = { when: r[0], by: r[1], name: r[2], czAccount: String(r[4]).replace(/^'/, ''), mrr: Number(String(r[5]).replace(/[^0-9.]/g, '')) || 0,
+      im: r[6], outcome: r[7], owner: r[8], answers: ans || {} };
+  });
+  return out;
+}
+
+function handoffHistory_(b, who) {
+  var users = users_(), logged = handoffLogByFirm_('2000-01-01'), queue = {};
+  queueRows_().forEach(function (r) { queue[r['Firm ID']] = r; });
+  var ids = Object.keys(logged);
+  Object.keys(queue).forEach(function (id) { if (!logged[id]) ids.push(id); });   // queued before the log existed
+  var firms = ids.map(function (id) {
+    var l = logged[id] || {}, q = queue[id] || {}, a = l.answers || {};
+    return { firmId: id, name: q['Firm'] || l.name || '', mrr: l.mrr || 0, completed: (q['Completed'] || String(l.when || '')).slice(0, 10),
+      outcome: q['Outcome'] || l.outcome || '', im: q['IM'] || l.im || '', csm: q['CSM'] || '', owner: l.owner || '', closedBy: l.by || '',
+      acceptedBy: q['Accepted By'] || '', acceptedAt: q['Accepted At'] || '', waiting: !!q['Firm ID'] && !q['Accepted At'],
+      sentiment: String(a.sentiment || ''), techSavvy: String(a.techSavvy || '') };
+  }).sort(function (x, y) { return y.completed.localeCompare(x.completed) || x.name.localeCompare(y.name); });
+  return Object.assign({ ok: true }, handoffShape_(), { firms: firms });
+}
+
+// One firm's full handoff, or firm: null when it was never closed through the dashboard.
+function handoffFor_(b, who) {
+  var id = String(b.firmId || '').trim();
+  if (!id) throw new Error('No Firm ID.');
+  var users = users_(), q = queueRows_().filter(function (r) { return r['Firm ID'] === id; })[0];
+  var row = q;
+  if (!row) {
+    var l = handoffLogByFirm_('2000-01-01')[id];
+    if (!l) return Object.assign({ ok: true, firm: null }, handoffShape_());
+    row = { noQueue: true, 'Firm ID': id, 'Firm': l.name, 'CZ Account': l.czAccount, 'CSM': '', 'IM': l.im, 'Outcome': l.outcome, 'Completed': String(l.when).slice(0, 10) };
+  }
+  var today = Utilities.formatDate(new Date(), 'America/Los_Angeles', 'yyyy-MM-dd');
+  return Object.assign({ ok: true }, handoffShape_(), { firm: handoffDetails_([row], users, who, today)[0] || null });
 }
 
 function acceptHandoff_(b, who) {

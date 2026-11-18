@@ -115,7 +115,7 @@ async function openHandoff(firmId, name) {
       if (res.outcome === 'Complete') obDanceParty(f.name, res);
       if (res.dryRun) return;
       IMPL.open = IMPL.open.filter((r) => String(r.FirmId) !== String(firmId));
-      if (typeof CSM !== 'undefined') CSM.handoffs = null;   // the CSM page reloads its completed list
+      if (typeof CSM !== 'undefined') { CSM.handoffs = null; CSM.hoHist = null; }   // the CSM page and Firm Lookup reload the handoffs
       handoffResyncImpl();
       document.querySelectorAll(`#impl-drill [data-close-firm="${CSS.escape(String(firmId))}"]`).forEach((b) => { b.closest('tr').classList.add('row-muted'); b.replaceWith(Object.assign(document.createElement('span'), { className: 'muted', textContent: 'Closed' })); });
     } catch (err) {
