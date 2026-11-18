@@ -223,6 +223,7 @@
         <td class="au-num">${s.enrolled}</td>
         <td><div class="au-statbar">${s.running ? `<span class="st-run">${s.running} running</span>` : ''}${s.delayed ? `<span class="st-del">${s.delayed} delayed</span>` : ''}${s.finished ? `<span class="st-fin">${s.finished} finished</span>` : ''}${s.exited ? `<span class="st-ex">${s.exited} exited</span>` : ''}${!s.enrolled ? '<span class="au-muted">No firms yet</span>' : ''}</div></td>
         <td><button type="button" class="au-toggle${a.active ? ' on' : ''}" data-toggle="${a.id}" aria-pressed="${a.active}" aria-label="Active"><i></i></button><span class="au-tlabel">${a.active ? 'Active' : 'Inactive'}</span></td>
+        <td class="au-delcell">${UI.confirmDel === a.id ? `<button type="button" class="au-btn sm danger-solid" data-delauto="${a.id}">Delete?</button><button type="button" class="au-btn sm" data-delcancel>Keep</button>` : `<button type="button" class="au-x au-trash" data-delauto="${a.id}" aria-label="Delete ${e(a.name)}" title="Delete">🗑</button>`}</td>
       </tr>`;
     }).join('');
     return `<header class="au-top"><div class="au-crumbs"><b>⚡ Automations</b><span class="au-mock">Mockup · nothing runs or sends</span></div>
@@ -230,7 +231,7 @@
       <main class="au-listwrap">
         <section class="au-hero"><div><h2>Automate the busywork</h2><p>Check-ins, reschedules, stage moves and renewal tasks that run on every firm, straight from the CS Dashboard’s own data: firms and contacts, usage from Segment, billing from Chargebee, accounts from Salesforce, calls from Zoom and Gong.</p></div>
           <div class="au-kpis"><div><b>${STATE.list.filter((a) => a.active).length}</b><span>Active</span></div><div><b>${STATE.list.reduce((t, a) => t + a.stats.running + a.stats.delayed, 0)}</b><span>Firms in progress</span></div><div><b>6</b><span>Waiting for approval</span></div></div></section>
-        <div class="au-tablewrap"><table class="au-table"><thead><tr><th>Automation</th><th>Trigger</th><th>Firms</th><th>Status of firms</th><th>On/off</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="au-tablewrap"><table class="au-table"><thead><tr><th>Automation</th><th>Trigger</th><th>Firms</th><th>Status of firms</th><th>On/off</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
       </main>`;
   }
 
@@ -390,6 +391,8 @@
       ${row('Skip firms that', sel('skip', ['Have an open support ticket', 'Are flagged to cancel', 'Are excluded on the dashboard', 'Never skip'], a.skip || 'Are flagged to cancel'))}
       ${row('When switched on', sel('start', ['Run on future matches only', 'Run now on every firm that matches'], a.start || 'Run on future matches only'), 'Like Lawmatics: choose whether firms that already match start right away')}
       ${row('Daily limit', sel('limit', ['25 firms a day', '50 firms a day', 'No limit'], a.limit || '25 firms a day'), 'A safety cap while a new automation settles in')}
+      <div class="au-danger"><div><b>Delete this automation</b><small>Firms in it stop where they are. Its activity history is kept.</small></div>
+        ${UI.confirmDel === a.id ? `<span><button type="button" class="au-btn sm danger-solid" data-delauto="${a.id}">Yes, delete it</button> <button type="button" class="au-btn sm" data-delcancel>Keep</button></span>` : `<button type="button" class="au-btn sm danger" data-delauto="${a.id}">Delete automation</button>`}</div>
     </div></main>`;
   }
 
@@ -422,6 +425,15 @@
     const t = ev.target;
     const q = (s) => t.closest(s);
     const a = UI.autoId ? cur() : null;
+    // Delete: the first click asks, the second deletes (pop-up confirms don't work in the page viewer).
+    if (q('[data-delcancel]')) { UI.confirmDel = null; render(); return; }
+    if (q('[data-delauto]')) {
+      const did = q('[data-delauto]').dataset.delauto;
+      if (UI.confirmDel !== did) { UI.confirmDel = did; render(); return; }
+      STATE.list = STATE.list.filter((x) => x.id !== did); UI.confirmDel = null;
+      if (UI.autoId === did) { UI.autoId = null; UI.view = 'list'; }
+      save(); render(); return;
+    }
     if (q('[data-toggle]')) { const x = STATE.list.find((y) => y.id === q('[data-toggle]').dataset.toggle); x.active = !x.active; save(); render(); return; }
     if (q('[data-open]')) { UI.autoId = q('[data-open]').dataset.open; UI.view = 'builder'; UI.tab = 'build'; UI.sel = null; render(); return; }
     if (q('[data-new]')) {
