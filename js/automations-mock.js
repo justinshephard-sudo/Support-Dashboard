@@ -434,12 +434,16 @@
     if (q('[data-tab]')) { UI.tab = q('[data-tab]').dataset.tab; render(); return; }
     if (q('[data-save]')) { const b = q('[data-save]'); b.textContent = '✓ Saved'; setTimeout(() => { b.textContent = 'Save'; }, 1400); return; }
     if (q('[data-test]')) { UI.test = true; render(); return; }
-    if (q('[data-testclose]') && (t.closest('button') || t.classList.contains('au-modal'))) { UI.test = false; render(); return; }
-    if (q('[data-pickclose]') && (t.closest('button') || t.classList.contains('au-modal'))) { UI.picker = null; render(); return; }
-    if (q('[data-pick]')) {
+    // A picked step is added first; the picker and test windows close only from their ✕/button or the dark backdrop.
+    if (q('[data-pick]') && UI.picker) {
       const arr = pathArr(a, UI.picker.path), n = newNode(q('[data-pick]').dataset.pick);
-      arr.splice(UI.picker.at, 0, n); UI.picker = null; UI.sel = n.id; save(); render(); return;
+      if (arr) { arr.splice(UI.picker.at, 0, n); UI.sel = n.id; a.edited = 'just now'; save(); }
+      UI.picker = null; render(); return;
     }
+    const closer = (attr) => t.matches('.au-modal[' + attr + ']') || !!t.closest('button[' + attr + ']');
+    if (closer('data-testclose')) { UI.test = false; render(); return; }
+    if (closer('data-pickclose')) { UI.picker = null; render(); return; }
+    if (q('.au-modal')) return;
     if (q('[data-add]')) { const b = q('[data-add]'); UI.picker = { path: b.dataset.add, at: Number(b.dataset.at) }; render(); return; }
     if (q('[data-del]')) { const f = find(a.steps, q('[data-del]').dataset.del); if (f) { f.arr.splice(f.i, 1); if (UI.sel === f.n.id) UI.sel = null; save(); render(); } return; }
     if (q('[data-addcond]')) { const base = q('[data-addcond]').dataset.addcond; const g = base === 'node' ? find(a.steps, UI.sel).n.cfg : a[base]; g.conds.push({ field: FIELDS[0], op: 'is', value: '' }); save(); render(); return; }
