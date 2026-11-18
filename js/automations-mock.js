@@ -12,35 +12,33 @@
 
   /* ---------- catalogs ---------- */
   const TRIGGERS = {
-    call_completed: { icon: '🎧', label: 'Call completed', desc: 'A Gong or Zoom call with the firm ends' },
-    call_missed: { icon: '🚫', label: 'Appointment missed', desc: 'The firm didn’t join a scheduled call, or the IM marks it missed' },
+    call_completed: { icon: '🎧', label: 'Call completed', desc: 'A Zoom or Gong recording of a call with the firm finishes (matched to the firm by its contacts)' },
+    call_missed: { icon: '🚫', label: 'Appointment marked missed', desc: 'The IM or CSM clicks “Missed” on the firm’s meeting in the dashboard' },
     button: { icon: '🖱️', label: 'Dashboard button', desc: 'Someone clicks a button on the dashboard' },
-    usage: { icon: '📉', label: 'Usage threshold', desc: 'A usage metric crosses a threshold' },
-    date: { icon: '📅', label: 'Date reached', desc: 'Days before or after a date on the firm' },
+    usage: { icon: '📉', label: 'Usage threshold', desc: 'A usage metric crosses a threshold (checked daily from Segment)' },
+    date: { icon: '📅', label: 'Date reached', desc: 'Days before or after a date on the firm (checked daily)' },
     field: { icon: '✏️', label: 'Field changes', desc: 'A firm field changes to a value' },
-    health: { icon: '❤️', label: 'Health score changes', desc: 'Churn score moves into a band' },
-    sf: { icon: '☁️', label: 'Salesforce record updated', desc: 'A Salesforce field or form changes' },
-    match: { icon: '🎯', label: 'Match on fields', desc: 'Any firm matching the entry conditions' },
+    health: { icon: '❤️', label: 'Health score changes', desc: 'Health score moves into a band (checked daily)' },
+    sf: { icon: '☁️', label: 'Salesforce field changes', desc: 'A Salesforce field or form changes (synced hourly)' },
+    match: { icon: '🎯', label: 'Match on fields', desc: 'Any firm matching the entry conditions (checked daily)' },
   };
   const ACTIONS = [
     { group: 'Communicate', items: [
-      ['email', '✉️', 'Send email', 'From the CSM, IM or support@'],
-      ['sms', '💬', 'Send SMS', 'Text the firm’s contact'],
-      ['slack', '🔔', 'Slack message', 'DM the rep or post to a channel'],
-      ['booking', '📆', 'Send booking link', 'Scheduling or reschedule link'],
+      ['email', '✉️', 'Send email', 'From the CSM’s or IM’s Gmail, or support@ — links go in as fill-in fields'],
+      ['slack', '🔔', 'Slack message', 'Ops Comms DM to the rep, or a post to a channel'],
     ] },
     { group: 'Logic & timing', items: [
       ['wait', '⏳', 'Add delay', 'Wait a length of time'],
-      ['waituntil', '⏱️', 'Wait until', 'Until something happens, with a time limit'],
+      ['waituntil', '⏱️', 'Wait until', 'A reply, a booked meeting or a usage change, with a time limit'],
       ['if', '🔀', 'If / Else', 'Split into Yes and No paths'],
       ['end', '⏹️', 'End automation', 'Stop here'],
     ] },
     { group: 'Records', items: [
       ['stage', '🪜', 'Change onboarding stage', 'Move to the next call or a set stage'],
-      ['field', '✏️', 'Change field', 'Update any firm field'],
+      ['field', '✏️', 'Change field', 'Update a firm field'],
       ['owner', '👤', 'Assign owner', 'IM, CSM or Support'],
-      ['task', '✅', 'Create task', 'For the rep, with a due date'],
-      ['sf', '☁️', 'Update Salesforce', 'Write a field back to Salesforce'],
+      ['task', '✅', 'Create task', 'On the rep’s dashboard task list, with a due date'],
+      ['sf', '☁️', 'Update Salesforce', 'Write a field back to the Salesforce account'],
       ['note', '📝', 'Log note', 'On the firm’s timeline'],
     ] },
   ];
@@ -75,7 +73,7 @@
       },
       {
         id: 'a2', name: 'Missed onboarding appointment → reschedule', folder: 'Onboarding', active: true, edited: 'yesterday', by: 'Clare',
-        trigger: { type: 'call_missed', detail: 'Or the IM clicks “Missed – send reschedule”' },
+        trigger: { type: 'call_missed', detail: 'IM clicks “Missed” on an onboarding meeting' },
         entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Open')] }, reentry: 'Every time it triggers',
         exit: { match: 'any', conds: [C('Booked a meeting', 'is', 'Yes'), C('Onboarding status', 'is not', 'Open')] },
         steps: [
@@ -324,6 +322,7 @@
         + row('To', sel(p + 'to', ['Primary contact', 'Decision maker', 'All onboarding contacts', 'All contacts'], c.to))
         + row('Subject', inp(p + 'subject', c.subject))
         + `<label class="au-row"><span>Message</span><textarea data-f="${p}body" rows="9">${e(c.body)}</textarea></label>
+          <small class="au-mergehint">Fill-in fields · {{reschedule_link}} comes from meetings booked through the Lawmatics scheduler</small>
           <div class="au-merges">${MERGE.map((m) => `<button type="button" data-merge="${m}">${m}</button>`).join('')}</div>`
         + `<label class="au-check"><input type="checkbox" data-f="${p}approval"${c.approval ? ' checked' : ''}> Rep approves each email before it sends</label>`
         + row('Delivery window', sel(p + 'window', ['Any time', 'Weekdays 8am–5pm firm time', 'Weekdays 9am–12pm firm time'], c.window))
@@ -337,7 +336,7 @@
     } else if (n.type === 'wait') {
       body = `<div class="au-inline">${row('Wait', `<input type="number" min="1" data-f="${p}amount" value="${e(c.amount)}">`)}${row('&nbsp;', sel(p + 'unit', ['minutes', 'hours', 'days', 'business days', 'weeks'], c.unit))}</div>`;
     } else if (n.type === 'waituntil') {
-      body = row('Wait until', sel(p + 'what', ['They reply or book a meeting', 'They reply', 'They book a meeting', 'Merlin usage % is at least 50', 'A support ticket is closed', 'The task is completed'], c.what))
+      body = row('Wait until', sel(p + 'what', ['They reply or book a meeting', 'They reply', 'They book a meeting', 'Merlin usage % is at least 50', 'Their open support tickets are closed', 'The task is completed'], c.what))
         + row('Give up after', sel(p + 'limit', ['2 business days', '5 business days', '7 days', '14 days', '30 days'], c.limit), 'Then the firm moves to the next step');
     } else if (n.type === 'if') {
       body = `<p class="au-help">Firms that match go down <b>Yes</b>, everyone else goes down <b>No</b>.</p>` + condEditor(c, 'node');
