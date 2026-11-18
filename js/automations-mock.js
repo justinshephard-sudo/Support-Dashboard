@@ -8,7 +8,7 @@
    ========================================================================== */
 (function () {
   if (!window.CS_DEMO) return;
-  const KEY = 'cs-demo-automations';
+  const KEY = 'cs-demo-automations-v2';
 
   /* ---------- catalogs ---------- */
   const TRIGGERS = {
@@ -20,6 +20,8 @@
     field: { icon: '✏️', label: 'Field changes', desc: 'A firm field changes to a value' },
     health: { icon: '❤️', label: 'Health score changes', desc: 'Health score moves into a band (checked daily)' },
     sf: { icon: '☁️', label: 'Salesforce field changes', desc: 'A Salesforce field or form changes (synced hourly)' },
+    survey: { icon: '⭐', label: 'Survey response', desc: 'An NPS or CSAT response comes in (Intercom)' },
+    event: { icon: '🛰️', label: 'Product event', desc: 'A Segment event happens in the firm’s account' },
     match: { icon: '🎯', label: 'Match on fields', desc: 'Any firm matching the entry conditions (checked daily)' },
   };
   const ACTIONS = [
@@ -41,14 +43,18 @@
       ['sf', '☁️', 'Update Salesforce', 'Write a field back to the Salesforce account'],
       ['note', '📝', 'Log note', 'On the firm’s timeline'],
     ] },
+    { group: 'Connect', items: [
+      ['webhook', '🔗', 'Send to Zapier', 'Post the firm’s details to a Zapier webhook'],
+    ] },
   ];
   const ACTION = Object.fromEntries(ACTIONS.flatMap((g) => g.items.map(([k, icon, label, desc]) => [k, { icon, label, desc, group: g.group }])));
   const FIELDS = ['Onboarding status', 'Onboarding stage', 'CSM', 'IM', 'MRR', 'Health score', 'Plan', 'Days since go-live', 'Days until renewal',
     'Merlin AI credits used (30 days)', 'Merlin usage %', 'Logins (30 days)', 'Messages sent (30 days)', 'Open support tickets',
-    'Replied to last email', 'Booked a meeting', 'Practice area', 'Has AI add-on', 'Partner firm', 'Last outreach (days ago)'];
+    'Replied to last email', 'Booked a meeting', 'Next meeting scheduled', 'Practice area', 'Has AI add-on', 'Partner firm', 'Last outreach (days ago)',
+    'Last meeting date', 'Cancellation requested', 'Legacy contract', 'Legacy contract status', 'QualifyAI interest', 'NPS score', 'CSAT score'];
   const OPS = ['is', 'is not', 'is greater than', 'is less than', 'is at least', 'contains', 'is empty', 'is not empty', 'changed in the last'];
   const MERGE = ['{{contact.first_name}}', '{{firm.name}}', '{{csm.first_name}}', '{{csm.name}}', '{{im.first_name}}', '{{merlin.credits_30d}}',
-    '{{merlin.credits_monthly}}', '{{meeting.date}}', '{{reschedule_link}}', '{{booking_link}}'];
+    '{{merlin.credits_monthly}}', '{{meeting.date}}', '{{reschedule_link}}', '{{booking_link}}', '{{ae.first_name}}', '{{meeting.type}}', '{{renewal.date}}', '{{sms.tier}}'];
 
   /* ---------- sample automations ---------- */
   let uid = 1000;
@@ -57,71 +63,326 @@
   const email = (from, subject, body, approval) => ({ id: id(), type: 'email', cfg: { from, to: 'Primary contact', subject, body, approval: !!approval, window: 'Weekdays 8am–5pm firm time' } });
   const node = (type, cfg) => ({ id: id(), type, cfg: cfg || {} });
   const branch = (conds, yes, no, match) => ({ id: id(), type: 'if', cfg: { match: match || 'all', conds }, yes, no });
+  // The ChurnZero plays that ran in the last 90 days (audit 2026-10-12, steps pulled from the CZ API 2026-11-18),
+  // rebuilt here. Per-rep and per-tier copies collapse into one automation each. Email copy is placeholder text:
+  // the CZ API only exposes step names, so the real wording moves over from ChurnZero at build time.
+  const S = (enrolled, running, delayed, exited) => ({ enrolled, running, delayed: delayed || 0, exited: exited || 0, finished: Math.max(0, enrolled - running - (delayed || 0) - (exited || 0)) });
   function seed() {
+    const IM = 'Firm’s IM', CSM = 'Firm’s CSM', SUP = 'Support (support@lawmatics.com)';
+    const csmOrSupport = (subject, body) => branch([C('CSM', 'is not empty', '')], [email(CSM, subject, body)], [email(SUP, subject, body.replace(/\{\{csm\.first_name\}\}/g, 'The Lawmatics Support Team'))]);
     return [
+      /* ----- Onboarding (IM) ----- */
       {
-        id: 'a1', name: 'Onboarding call completed → next stage', folder: 'Onboarding', active: true, edited: '2 days ago', by: 'Johnny',
-        trigger: { type: 'call_completed', detail: 'Meeting title contains “Onboarding”' },
-        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Open'), C('Onboarding stage', 'is not empty', '')] },
-        reentry: 'Every time it triggers', exit: { match: 'any', conds: [C('Onboarding status', 'is', 'Complete')] },
+        id: 'p-welcome', name: 'New customer: welcome + book the first call', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#15 Onboarding Pre-Call, #13 New Customer Kickoff, #173 Pre-Call (call scheduled)',
+        czNote: 'Three overlapping plays become one. #13 re-sent a welcome after #15 had already sent one, and its last 4 task steps stopped firing in July. The Danger Zone escalation used to go to Clare and Johnny no matter who the rep was; here it goes to the IM’s manager.',
+        trigger: { type: 'field', detail: 'Onboarding status changes to Pre-Kickoff (Salesforce Closed Won)' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Pre-Kickoff')] }, reentry: 'Once',
+        exit: { match: 'any', conds: [C('Onboarding status', 'is', 'Cancelled')] },
         steps: [
-          node('stage', { to: 'Next call in the plan' }),
-          branch([C('Onboarding stage', 'is', 'Sixth Onboarding')], [node('task', { title: 'Wrap up onboarding and close it', who: 'Firm’s IM', due: '2 business days' })],
-            [node('slack', { to: 'Firm’s IM (DM)', text: 'Moved {{firm.name}} to {{onboarding.stage}}. Book the next call within 7 days.' })]),
+          email('Account executive (Salesforce)', 'Welcome to Lawmatics, {{contact.first_name}}!', 'Hi {{contact.first_name}},\n\nWelcome aboard! {{im.first_name}} will be your Implementation Manager. Book your first onboarding call here: {{booking_link}}\n\n{{ae.first_name}}'),
+          node('task', { title: 'Call {{firm.name}} to welcome them and book the first call', who: IM, due: 'Same day' }),
+          node('waituntil', { what: 'They book a meeting', limit: '2 business days' }),
+          branch([C('Booked a meeting', 'is', 'Yes')],
+            [email(IM, 'Before our first call: what to send over', 'Hi {{contact.first_name}},\n\nLooking forward to {{meeting.date}}! Before then, please upload your intake forms and templates here: {{upload_link}}\n\n{{im.first_name}}')],
+            [email(IM, 'Reminder to schedule your onboarding', 'Hi {{contact.first_name}},\n\nLet’s get your onboarding on the calendar: {{booking_link}}\n\n{{im.first_name}}'),
+              node('slack', { to: 'Account executive (DM)', text: '{{firm.name}} hasn’t booked onboarding yet. A nudge from you could help.' }),
+              node('waituntil', { what: 'They book a meeting', limit: '5 business days' }),
+              branch([C('Booked a meeting', 'is', 'No')],
+                [node('task', { title: 'Call {{firm.name}}: onboarding still not scheduled', who: IM, due: 'Same day' }),
+                  node('wait', { amount: 3, unit: 'business days' }),
+                  node('task', { title: 'Danger Zone: {{firm.name}} not scheduled after 10 days', who: 'Firm’s manager', due: 'Same day' }),
+                  node('slack', { to: '#cs-ops', text: '🚨 {{firm.name}} still needs to schedule onboarding (IM: {{im.name}}, AE: {{ae.name}}).' })],
+                [node('end', {})])]),
         ],
-        stats: { enrolled: 214, running: 0, delayed: 0, finished: 212, exited: 2 },
+        stats: S(113, 9, 4, 3),
       },
       {
-        id: 'a2', name: 'Missed onboarding appointment → reschedule', folder: 'Onboarding', active: true, edited: 'yesterday', by: 'Clare',
+        id: 'p-callupdate', name: 'Onboarding call completed: next stage + recap email', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#31–#37 First–Sixth + Additional Onboarding Call Update, #21–#26 + #29 Onboarding FUP Emails',
+        czNote: '14 plays (one per call number) become one. The stage moves to the next call in the plan, and the follow-up email uses the call number as a fill-in field.',
+        trigger: { type: 'call_completed', detail: 'Meeting type is an onboarding call' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Open')] }, reentry: 'Every time it triggers',
+        exit: { match: 'any', conds: [] },
+        steps: [
+          node('stage', { to: 'Next call in the plan' }),
+          email(IM, 'Recap from today’s {{meeting.type}}', 'Hi {{contact.first_name}},\n\nThanks for your time today! Here’s what we covered and what’s next before our next call.\n\n…\n\nBook the next session here: {{booking_link}}\n\n{{im.first_name}}'),
+        ],
+        stats: S(692, 0),
+      },
+      {
+        id: 'p-nocall', name: 'Open onboarding with no call booked', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#43 Open Onboarding – No Call Scheduled, #175 Needs to Schedule Call Update',
+        czNote: 'The stage update (#175) and the chaser emails (#43) ran off the same segment, so they’re one automation now.',
+        trigger: { type: 'match', detail: 'Checked daily' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Open'), C('Next meeting scheduled', 'is', 'No')] }, reentry: 'Once every 30 days',
+        exit: { match: 'any', conds: [C('Booked a meeting', 'is', 'Yes'), C('Onboarding status', 'is not', 'Open')] },
+        steps: [
+          node('stage', { to: 'Needs to Schedule' }),
+          email(IM, 'Let’s book your next onboarding session', 'Hi {{contact.first_name}},\n\nWe don’t have your next session on the calendar yet. Grab a time here: {{booking_link}}\n\n{{im.first_name}}'),
+          node('task', { title: '{{firm.name}} needs to schedule their next call', who: IM, due: '2 business days' }),
+          node('wait', { amount: 3, unit: 'business days' }),
+          email(IM, 'Still want to keep going, {{contact.first_name}}?', 'Hi {{contact.first_name}},\n\nJust checking in. Here’s my calendar whenever you’re ready: {{booking_link}}\n\n{{im.first_name}}'),
+        ],
+        stats: S(137, 11, 6, 84),
+      },
+      {
+        id: 'p-noshow', name: 'Missed onboarding call: reschedule', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#16, #17, #18, #39 Second / Third / Fourth / Additional Onboarding No Show',
+        czNote: 'Four identical plays (one per call number). #19 and #20 (Fifth and Sixth No Show) had no entries in 90 days, so they’re not carried over.',
         trigger: { type: 'call_missed', detail: 'IM clicks “Missed” on an onboarding meeting' },
         entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Open')] }, reentry: 'Every time it triggers',
         exit: { match: 'any', conds: [C('Booked a meeting', 'is', 'Yes'), C('Onboarding status', 'is not', 'Open')] },
         steps: [
-          email('Firm’s IM', 'Sorry we missed you today, {{contact.first_name}}', 'Hi {{contact.first_name}},\n\nLooks like we missed each other for today’s onboarding call. No problem — you can pick a new time here: {{reschedule_link}}\n\nTalk soon,\n{{im.first_name}}'),
+          node('slack', { to: 'Firm’s IM (DM)', text: '{{firm.name}} missed {{meeting.type}}. Reschedule emails are starting.' }),
+          email(IM, 'Sorry we missed you today, {{contact.first_name}}', 'Hi {{contact.first_name}},\n\nLooks like we missed each other. No problem, pick a new time here: {{reschedule_link}}\n\n{{im.first_name}}'),
           node('wait', { amount: 2, unit: 'business days' }),
-          branch([C('Booked a meeting', 'is', 'No')],
-            [email('Firm’s IM', 'Still want to finish setting up {{firm.name}}?', 'Hi {{contact.first_name}},\n\nJust checking in — grab any time that works: {{reschedule_link}}\n\n{{im.first_name}}'),
-              node('wait', { amount: 3, unit: 'business days' }),
-              node('task', { title: 'Call {{firm.name}} — no reschedule after 2 emails', who: 'Firm’s IM', due: 'Same day' })],
-            [node('end', {})]),
+          email(IM, 'Let’s find a new time', 'Hi {{contact.first_name}},\n\nHere’s the link again: {{reschedule_link}}\n\n{{im.first_name}}'),
+          node('task', { title: 'Call {{firm.name}} to reschedule', who: IM, due: 'Same day' }),
+          node('wait', { amount: 3, unit: 'business days' }),
+          email(IM, 'Checking in on your onboarding', 'Hi {{contact.first_name}},\n\n…\n\n{{im.first_name}}'),
+          node('task', { title: 'Second call to {{firm.name}}: still not rescheduled', who: IM, due: 'Same day' }),
+          node('wait', { amount: 5, unit: 'business days' }),
+          email(IM, 'Should we pause your onboarding?', 'Hi {{contact.first_name}},\n\n…\n\n{{im.first_name}}'),
+          node('task', { title: 'Decide: pause onboarding for {{firm.name}}?', who: IM, due: '2 business days' }),
         ],
-        stats: { enrolled: 38, running: 5, delayed: 4, finished: 26, exited: 3 },
+        stats: S(6, 1, 2, 2),
       },
       {
-        id: 'a3', name: 'Low Merlin usage check-in', folder: 'Adoption', active: true, edited: '5 days ago', by: 'Justin',
+        id: 'p-paused', name: 'Paused onboarding check-in', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#162 Paused onboarding task',
+        trigger: { type: 'field', detail: 'Onboarding status changes to Paused' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [C('Onboarding status', 'is not', 'Paused')] },
+        steps: [node('task', { title: 'Check in with {{firm.name}} about restarting onboarding', who: IM, due: '5 business days' })],
+        stats: S(41, 20),
+      },
+      {
+        id: 'p-closed', name: 'Onboarding complete: welcome to live', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#27 Onboarding Closed Drip Campaign',
+        trigger: { type: 'field', detail: 'Onboarding status changes to Complete' },
+        entry: { match: 'all', conds: [] }, reentry: 'Once', exit: { match: 'any', conds: [C('Onboarding status', 'is', 'Cancelled')] },
+        steps: [
+          email(IM, 'You’re live on Lawmatics! 🎉', 'Hi {{contact.first_name}},\n\nCongratulations on finishing onboarding! …\n\n{{im.first_name}}'),
+          node('wait', { amount: 7, unit: 'days' }),
+          email(CSM, 'One week in: how’s it going?', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          node('wait', { amount: 23, unit: 'days' }),
+          email(CSM, 'One month live at {{firm.name}}', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+        ],
+        stats: S(106, 25),
+      },
+      {
+        id: 'p-lowcsat', name: 'Low onboarding CSAT', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#45 Low Onboarding CSAT',
+        trigger: { type: 'survey', detail: 'Onboarding CSAT of 3 or lower' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [
+          node('slack', { to: 'Firm’s manager (DM)', text: '{{firm.name}} rated onboarding {{csat.score}}/5: “{{csat.comment}}”' }),
+          email('Firm’s manager', 'Your onboarding experience', 'Hi {{contact.first_name}},\n\nThank you for the honest feedback. I’d like to hear more and make it right…'),
+        ],
+        stats: S(5, 0),
+      },
+      {
+        id: 'p-rsl', name: 'Ready, Set, Launch invite', folder: 'Onboarding', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#183 RSL – Continuous', czNote: 'Entry rule still to confirm: the CZ API doesn’t show the segment behind this play.',
+        trigger: { type: 'match', detail: 'Checked daily' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Open')] }, reentry: 'Once', exit: { match: 'any', conds: [] },
+        steps: [email(IM, 'Join us for Ready, Set, Launch', 'Hi {{contact.first_name}},\n\n…\n\n{{im.first_name}}')],
+        stats: S(31, 1),
+      },
+      /* ----- Adoption (CSM) ----- */
+      {
+        id: 'p-lowadopt', name: 'Low adoption outreach', folder: 'Adoption', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#30 Low Adoption Outreach, #60 Low Adoption Outreach (Continued)',
+        czNote: 'The biggest customer-facing play (1,409 entries in 90 days). #60 is #30 plus a phone call task, so that’s an If/Else on MRR here.',
+        trigger: { type: 'health', detail: 'Churn score moves into At risk (checked daily)' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Complete'), C('Last outreach (days ago)', 'is at least', '30')] }, reentry: 'Once every 60 days',
+        exit: { match: 'any', conds: [C('Replied to last email', 'is', 'Yes'), C('Booked a meeting', 'is', 'Yes'), C('Health score', 'is less than', '33')] },
+        steps: [
+          email(CSM, 'Getting the most out of Lawmatics at {{firm.name}}', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          branch([C('MRR', 'is greater than', '400')], [node('task', { title: 'Call {{firm.name}}: low adoption', who: CSM, due: '2 business days' })], []),
+          node('waituntil', { what: 'They reply or book a meeting', limit: '7 days' }),
+          email(CSM, 'A few quick wins for {{firm.name}}', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          node('waituntil', { what: 'They reply or book a meeting', limit: '7 days' }),
+          email(CSM, 'Should we set up a quick call?', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          node('task', { title: 'No response from {{firm.name}} after 3 emails', who: CSM, due: '3 business days' }),
+        ],
+        stats: S(1409, 205, 62, 340),
+      },
+      {
+        id: 'p-convos', name: '10+ support conversations outreach', folder: 'Adoption', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#184 10+ conversation outreach',
+        trigger: { type: 'usage', detail: '10 or more Intercom conversations in 30 days' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Complete')] }, reentry: 'Once every 60 days', exit: { match: 'any', conds: [] },
+        steps: [email(CSM, 'Want a hand with anything, {{contact.first_name}}?', 'Hi {{contact.first_name}},\n\nI saw your team has reached out to support a lot lately…\n\n{{csm.first_name}}')],
+        stats: S(3, 1),
+      },
+      {
+        id: 'p-30min', name: 'Check-in call follow-up email', folder: 'Adoption', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#103 30 Minute Meeting FUP Email',
+        trigger: { type: 'call_completed', detail: 'Meeting type is “30 Minute Meeting”' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [email('Firm’s owner', 'Thanks for the time today', 'Hi {{contact.first_name}},\n\n…')],
+        stats: S(36, 0),
+      },
+      {
+        id: 'p-merlin', name: 'Low Merlin usage check-in', folder: 'Adoption', active: false, edited: 'Nov 18', by: 'Justin',
+        cz: '', czNote: 'New: not a ChurnZero play. Same email as the Merlin outreach button on the CSM tab, sent automatically.',
         trigger: { type: 'usage', detail: 'Merlin usage % falls below 25% (checked daily)' },
         entry: { match: 'all', conds: [C('Has AI add-on', 'is', 'Yes'), C('Days since go-live', 'is at least', '30'), C('Last outreach (days ago)', 'is at least', '30')] },
         reentry: 'Once every 60 days', exit: { match: 'any', conds: [C('Merlin usage %', 'is at least', '50'), C('Replied to last email', 'is', 'Yes'), C('Booked a meeting', 'is', 'Yes')] },
         steps: [
-          email('Firm’s CSM', 'Getting more out of Merlin at {{firm.name}}', 'Hi {{contact.first_name}},\n\nI noticed your team has used {{merlin.credits_30d}} of your {{merlin.credits_monthly}} monthly Merlin AI credits over the last 30 days. Is anything getting in the way, or are there questions I can answer?\n\nWould you have time for a short call this week or next?\n\n{{csm.name}}', true),
+          email(CSM, 'Getting more out of Merlin at {{firm.name}}', 'Hi {{contact.first_name}},\n\nI noticed your team has used {{merlin.credits_30d}} of your {{merlin.credits_monthly}} monthly Merlin AI credits over the last 30 days. Is anything getting in the way?\n\n{{csm.name}}', true),
           node('waituntil', { what: 'They reply or book a meeting', limit: '5 business days' }),
-          branch([C('Replied to last email', 'is', 'No'), C('Booked a meeting', 'is', 'No')],
-            [email('Firm’s CSM', 'Quick Merlin tip for {{firm.name}}', 'Hi {{contact.first_name}},\n\nOne quick win: turning on lead scoring for your web form usually takes 10 minutes. Happy to walk you through it: {{booking_link}}\n\n{{csm.first_name}}'),
-              node('wait', { amount: 7, unit: 'days' }),
-              branch([C('Merlin usage %', 'is less than', '25')], [node('slack', { to: 'Firm’s CSM (DM)', text: '{{firm.name}} still under 25% Merlin usage after 2 emails — worth a call.' })], [node('end', {})])],
-            [node('note', { text: 'Engaged after Merlin check-in' })], 'all'),
+          branch([C('Merlin usage %', 'is less than', '25')], [node('slack', { to: 'Firm’s CSM (DM)', text: '{{firm.name}} still under 25% Merlin usage. Worth a call.' })], [node('end', {})]),
         ],
-        stats: { enrolled: 61, running: 18, delayed: 12, finished: 22, exited: 9 },
+        stats: S(0, 0),
+      },
+      /* ----- Renewals & billing ----- */
+      {
+        id: 'p-sms', name: 'SMS overage notice', folder: 'Renewals & billing', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#143 +1000 SMS overage, #82, #108–#111 Tier 1–5, #114–#117 Tier 1–4 (Annual)',
+        czNote: '10 plays (one per tier, monthly and annual) become one. The tier is a fill-in field. Each CZ play split on “has an AM”: that’s the If/Else here.',
+        trigger: { type: 'usage', detail: 'SMS sent this billing period goes over the plan (checked daily from Segment)' },
+        entry: { match: 'all', conds: [] }, reentry: 'Once every 30 days', exit: { match: 'any', conds: [] },
+        steps: [
+          csmOrSupport('Your SMS usage at {{firm.name}}', 'Hi {{contact.first_name}},\n\nYour team has sent {{sms.overage}} messages over your plan this period ({{sms.tier}}). Here are your options…\n\n{{csm.first_name}}'),
+        ],
+        stats: S(587, 20),
       },
       {
-        id: 'a4', name: 'Renewal 90 days out', folder: 'Renewals', active: false, edited: '3 weeks ago', by: 'Johnny',
-        trigger: { type: 'date', detail: '90 days before Contract end' },
+        id: 'p-renewal', name: 'Renewal countdown', folder: 'Renewals & billing', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#77 Renewal in 4 Months, #136 90 day renewal notice, #79 Renewal in 2 Months',
+        czNote: 'Three date plays become one timeline. The 90-day notice keeps its “has an AM” split.',
+        trigger: { type: 'date', detail: '120 days before Renewal date' },
         entry: { match: 'all', conds: [C('Plan', 'contains', 'Annual')] }, reentry: 'Once per contract term',
         exit: { match: 'any', conds: [C('Days until renewal', 'is less than', '0')] },
         steps: [
-          node('task', { title: 'Run Renewal prep for {{firm.name}}', who: 'Firm’s CSM', due: '5 business days' }),
-          branch([C('Health score', 'is at least', '67')], [node('slack', { to: '#cs-renewals', text: '⚠️ {{firm.name}} renews in 90 days with bad health ({{health.score}}).' })], []),
+          node('task', { title: '{{firm.name}} renews in 4 months: run Renewal prep', who: CSM, due: '5 business days' }),
           node('wait', { amount: 30, unit: 'days' }),
-          node('task', { title: 'Renewal call booked with {{firm.name}}?', who: 'Firm’s CSM', due: '3 business days' }),
+          csmOrSupport('Your Lawmatics renewal is coming up', 'Hi {{contact.first_name}},\n\nYour agreement renews on {{renewal.date}}…\n\n{{csm.first_name}}'),
+          node('wait', { amount: 30, unit: 'days' }),
+          node('task', { title: '{{firm.name}} renews in 2 months: confirm renewal call', who: CSM, due: '3 business days' }),
+          email(CSM, 'Let’s review your year before renewal', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
         ],
-        stats: { enrolled: 0, running: 0, delayed: 0, finished: 0, exited: 0 },
+        stats: S(91, 3, 0, 0),
       },
       {
-        id: 'a5', name: 'First 90 days nurture', folder: 'Adoption', active: false, edited: 'just now', by: 'Erika',
-        trigger: { type: 'field', detail: 'Onboarding status changes to Complete' },
-        entry: { match: 'all', conds: [C('MRR', 'is greater than', '400')] }, reentry: 'Once', exit: { match: 'any', conds: [C('Health score', 'is at least', '67')] },
-        steps: [node('wait', { amount: 14, unit: 'days' }), email('Firm’s CSM', 'Two weeks live — how is it going?', 'Hi {{contact.first_name}},\n\n…', true)],
-        stats: { enrolled: 0, running: 0, delayed: 0, finished: 0, exited: 0 },
+        id: 'p-legacy', name: 'Legacy contract drip', folder: 'Renewals & billing', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#171 Legacy Contract Drip',
+        czNote: 'Started by hand in ChurnZero; here it’s a dashboard button on the firm page. The Custom Table updates become a field on the firm.',
+        trigger: { type: 'button', detail: '“Start legacy contract outreach” on the firm page' },
+        entry: { match: 'all', conds: [C('Legacy contract', 'is', 'Yes')] }, reentry: 'Once',
+        exit: { match: 'any', conds: [C('Replied to last email', 'is', 'Yes'), C('Legacy contract', 'is', 'No')] },
+        steps: [
+          csmOrSupport('An update about your Lawmatics contract', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          node('field', { field: 'Legacy contract status', value: 'Outreach sent' }),
+          node('wait', { amount: 7, unit: 'days' }),
+          csmOrSupport('Following up on your contract', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          node('field', { field: 'Legacy contract status', value: 'Reminder 1 sent' }),
+          node('wait', { amount: 7, unit: 'days' }),
+          csmOrSupport('Last reminder about your contract', 'Hi {{contact.first_name}},\n\n…\n\n{{csm.first_name}}'),
+          node('field', { field: 'Legacy contract status', value: 'Reminder 2 sent' }),
+        ],
+        stats: S(170, 7),
+      },
+      {
+        id: 'p-cancel', name: 'Cancellation request', folder: 'Renewals & billing', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#28 Cancellation Request',
+        czNote: 'The internal alert went to Clare and Johnny by name; here it goes to the firm’s manager.',
+        trigger: { type: 'field', detail: 'Cancellation requested changes to Yes' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [
+          email('Firm’s owner', 'We received your cancellation request', 'Hi {{contact.first_name}},\n\n…', true),
+          node('slack', { to: 'Firm’s manager (DM)', text: '⚠️ {{firm.name}} asked to cancel ({{mrr}} MRR). Owner: {{owner.name}}.' }),
+        ],
+        stats: S(39, 0),
+      },
+      {
+        id: 'p-contract', name: 'Contraction: update Chargebee', folder: 'Renewals & billing', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#122 Contraction Reminder to Update Chargebee, #121 1 Week Contraction Reminder',
+        trigger: { type: 'sf', detail: 'A contraction is recorded in Salesforce' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [
+          node('task', { title: 'Update Chargebee for {{firm.name}}’s contraction', who: CSM, due: 'Same day' }),
+          node('wait', { amount: 7, unit: 'days' }),
+          node('task', { title: 'Reminder: contraction for {{firm.name}} takes effect in a week', who: CSM, due: 'Same day' }),
+        ],
+        stats: S(4, 0),
+      },
+      /* ----- Feedback ----- */
+      {
+        id: 'p-detractor', name: 'NPS detractor follow-up', folder: 'Feedback', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#84 NPS Detractors',
+        trigger: { type: 'survey', detail: 'NPS score of 6 or lower' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [
+          csmOrSupport('Thank you for your feedback', 'Hi {{contact.first_name}},\n\nThanks for taking the survey. I’d like to understand what we can do better…\n\n{{csm.first_name}}'),
+          node('task', { title: 'Negative NPS ({{nps.score}}) from {{firm.name}}', who: 'Firm’s owner', due: '2 business days' }),
+          node('slack', { to: 'Firm’s manager (DM)', text: '{{firm.name}} gave NPS {{nps.score}}: “{{nps.comment}}”' }),
+        ],
+        stats: S(41, 3),
+      },
+      {
+        id: 'p-promoter', name: 'NPS promoter: referral link', folder: 'Feedback', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#64 NPS Referral Link',
+        trigger: { type: 'survey', detail: 'NPS score of 9 or 10' },
+        entry: { match: 'all', conds: [] }, reentry: 'Once every 60 days', exit: { match: 'any', conds: [] },
+        steps: [csmOrSupport('Thanks for the love, {{contact.first_name}}!', 'Hi {{contact.first_name}},\n\nKnow another firm that could use Lawmatics? Here’s your referral link…\n\n{{csm.first_name}}')],
+        stats: S(57, 0),
+      },
+      {
+        id: 'p-g2', name: 'Positive CSAT: ask for a G2 review', folder: 'Feedback', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#41 Positive CSAT → Send G2 Review',
+        trigger: { type: 'survey', detail: 'Support CSAT of 5' },
+        entry: { match: 'all', conds: [] }, reentry: 'Once every 60 days', exit: { match: 'any', conds: [] },
+        steps: [email(SUP, 'Would you share that on G2?', 'Hi {{contact.first_name}},\n\nSo glad we could help! Would you leave a quick review on G2? …')],
+        stats: S(81, 0),
+      },
+      {
+        id: 'p-npshook', name: 'NPS response → Zapier', folder: 'Feedback', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#179 NPS Webhook to Zapier',
+        trigger: { type: 'survey', detail: 'Any NPS response' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [node('webhook', { to: 'Zapier: NPS responses', what: 'Firm, contact, score, comment' })],
+        stats: S(119, 0),
+      },
+      /* ----- Records (no customer contact) ----- */
+      {
+        id: 'p-owner', name: 'Owner fields from Salesforce', folder: 'Records', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '11 × “IS → Owner (rep)”, 8 × “AM Filed Update (rep)”',
+        czNote: '19 per-rep plays (about 13,800 runs in 90 days) become one rule. After the split, IM and CSM are their own fields, so nothing is copied from one into the other.',
+        trigger: { type: 'sf', detail: 'Implementation_Specialist__c or Account_Manager__c changes' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [node('field', { field: 'IM', value: '{{sf.implementation_specialist}}' }), node('field', { field: 'CSM', value: '{{sf.account_manager}}' })],
+        stats: S(13802, 0),
+      },
+      {
+        id: 'p-lastmtg', name: 'Track most recent meeting', folder: 'Records', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#161 Most Recent Meeting Update (Copy)',
+        trigger: { type: 'call_completed', detail: 'Any call with the firm' },
+        entry: { match: 'all', conds: [] }, reentry: 'Every time it triggers', exit: { match: 'any', conds: [] },
+        steps: [node('field', { field: 'Last meeting date', value: '{{meeting.date}}' })],
+        stats: S(1390, 0),
+      },
+      {
+        id: 'p-open', name: 'First call booked: Pre-Kickoff → Open', folder: 'Records', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#73 Pre-Kickoff → Open',
+        trigger: { type: 'field', detail: 'Booked a meeting changes to Yes' },
+        entry: { match: 'all', conds: [C('Onboarding status', 'is', 'Pre-Kickoff')] }, reentry: 'Once', exit: { match: 'any', conds: [] },
+        steps: [node('field', { field: 'Onboarding status', value: 'Open' })],
+        stats: S(45, 0),
+      },
+      {
+        id: 'p-qualify', name: 'QualifyAI interest → Salesforce', folder: 'Records', active: true, edited: 'Nov 18', by: 'Justin',
+        cz: '#147, #149, #144 QualifyAI plays',
+        trigger: { type: 'event', detail: 'Segment event: QualifyAI Sign Up Clicked or Learn More Clicked' },
+        entry: { match: 'all', conds: [] }, reentry: 'Once', exit: { match: 'any', conds: [] },
+        steps: [
+          node('field', { field: 'QualifyAI interest', value: 'Yes' }),
+          node('sf', { field: 'Demo_Requested__c', value: 'true' }),
+          node('note', { text: 'QualifyAI clicked by {{contact.name}}' }),
+        ],
+        stats: S(601, 0),
       },
     ];
   }
@@ -133,7 +394,7 @@
   const passReset = window.DEMO_RESET;
   window.DEMO_RESET = () => { try { localStorage.removeItem(KEY); } catch (e) { /* */ } passReset(); };
 
-  const UI = { view: 'list', autoId: null, sel: null, tab: 'build', picker: null };
+  const UI = { folder: 'All', view: 'list', autoId: null, sel: null, tab: 'build', picker: null };
   const cur = () => STATE.list.find((a) => a.id === UI.autoId);
 
   /* ---------- helpers ---------- */
@@ -155,6 +416,7 @@
       case 'task': return `“${e(c.title)}” for <b>${e(c.who)}</b>, due ${e(c.due)}`;
       case 'sf': return `Set Salesforce <b>${e(c.field || 'field')}</b> to <b>${e(c.value || '…')}</b>`;
       case 'note': return `“${e(c.text || '')}”`;
+      case 'webhook': return `To <b>${e(c.to || 'Zapier')}</b> · ${e(c.what || '')}`;
       case 'end': return 'The firm leaves the automation here';
       default: return '';
     }
@@ -182,7 +444,7 @@
       slack: { to: 'Firm’s CSM (DM)', text: '' }, booking: { kind: 'reschedule link', from: 'Firm’s IM' },
       wait: { amount: 3, unit: 'days' }, waituntil: { what: 'They reply or book a meeting', limit: '5 business days' },
       stage: { to: 'Next call in the plan' }, field: { field: 'Onboarding status', value: '' }, owner: { to: 'Firm’s CSM' },
-      task: { title: 'Follow up with {{firm.name}}', who: 'Firm’s CSM', due: '2 business days' }, sf: { field: '', value: '' }, note: { text: '' }, end: {},
+      task: { title: 'Follow up with {{firm.name}}', who: 'Firm’s CSM', due: '2 business days' }, sf: { field: '', value: '' }, note: { text: '' }, webhook: { to: 'Zapier: new hook', what: 'Firm, contact, owner' }, end: {},
     }[type] || {};
     const n = { id: id(), type, cfg: JSON.parse(JSON.stringify(d)) };
     if (type === 'if') Object.assign(n, { cfg: { match: 'all', conds: [{ field: 'Replied to last email', op: 'is', value: 'No' }] }, yes: [], no: [] });
@@ -214,11 +476,14 @@
 
   /* ---------- list ---------- */
   function listHtml() {
-    const rows = STATE.list.map((a) => {
+    const folders = ['All'].concat([...new Set(STATE.list.map((a) => a.folder))]);
+    if (!folders.includes(UI.folder)) UI.folder = 'All';
+    const shown = STATE.list.filter((a) => UI.folder === 'All' || a.folder === UI.folder);
+    const rows = shown.map((a) => {
       const t = TRIGGERS[a.trigger.type] || {};
       const s = a.stats;
       return `<tr data-open="${a.id}">
-        <td><div class="au-l-name">${e(a.name)}</div><div class="au-l-sub">${e(a.folder)} · edited ${e(a.edited)} by ${e(a.by)}</div></td>
+        <td><div class="au-l-name">${e(a.name)}</div><div class="au-l-sub">${e(a.folder)} · edited ${e(a.edited)} by ${e(a.by)}</div>${a.cz ? `<div class="au-l-cz">Replaces ChurnZero ${e(a.cz)}</div>` : a.czNote ? '<div class="au-l-cz new">New: not in ChurnZero</div>' : ''}</td>
         <td><span class="au-trig-pill">${t.icon || ''} ${e(t.label || a.trigger.type)}</span></td>
         <td class="au-num">${s.enrolled}</td>
         <td><div class="au-statbar">${s.running ? `<span class="st-run">${s.running} running</span>` : ''}${s.delayed ? `<span class="st-del">${s.delayed} delayed</span>` : ''}${s.finished ? `<span class="st-fin">${s.finished} finished</span>` : ''}${s.exited ? `<span class="st-ex">${s.exited} exited</span>` : ''}${!s.enrolled ? '<span class="au-muted">No firms yet</span>' : ''}</div></td>
@@ -229,8 +494,9 @@
     return `<header class="au-top"><div class="au-crumbs"><b>⚡ Automations</b><span class="au-mock">Mockup · nothing runs or sends</span></div>
         <div class="au-top-actions"><button type="button" class="au-btn primary" data-new>＋ New automation</button></div></header>
       <main class="au-listwrap">
-        <section class="au-hero"><div><h2>Automate the busywork</h2><p>Check-ins, reschedules, stage moves and renewal tasks that run on every firm, straight from the CS Dashboard’s own data: firms and contacts, usage from Segment, billing from Chargebee, accounts from Salesforce, calls from Zoom and Gong.</p></div>
+        <section class="au-hero"><div><h2>Automate the busywork</h2><p>These are the ChurnZero plays that ran in the last 90 days, rebuilt here: 75 plays become ${STATE.list.filter((a) => a.cz).length} automations once the per-rep and per-tier copies merge. They run on the CS Dashboard’s own data: usage from Segment, billing from Chargebee, accounts from Salesforce, calls from Zoom and Gong. Email wording is placeholder text until it’s copied over from ChurnZero.</p></div>
           <div class="au-kpis"><div><b>${STATE.list.filter((a) => a.active).length}</b><span>Active</span></div><div><b>${STATE.list.reduce((t, a) => t + a.stats.running + a.stats.delayed, 0)}</b><span>Firms in progress</span></div><div><b>6</b><span>Waiting for approval</span></div></div></section>
+        <div class="au-folders">${folders.map((f) => `<button type="button" class="${UI.folder === f ? 'on' : ''}" data-folder="${e(f)}">${e(f)} <span>${f === 'All' ? STATE.list.length : STATE.list.filter((a) => a.folder === f).length}</span></button>`).join('')}</div>
         <div class="au-tablewrap"><table class="au-table"><thead><tr><th>Automation</th><th>Trigger</th><th>Firms</th><th>Status of firms</th><th>On/off</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
       </main>`;
   }
@@ -304,7 +570,7 @@
       <button type="button" class="au-btn sm" data-addcond="${base}">＋ Add condition</button></div>`;
   }
   function panelHtml(a) {
-    if (!UI.sel) return `<div class="au-empty"><b>Select a step</b><p>Click any step to edit it, or ＋ between steps to add one. Firms run top to bottom; exit conditions are checked before every step.</p>
+    if (!UI.sel) return `${a.cz || a.czNote ? `<div class="au-cz-box"><b>${a.cz ? 'Replaces ChurnZero plays' : 'New automation'}</b>${a.cz ? `<p>${e(a.cz)}</p>` : ''}${a.czNote ? `<small>${e(a.czNote)}</small>` : ''}</div>` : ''}<div class="au-empty"><b>Select a step</b><p>Click any step to edit it, or ＋ between steps to add one. Firms run top to bottom; exit conditions are checked before every step.</p>
       <ul class="au-legend"><li><span class="au-ico entry">⚡</span>Entry: what starts it and which firms</li><li><span class="au-ico exit">⛔</span>Exit: when a firm should stop</li><li><span class="au-ico t-if">🔀</span>If / Else: split on a condition</li><li><span class="au-ico t-wait">⏳</span>Delays: wait time or wait until</li></ul></div>`;
     if (UI.sel === 'entry') {
       return `<h3>⚡ Entry</h3>
@@ -319,7 +585,7 @@
     const n = f.n, c = n.cfg, A = ACTION[n.type] || {}, p = 'node.';
     let body = '';
     if (n.type === 'email') {
-      body = row('From', sel(p + 'from', ['Firm’s CSM', 'Firm’s IM', 'Support (support@lawmatics.com)', 'Firm’s owner'], c.from), 'Sends from that person’s Gmail, in their Sent folder')
+      body = row('From', sel(p + 'from', ['Firm’s CSM', 'Firm’s IM', 'Support (support@lawmatics.com)', 'Firm’s owner', 'Firm’s manager', 'Account executive (Salesforce)'], c.from), 'Sends from that person’s Gmail, in their Sent folder')
         + row('To', sel(p + 'to', ['Primary contact', 'Decision maker', 'All onboarding contacts', 'All contacts'], c.to))
         + row('Subject', inp(p + 'subject', c.subject))
         + `<label class="au-row"><span>Message</span><textarea data-f="${p}body" rows="9">${e(c.body)}</textarea></label>
@@ -331,7 +597,7 @@
     } else if (n.type === 'sms') {
       body = row('To', sel(p + 'to', ['Primary contact', 'Decision maker'], c.to)) + `<label class="au-row"><span>Text</span><textarea data-f="${p}body" rows="4">${e(c.body)}</textarea></label>`;
     } else if (n.type === 'slack') {
-      body = row('Send to', sel(p + 'to', ['Firm’s CSM (DM)', 'Firm’s IM (DM)', 'Firm’s manager (DM)', '#cs-renewals', '#cs-ops'], c.to)) + `<label class="au-row"><span>Message</span><textarea data-f="${p}text" rows="4">${e(c.text)}</textarea></label>`;
+      body = row('Send to', sel(p + 'to', ['Firm’s CSM (DM)', 'Firm’s IM (DM)', 'Firm’s manager (DM)', 'Account executive (DM)', '#cs-renewals', '#cs-ops'], c.to)) + `<label class="au-row"><span>Message</span><textarea data-f="${p}text" rows="4">${e(c.text)}</textarea></label>`;
     } else if (n.type === 'booking') {
       body = row('Link', sel(p + 'kind', ['reschedule link', 'booking link', 'renewal call link'], c.kind)) + row('From', sel(p + 'from', ['Firm’s IM', 'Firm’s CSM'], c.from));
     } else if (n.type === 'wait') {
@@ -348,9 +614,11 @@
     } else if (n.type === 'owner') {
       body = row('Owner', sel(p + 'to', ['Firm’s CSM', 'Firm’s IM', 'Support', 'Round robin (IMs)'], c.to));
     } else if (n.type === 'task') {
-      body = row('Task', inp(p + 'title', c.title)) + row('For', sel(p + 'who', ['Firm’s CSM', 'Firm’s IM', 'Firm’s manager'], c.who)) + row('Due', sel(p + 'due', ['Same day', '2 business days', '3 business days', '5 business days'], c.due));
+      body = row('Task', inp(p + 'title', c.title)) + row('For', sel(p + 'who', ['Firm’s CSM', 'Firm’s IM', 'Firm’s manager', 'Firm’s owner'], c.who)) + row('Due', sel(p + 'due', ['Same day', '2 business days', '3 business days', '5 business days'], c.due));
     } else if (n.type === 'note') {
       body = `<label class="au-row"><span>Note</span><textarea data-f="${p}text" rows="3">${e(c.text)}</textarea></label>`;
+    } else if (n.type === 'webhook') {
+      body = row('Webhook', inp(p + 'to', c.to)) + row('Sends', inp(p + 'what', c.what), 'Zapier gets one call per firm');
     } else if (n.type === 'end') body = '<p class="au-help">Firms that reach this step finish the automation.</p>';
     return `<h3>${A.icon || ''} ${e(A.label || n.type)}</h3>${body}<div class="au-panel-foot"><button type="button" class="au-btn danger sm" data-del="${n.id}">Delete step</button></div>`;
   }
@@ -385,7 +653,7 @@
   }
   function settingsHtml(a) {
     return `<main class="au-listwrap"><div class="au-settings">
-      ${row('Folder', sel('folder', ['Onboarding', 'Adoption', 'Renewals', 'Support'], a.folder))}
+      ${row('Folder', sel('folder', ['Onboarding', 'Adoption', 'Renewals & billing', 'Feedback', 'Records', 'Support'], a.folder))}
       ${row('Max emails per firm', sel('cap', ['1 every 7 days', '1 every 14 days', '1 every 30 days'], a.cap || '1 every 14 days'), 'Across all automations — protects firms from getting too much')}
       ${row('Quiet hours', sel('quiet', ['Weekdays 8am–5pm firm time', 'Any time'], a.quiet || 'Weekdays 8am–5pm firm time'))}
       ${row('Skip firms that', sel('skip', ['Have an open support ticket', 'Are flagged to cancel', 'Are excluded on the dashboard', 'Never skip'], a.skip || 'Are flagged to cancel'))}
@@ -425,6 +693,7 @@
     const t = ev.target;
     const q = (s) => t.closest(s);
     const a = UI.autoId ? cur() : null;
+    if (q('[data-folder]')) { UI.folder = q('[data-folder]').dataset.folder; render(); return; }
     // Delete: the first click asks, the second deletes (pop-up confirms don't work in the page viewer).
     if (q('[data-delcancel]')) { UI.confirmDel = null; render(); return; }
     if (q('[data-delauto]')) {
