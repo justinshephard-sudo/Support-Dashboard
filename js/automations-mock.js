@@ -585,7 +585,7 @@
     const n = f.n, c = n.cfg, A = ACTION[n.type] || {}, p = 'node.';
     let body = '';
     if (n.type === 'email') {
-      body = row('From', sel(p + 'from', ['Firm’s CSM', 'Firm’s IM', 'Support (support@lawmatics.com)', 'Firm’s owner', 'Firm’s manager', 'Account executive (Salesforce)'], c.from), 'Sends from that person’s Gmail, in their Sent folder')
+      body = row('From', sel(p + 'from', ['Firm’s CSM', 'Firm’s IM', 'Support (support@lawmatics.com)', 'Firm’s owner', 'Firm’s manager', 'Account executive (Salesforce)'], c.from), 'Sent through SendGrid as that person (their @lawmatics.com address). Replies go to their Gmail and show on the firm’s timeline. Unsubscribes are handled by SendGrid.')
         + row('To', sel(p + 'to', ['Primary contact', 'Decision maker', 'All onboarding contacts', 'All contacts'], c.to))
         + row('Subject', inp(p + 'subject', c.subject))
         + `<label class="au-row"><span>Message</span><textarea data-f="${p}body" rows="9">${e(c.body)}</textarea></label>

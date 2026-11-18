@@ -355,6 +355,7 @@
     if ((el = q('[data-firmpage]'))) {
       const id = el.dataset.firmpage; UI.drill = null; render();
       document.querySelector('.tab[data-tab="resources"]')?.click();
+      document.querySelector('#view-resources [data-res-view="firm"]')?.click();
       setTimeout(() => { if (typeof openFirm === 'function') openFirm(id); document.getElementById('profile')?.scrollIntoView({ behavior: 'smooth' }); }, 150);
       return;
     }
