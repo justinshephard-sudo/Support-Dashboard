@@ -15,7 +15,7 @@ s = re.sub(r'<title>[^<]*</title>', '<title>CS Dashboard Test Site</title>', s)
 # The test data goes in first, before any other script runs.
 s = s.replace('<link rel="stylesheet"', '<script src="js/demo-support.js"></script>\n<script src="js/demo.js"></script>\n<link rel="stylesheet"', 1)
 # Mockups that only exist on the test site.
-s = s.replace('<script src="js/boot.js', '<script src="js/automations-mock.js" defer></script>\n<script src="js/emails-mock.js" defer></script>\n<script src="js/boot.js', 1)
+s = s.replace('<script src="js/boot.js', '<script src="js/automations-mock.js" defer></script>\n<script src="js/emails-mock.js" defer></script>\n<script src="js/reports-mock.js" defer></script>\n<script src="js/boot.js', 1)
 # Published as a claude.ai page, which supplies its own <!doctype>/<html>/<head>/<body>: keep only what's inside.
 s = re.sub(r'(?is)<!doctype html>\s*<html[^>]*>\s*<head>\s*', '', s)
 s = re.sub(r'(?is)<meta charset="utf-8">\s*<meta name="viewport"[^>]*>\s*', '', s)

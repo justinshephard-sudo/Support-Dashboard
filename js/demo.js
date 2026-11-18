@@ -37,7 +37,7 @@ window.CS_DEMO = true;
   try { ST = JSON.parse(localStorage.getItem(KEY_STATE) || '{}') || {}; } catch (e) { ST = {}; }
   ST.excluded = ST.excluded || [];
   const saveSt = () => { try { localStorage.setItem(KEY_STATE, JSON.stringify(ST)); } catch (e) { /* */ } };
-  window.DEMO_RESET = () => { try { [KEY_STATE, 'cs-mock-state'].forEach((k) => localStorage.removeItem(k)); sessionStorage.clear(); } catch (e) { /* */ } location.reload(); };
+  window.DEMO_RESET = () => { try { [KEY_STATE, 'cs-mock-state', 'cs-demo-automations', 'cs-demo-reports'].forEach((k) => localStorage.removeItem(k)); sessionStorage.clear(); } catch (e) { /* */ } location.reload(); };
 
   /* ---------- deterministic made-up book ---------- */
   let seed = 20261117;
@@ -124,6 +124,7 @@ window.CS_DEMO = true;
   const isOpen = (f) => f.onboarding && !closedIds().has(f.id);
   const exclIds = () => new Set(ST.excluded.map((x) => x.id));
   window.DEMO_FIRM = (id) => FIRMS.find((f) => f.id === String(id));
+  window.DEMO_FIRMS = () => FIRMS;
 
   /* ---------- sheet tabs ---------- */
   const SUP = window.DEMO_SUPPORT || {};
