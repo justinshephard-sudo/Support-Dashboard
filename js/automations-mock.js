@@ -1,6 +1,6 @@
 /* ==========================================================================
    Automation Builder — MOCKUP for the test site only (tools/build-demo.sh loads it).
-   What a ChurnZero-style automation engine could look like inside the CS Dashboard:
+   The CS Dashboard's own automation engine (replacing ChurnZero plays), running on its own database:
    automations list → builder with an entry block ("When this happens"), entry conditions,
    exit conditions, steps (email, Slack, wait, If/Else branches, field changes, tasks…),
    a settings panel for the selected step, a test run preview and an activity log.
@@ -228,7 +228,7 @@
     return `<header class="au-top"><div class="au-crumbs"><b>⚡ Automations</b><span class="au-mock">Mockup · nothing runs or sends</span></div>
         <div class="au-top-actions"><button type="button" class="au-btn primary" data-new>＋ New automation</button></div></header>
       <main class="au-listwrap">
-        <section class="au-hero"><div><h2>Automate the busywork</h2><p>Triggers, conditions and steps that run on every firm — check-ins, reschedules, stage moves, renewal tasks — the way ChurnZero plays and Lawmatics automations do, built for the CS team.</p></div>
+        <section class="au-hero"><div><h2>Automate the busywork</h2><p>Check-ins, reschedules, stage moves and renewal tasks that run on every firm, straight from the CS Dashboard’s own data: firms and contacts, usage from Segment, billing from Chargebee, accounts from Salesforce, calls from Zoom and Gong.</p></div>
           <div class="au-kpis"><div><b>${STATE.list.filter((a) => a.active).length}</b><span>Active</span></div><div><b>${STATE.list.reduce((t, a) => t + a.stats.running + a.stats.delayed, 0)}</b><span>Firms in progress</span></div><div><b>6</b><span>Waiting for approval</span></div></div></section>
         <div class="au-tablewrap"><table class="au-table"><thead><tr><th>Automation</th><th>Trigger</th><th>Firms</th><th>Status of firms</th><th>On/off</th></tr></thead><tbody>${rows}</tbody></table></div>
       </main>`;
