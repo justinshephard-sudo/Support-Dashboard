@@ -193,22 +193,20 @@
 
   /* ---------- page shell ---------- */
   function open() {
+    const host = document.getElementById('auHost');
+    if (!host) return;
     let page = document.getElementById('auPage');
     if (!page) {
       page = document.createElement('div');
       page.id = 'auPage';
       page.className = 'au-page';
-      document.body.appendChild(page);
+      host.appendChild(page);
       page.addEventListener('click', onClick);
       page.addEventListener('input', onInput);
       page.addEventListener('change', onInput);
     }
-    // Sit below the yellow test-site banner so Reset stays reachable.
-    page.style.top = ((document.querySelector('.demo-banner') || {}).offsetHeight || 0) + 'px';
-    document.body.classList.add('au-open');
     render();
   }
-  function close() { document.getElementById('auPage')?.remove(); document.body.classList.remove('au-open'); UI.view = 'list'; }
 
   function render() {
     const page = document.getElementById('auPage');
@@ -230,7 +228,7 @@
       </tr>`;
     }).join('');
     return `<header class="au-top"><div class="au-crumbs"><b>⚡ Automations</b><span class="au-mock">Mockup · nothing runs or sends</span></div>
-        <div class="au-top-actions"><button type="button" class="au-btn primary" data-new>＋ New automation</button><button type="button" class="au-btn" data-close>✕ Close</button></div></header>
+        <div class="au-top-actions"><button type="button" class="au-btn primary" data-new>＋ New automation</button></div></header>
       <main class="au-listwrap">
         <section class="au-hero"><div><h2>Automate the busywork</h2><p>Triggers, conditions and steps that run on every firm — check-ins, reschedules, stage moves, renewal tasks — the way ChurnZero plays and Lawmatics automations do, built for the CS team.</p></div>
           <div class="au-kpis"><div><b>${STATE.list.filter((a) => a.active).length}</b><span>Active</span></div><div><b>${STATE.list.reduce((t, a) => t + a.stats.running + a.stats.delayed, 0)}</b><span>Firms in progress</span></div><div><b>6</b><span>Waiting for approval</span></div></div></section>
@@ -425,7 +423,6 @@
     const t = ev.target;
     const q = (s) => t.closest(s);
     const a = UI.autoId ? cur() : null;
-    if (q('[data-close]')) { close(); return; }
     if (q('[data-toggle]')) { const x = STATE.list.find((y) => y.id === q('[data-toggle]').dataset.toggle); x.active = !x.active; save(); render(); return; }
     if (q('[data-open]')) { UI.autoId = q('[data-open]').dataset.open; UI.view = 'builder'; UI.tab = 'build'; UI.sel = null; render(); return; }
     if (q('[data-new]')) {
@@ -454,18 +451,31 @@
     }
     if (q('[data-sel]') && !q('.au-x') && !q('.au-plus')) { UI.sel = q('[data-sel]').dataset.sel; render(); }
   }
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && document.getElementById('auPage')) { if (UI.picker || UI.test) { UI.picker = null; UI.test = false; render(); } else if (UI.view === 'builder') { UI.view = 'list'; render(); } else close(); } });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && document.getElementById('auPage') && (UI.picker || UI.test)) { UI.picker = null; UI.test = false; render(); } });
 
-  /* ---------- the button (next to New Firm Assignment, Manager mode) ---------- */
-  setInterval(() => {
-    const anchor = document.getElementById('assign-btn');
-    let btn = document.getElementById('auto-btn');
-    if (anchor && !btn) {
-      btn = Object.assign(document.createElement('button'), { id: 'auto-btn', type: 'button', className: 'mgr-btn', textContent: '⚡ Automations' });
-      btn.addEventListener('click', open);
-      anchor.after(btn);
-    }
-    if (btn && anchor) btn.hidden = anchor.hidden;
-  }, 700);
+  /* ---------- its own main tab, managers only ---------- */
+  // Added before boot.js wires up the tabs, so the normal tab switching picks it up.
+  const nav = document.querySelector('.tabbar');
+  if (nav && !document.querySelector('[data-tab="auto"]')) {
+    const tab = document.createElement('button');
+    tab.className = 'tab';
+    tab.dataset.tab = 'auto';
+    tab.hidden = true;
+    tab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg> Automations';
+    tab.addEventListener('click', () => setTimeout(open, 0));
+    nav.appendChild(tab);
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.id = 'view-auto';
+    view.innerHTML = '<div class="wrap"><div id="auHost"></div></div>';
+    const last = document.getElementById('view-partners') || document.querySelector('.view:last-of-type');
+    if (last) last.after(view); else document.body.appendChild(view);
+    // Managers only: show once sign-in has settled, hide (and leave the tab) for everyone else.
+    setInterval(() => {
+      const mgr = typeof isManager === 'function' && typeof AUTH !== 'undefined' && AUTH.email && isManager();
+      tab.hidden = !mgr;
+      if (!mgr && tab.classList.contains('active')) document.querySelector('.tab[data-tab="team"]')?.click();
+    }, 700);
+  }
   window.openAutomations = open;
 })();

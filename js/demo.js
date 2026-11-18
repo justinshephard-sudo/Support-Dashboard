@@ -277,6 +277,20 @@ window.CS_DEMO = true;
       liveFrom: dayOff(90), events: { fields: EF, rows: ev }, scheduled: { fields: SF, rows: sched }, sf: {}, retention: { rate: [], detail: [], am: [] }, snapshots };
   }
 
+  /* ---------- Partnerships: agency, agency-client and affiliate firms with made-up referral partners ---------- */
+  function partnersPayload() {
+    const PARTNERS = ['Test – Summit Legal Marketing', 'Test – LexGrowth Partners', 'Test – Bright Path Advisors', 'Test – Counsel Collective', 'Test – Harbor Digital'];
+    let s2 = 4242;
+    const r2 = () => { s2 = (s2 * 9301 + 49297) % 233280; return s2 / 233280; };
+    const firms = FIRMS.filter((f, i) => f.partner || i % 9 === 0).slice(0, 48).map((f, i) => {
+      const kind = i % 7 === 0 ? 'agency' : i % 3 === 0 ? 'affiliate' : 'client';
+      return { czId: 900000 + f.i, id: f.id, name: f.name, partner: kind === 'agency' ? '' : PARTNERS[Math.floor(r2() * PARTNERS.length)],
+        type: kind === 'affiliate' ? 'Affiliate' : '', agency: kind === 'agency', agencyClient: kind === 'client', start: f.signup, mrr: f.mrr || f.start,
+        active: !f.cancelled, onboarding: isOpen(f) ? f.status : 'Complete', partnerFrom: r2() < 0.15 ? 'chargebee' : '' };
+    });
+    return { ok: true, firms, built: Date.now() };
+  }
+
   /* ---------- calendars: each rep's week of made-up meetings ---------- */
   function calendarItems(email, url) {
     const q = new URL(url).searchParams;
@@ -319,7 +333,8 @@ window.CS_DEMO = true;
       return { ok: true };
     }
     if (a === 'resyncImpl') return { ok: true };
-    if (a === 'partners') return { ok: true, firms: [], partners: [], built: Date.now() };
+    if (a === 'partners') return partnersPayload();
+    if (a === 'closeThirdParty') return { ok: true, testData: true };
     if (a === 'calendarMatch') return { ok: true, reps: Object.fromEntries(IMS.concat(CSMS, [PARTNER]).map((n) => [n, emailOf(n)])) };
     if (/^(bug|fr)/.test(a) || a === 'load' || a === 'page') return notHere('Shortcut, Notion and Loop Tracker data');
     if (/prep|audit/i.test(a)) return notHere('Call prep and audits');
