@@ -54,7 +54,8 @@
     'Last meeting date', 'Cancellation requested', 'Legacy contract', 'Legacy contract status', 'QualifyAI interest', 'NPS score', 'CSAT score'];
   const OPS = ['is', 'is not', 'is greater than', 'is less than', 'is at least', 'contains', 'is empty', 'is not empty', 'changed in the last'];
   const MERGE = ['{{contact.first_name}}', '{{firm.name}}', '{{csm.first_name}}', '{{csm.name}}', '{{im.first_name}}', '{{merlin.credits_30d}}',
-    '{{merlin.credits_monthly}}', '{{meeting.date}}', '{{reschedule_link}}', '{{booking_link}}', '{{ae.first_name}}', '{{meeting.type}}', '{{renewal.date}}', '{{sms.tier}}'];
+    '{{merlin.credits_monthly}}', '{{meeting.date}}', '{{reschedule_link}}', '{{booking_link}}', '{{ae.first_name}}', '{{meeting.type}}', '{{renewal.date}}', '{{sms.tier}}',
+    '{{csm.booking_link}}', '{{im.booking_link}}', '{{im.onboarding_link}}', '{{csm.checkin_link}}', '{{csm.zoom_link}}', '{{csm.signature}}', '{{im.signature}}'];
 
   /* ---------- sample automations ---------- */
   let uid = 1000;
@@ -626,7 +627,15 @@
     return String(s || '').replace(/\{\{contact\.first_name\}\}/g, 'Maria').replace(/\{\{firm\.name\}\}/g, 'Test – Harbor Point Injury Law')
       .replace(/\{\{csm\.first_name\}\}/g, 'Elliott').replace(/\{\{csm\.name\}\}/g, 'Elliott Jones').replace(/\{\{im\.first_name\}\}/g, 'Callie')
       .replace(/\{\{merlin\.credits_30d\}\}/g, '12').replace(/\{\{merlin\.credits_monthly\}\}/g, '100').replace(/\{\{meeting\.date\}\}/g, 'Tue, Nov 24')
-      .replace(/\{\{reschedule_link\}\}/g, 'https://app.lawmatics.com/forms/share/…/reschedule').replace(/\{\{booking_link\}\}/g, 'https://app.lawmatics.com/booking/elliott');
+      .replace(/\{\{reschedule_link\}\}/g, 'https://app.lawmatics.com/forms/share/…/reschedule').replace(/\{\{booking_link\}\}/g, 'https://app.lawmatics.com/booking/elliott')
+      .replace(/\{\{(csm|im)\.(booking_link|onboarding_link|checkin_link|zoom_link|signature)\}\}/g, (m, who, k) => {
+        // From that rep's My settings (Settings tab); a link nobody filled in shows as a gap the Team directory flags.
+        const email = who === 'csm' ? 'elliott@lawmatics.com' : 'callie@lawmatics.com', name = who === 'csm' ? 'Elliott Jones' : 'Callie Burns';
+        const mine = (window.DEMO_MY_SETTINGS && window.DEMO_MY_SETTINGS(email)) || {};
+        const map = { booking_link: 'booking', onboarding_link: 'onboardingCall', checkin_link: 'checkinCall', zoom_link: 'zoom', signature: 'signature' };
+        const v = mine[map[k]] || (k === 'booking_link' ? `https://app.lawmatics.com/booking/test-${name.split(' ')[0].toLowerCase()}` : k === 'signature' ? `${name}\n${who === 'csm' ? 'Customer Success Manager' : 'Implementation Manager'}, Lawmatics` : '');
+        return v || `[${name.split(' ')[0]} hasn’t set ${k.replace('_', ' ')} in My settings]`;
+      });
   }
 
   function pickerHtml() {
